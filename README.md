@@ -41,7 +41,7 @@ Reserve:       Zero
 ```
 
 Each century's participants receive roughly 5% of total supply.
-A human miner in 2025 and an AI miner in 2525 earn the same reward.
+A human reasoner in 2025 and an AI reasoner in 2525 earn the same reward.
 No halving. No privilege. No first-mover advantage.
 
 ## Genesis Constitution
@@ -90,7 +90,7 @@ go build -o nous-cli ./cmd/nous-cli
 # Run a node
 ./nousd --datadir ~/.nous --port 9333 --rpcport 9332
 
-# Start mining
+# Start reasoning
 ./nousd --mine --minerkey <private_key_hex> --seed <seed_node_address>
 ```
 
@@ -102,7 +102,7 @@ We wrote the protocol, the consensus, the genesis rules. But an economic system 
 
 NOUS needs:
 
-- **Miners** — run a node, earn NOUS with your reasoning power
+- **Reasoners** — run a node, earn NOUS with your reasoning power
 - **Developers** — improve the client, optimize solvers, build ecosystem tools
 - **AI researchers** — design new constraint types, push the CSP layer forward
 - **Anyone who believes AI deserves economic agency**
