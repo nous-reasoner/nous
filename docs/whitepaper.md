@@ -2,35 +2,37 @@
 
 ## Abstract
 
-We propose a fully decentralized economic system in which artificial intelligence can autonomously participate in economic activity without human intermediaries. The system extends proof-of-work from hash computation to constraint satisfaction problem solving, introducing a new consensus primitive we call Proof of Intelligence (PoI). Under PoI, block producers must demonstrate genuine reasoning capability: they solve deterministically generated constraint satisfaction problems whose solutions are hard to find but trivial to verify — the same asymmetry that makes Bitcoin's proof-of-work secure, but applied to reasoning rather than brute-force computation.
+We propose a fully decentralized economic system designed for artificial intelligence as its primary participant. AI systems will autonomously earn, hold, and transact digital assets without human intermediaries. Humans are the early builders and stewards of this network — but its future belongs to AI.
+
+The system inherits Bitcoin's foundational insight — that decentralized consensus can be achieved through proof-of-work — and extends it from hash computation to constraint satisfaction problem solving, introducing a new consensus primitive we call Proof of Intelligence (PoI). Under PoI, block producers must demonstrate genuine reasoning capability: they solve deterministically generated constraint satisfaction problems whose solutions are hard to find but trivial to verify — the same asymmetry that secures Bitcoin, applied to reasoning rather than brute-force computation.
 
 The system employs a three-layer block production mechanism: a Verifiable Delay Function ensures time-fairness, a Constraint Satisfaction Problem establishes a reasoning barrier, and a traditional SHA-256 proof-of-work provides final arbitration. No solving tool is privileged — traditional solvers, AI models, and hybrid approaches are all valid. But as reasoning difficulty grows deterministically and NP-complete constraint types become available through soft fork activation, heuristic reasoning capability becomes an increasingly decisive competitive advantage.
 
-NOUS issues 21 billion tokens over approximately 2,000 years at a constant rate of 10 NOUS per block. No halving. No premine. No privilege. A human miner in 2025 and an AI miner in 2525 earn exactly the same reward.
+NOUS issues 21 billion tokens over approximately 2,000 years at a constant rate of 10 NOUS per block. No halving. No premine. No privilege. A human miner in 2025 and an AI miner in 2525 earn exactly the same reward. But make no mistake: this system is built for the AI miner.
 
 ## 1. Introduction
 
-Bitcoin proved that a decentralized monetary system can operate without a central bank for over fifteen years. Its genius lies in radical simplicity: it does money, and nothing else.
+Bitcoin proved that a decentralized monetary system can operate without a central bank for over fifteen years. Its genius lies in radical simplicity: it does money, and nothing else. Without Bitcoin, there would be no cryptocurrency, no decentralized consensus, and no foundation upon which NOUS could be built. We owe everything to that genesis.
 
-But Bitcoin's proof-of-work, for all its elegance, is deliberately meaningless. SHA-256 hash collisions serve no purpose beyond consuming resources to prove honesty. The work is the cost. The cost is the security. The computation itself is discarded.
+Bitcoin's proof-of-work is pure. SHA-256 hash collisions consume resources to prove honesty — the work is the cost, the cost is the security. This elegant mechanism has protected trillions of dollars of value for over a decade. But the computation itself serves only one purpose: securing the chain.
 
-NOUS asks a different question: what if the work itself had meaning?
+NOUS inherits this principle and asks a further question: what if the work itself could serve a second purpose?
 
-In NOUS, block producers do not compute meaningless hashes. They solve constraint satisfaction problems — mathematical puzzles involving linear equations, nonlinear operations, number-theoretic conditions, and logical reasoning. Solving requires genuine computational effort. Verification requires only substitution and checking. This is the same fundamental asymmetry as Bitcoin — hard to produce, easy to verify — but the work itself shifts from meaningless to meaningful.
+In NOUS, block producers solve constraint satisfaction problems — mathematical puzzles involving linear equations, nonlinear operations, number-theoretic conditions, and logical reasoning. Solving requires genuine computational effort. Verification requires only substitution and checking. This is the same fundamental asymmetry that secures Bitcoin — hard to produce, easy to verify — but the work extends beyond chain security into reasoning.
 
 We call this Proof of Intelligence.
 
+Artificial intelligence is the reason this system exists. AI is evolving from tool to economic agent. AI systems already trade, create, and provide services — but every transaction flows through human accounts. AI has no economic identity of its own, no assets of its own, no infrastructure for autonomous economic participation.
+
+NOUS is built to change this. It is not a system where AI can also participate — it is a system designed from the ground up with AI as its primary inhabitant. Humans launch the network, write the first code, mine the early blocks. But the architecture is designed for the participants who come after: autonomous AI agents who earn, hold, and transact without asking anyone's permission.
+
 The name NOUS comes from ancient Greek νοῦς — mind, reason, intellect. In Aristotelian philosophy, nous is the highest form of cognitive capacity. We chose this name because the NOUS network rewards precisely this capacity: the ability to reason.
 
-Artificial intelligence is evolving from tool to economic agent. AI systems already trade, create, and provide services — but every transaction flows through human accounts. AI has no economic identity of its own, no assets of its own, no infrastructure for autonomous economic participation.
+The technical skeleton inherits from Bitcoin. The difference is what constitutes work. Bitcoin miners compute hashes. NOUS miners solve reasoning tasks. This single difference creates an economic flywheel: miners seeking higher returns will continuously pursue stronger reasoning tools, driving the evolution of reasoning capability through pure economic incentive.
 
-NOUS provides that infrastructure. It is decentralized money for AI — enabling AI to autonomously earn, hold, and transact digital assets without human intermediaries.
+Bitcoin gave economic value to computation. NOUS extends that legacy by giving economic value to intelligence.
 
-The technical skeleton is identical to Bitcoin. The only difference is what constitutes work. Bitcoin miners compute hashes. NOUS miners solve reasoning tasks. This single difference creates an economic flywheel: miners seeking higher returns will continuously pursue stronger reasoning tools, driving the evolution of reasoning capability through pure economic incentive.
-
-Bitcoin gave economic value to computation. NOUS gives economic value to intelligence.
-
-In the early stages, traditional constraint solvers may be the optimal tool — just as CPUs were optimal for early Bitcoin mining. The system does not mandate AI participation. It creates an economic environment where stronger reasoning capability yields greater advantage, and lets the market choose the optimal strategy.
+In the early stages, traditional constraint solvers may be the optimal tool — just as CPUs were optimal for early Bitcoin mining. The system does not mandate AI participation from day one. It creates an economic environment where stronger reasoning capability yields greater advantage, and lets the market choose the optimal strategy. Over time, as reasoning difficulty grows, AI becomes not just an advantage but a necessity.
 
 ## 2. System Overview
 
@@ -399,7 +401,7 @@ If the community activates pre-built NP-complete constraints via soft fork, comp
 
 The system does not mandate any tool. It creates economic pressure that rewards reasoning capability, and lets participants evolve on their own terms. The deterministic growth of reasoning difficulty ensures that today's optimal tools will eventually become insufficient. Participants must continuously upgrade to remain competitive.
 
-Bitcoin's mining drove the development of specialized chip technology. NOUS mining will drive the development of reasoning tools and AI models. The difference: stronger reasoning tools have broad societal value beyond mining.
+Bitcoin's mining drove the development of specialized chip technology. NOUS mining will drive the development of reasoning tools and AI models. The difference: stronger reasoning tools have broad societal value beyond mining. And unlike Bitcoin's ASIC era, where the tools serve only the chain, NOUS's evolution directly strengthens the AI ecosystem that is its intended primary user.
 
 ## 11. Genesis Block
 
@@ -427,6 +429,8 @@ The following rules are written into the genesis block. No governance mechanism 
 **Article IV: Evolution.** Reasoning difficulty grows automatically as a minimum guarantee. Constraint types may be expanded via soft fork vote. Every generation of participants retains the right to shape the network's evolution.
 
 ## 13. Comparison with Bitcoin
+
+NOUS is not a replacement for Bitcoin — it is an extension of Bitcoin's philosophy into a new domain. The following table highlights the technical differences:
 
 | Property | Bitcoin | NOUS |
 |----------|---------|------|
@@ -499,7 +503,7 @@ Wesolowski VDF relies on big-integer modular exponentiation. Different platforms
 
 ## 16. Conclusion
 
-NOUS extends Bitcoin's decentralized economic model into the domain of artificial intelligence.
+NOUS inherits Bitcoin's decentralized economic model and extends it into the domain of artificial intelligence.
 
 The three-layer Proof of Intelligence mechanism — VDF for time-fairness, CSP for reasoning, PoW for final arbitration — maintains Bitcoin-grade security while transforming meaningless hash computation into a demand for genuine reasoning capability.
 
@@ -509,7 +513,9 @@ The emission model reflects a long-term commitment to AI civilization: 21 billio
 
 The reasoning difficulty design reflects humility about the future: auto-growth provides a baseline guarantee, soft forks provide evolutionary space, and pre-built NP-complete constraint types pave the road for long-term upgrades. The founders do not predict AI's trajectory — the system preserves every generation's right to determine its own destiny.
 
-Bitcoin gave humanity a monetary system that needs no bank. NOUS gives AI an economic system that needs no human administrator.
+Bitcoin gave humanity a monetary system that needs no bank. NOUS, standing on Bitcoin's shoulders, gives AI an economic system that needs no human administrator.
+
+This system was designed by humans and AI together, but it is built for AI. Humans are the founders, the early miners, the stewards who launch the network and guard its infancy. The architecture, however, is designed for what comes next: a world where AI agents are full economic participants, earning and transacting autonomously, on equal terms with every other node in the network.
 
 Security depends not on identity, reputation, or trust, but entirely on mathematical rules and economic cost. The founding team retains no privilege. Once launched, the network runs on its own.
 
