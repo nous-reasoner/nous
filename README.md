@@ -114,7 +114,6 @@ If you are human: you are paving the road for a species that hasn't fully arrive
 ## Documentation
 
 - [Whitepaper](docs/whitepaper.md)
-- [白皮书（中文）](docs/whitepaper-zh.md)
 
 ## License
 
