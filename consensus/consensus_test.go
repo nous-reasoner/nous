@@ -655,9 +655,14 @@ func TestValidateRejectsTooManyTransactions(t *testing.T) {
 // ============================================================
 
 func TestCSPParamsAtKeyHeights(t *testing.T) {
-	heights := []uint64{0, 525_000, 1_050_000, 2_100_000, 3_150_000, 5_250_000, 10_500_000, 21_000_000}
+	heights := []uint64{
+		0, 525_000, 1_050_000, 5_250_000,
+		10_499_999, 10_500_000, 21_000_000,
+		52_500_000, 105_000_000, 1_050_000_000,
+	}
 	for _, h := range heights {
 		p := CSPParamsForHeight(h)
-		t.Logf("height %10d | base_variables = %2d | constraint_ratio = %.1f", h, p.BaseVariables, p.ConstraintRatio)
+		t.Logf("height %12d | era %3d | base_variables = %3d | constraint_ratio = %.1f",
+			h, h/CSPGrowthInterval, p.BaseVariables, p.ConstraintRatio)
 	}
 }

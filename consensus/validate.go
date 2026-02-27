@@ -69,7 +69,9 @@ func ValidateBlock(
 
 	// Step 3: Regenerate CSP from VDF output.
 	seed := crypto.Sha256(hdr.VDFOutput)
-	stdProblem, _ := csp.GenerateProblem(seed, csp.Standard)
+	cspParams := CSPParamsForHeight(height)
+	numConstraints := ceilConstraints(cspParams.BaseVariables, cspParams.ConstraintRatio)
+	stdProblem, _ := csp.GenerateProblemWithParams(seed, cspParams.BaseVariables, numConstraints)
 
 	// Step 4: Check standard-tier solution.
 	if blk.CSPSolution == nil {

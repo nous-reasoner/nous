@@ -22,6 +22,10 @@ const TargetBlockTime uint64 = 30
 // DifficultyAdjustInterval is how many blocks between difficulty recalculations.
 const DifficultyAdjustInterval = 144
 
+// CSPGrowthInterval is the number of blocks between each +1 base_variables increase.
+// 10,500,000 blocks ≈ 10 years at 30-second block time.
+const CSPGrowthInterval uint64 = 10_500_000
+
 // CSPDifficultyParams holds the CSP complexity parameters.
 type CSPDifficultyParams struct {
 	BaseVariables   int
@@ -142,6 +146,12 @@ func TargetToCompact(target crypto.Hash) uint32 {
 	}
 
 	return (exponent << 24) | mantissa
+}
+
+// ceilConstraints computes ceil(numVars * ratio) using deterministic integer arithmetic.
+func ceilConstraints(numVars int, ratio float64) int {
+	ratioX10 := int(ratio*10 + 0.5)
+	return (numVars*ratioX10 + 9) / 10
 }
 
 // HashSolutionValues computes a deterministic hash of a CSP solution's values

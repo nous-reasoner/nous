@@ -103,7 +103,9 @@ func MineBlock(
 
 	// Step 3: Generate standard CSP from VDF output seed.
 	seed := crypto.Sha256(vdfOutput.Y)
-	stdProblem, stdCandidate := csp.GenerateProblem(seed, csp.Standard)
+	cspParams := CSPParamsForHeight(height)
+	numConstraints := ceilConstraints(cspParams.BaseVariables, cspParams.ConstraintRatio)
+	stdProblem, stdCandidate := csp.GenerateProblemWithParams(seed, cspParams.BaseVariables, numConstraints)
 
 	// Step 4: Solve standard CSP.
 	stdSolution, err := solveCSP(solver, stdProblem, stdCandidate)
