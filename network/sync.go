@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,12 @@ import (
 
 // MaxBlocksPerInv is the maximum number of block hashes in a single inv message.
 const MaxBlocksPerInv = 500
+
+// Orphan pool limits.
+const (
+	MaxOrphanBlocks = 100
+	OrphanExpiry    = time.Hour
+)
 
 // SyncState tracks the current synchronization status.
 type SyncState int
@@ -42,6 +49,14 @@ type ChainAccess interface {
 	AddBlock(blk *block.Block) (uint64, error)
 }
 
+// orphanBlock holds a block whose parent is not yet known.
+type orphanBlock struct {
+	Block      *block.Block
+	Hash       crypto.Hash
+	ParentHash crypto.Hash
+	AddedAt    time.Time
+}
+
 // BlockSyncer manages the block synchronization protocol.
 type BlockSyncer struct {
 	server *Server
@@ -52,16 +67,22 @@ type BlockSyncer struct {
 	syncPeer  *Peer
 	pending   map[crypto.Hash]bool // blocks we've requested but not yet received
 	blockChan chan *block.Block    // received blocks waiting to be processed
+
+	// Orphan pool: blocks whose parents are not yet known.
+	orphans        map[crypto.Hash]*orphanBlock             // block hash → orphan
+	orphanByParent map[crypto.Hash]map[crypto.Hash]struct{} // parent hash → set of orphan hashes
 }
 
 // NewBlockSyncer creates a new block syncer.
 func NewBlockSyncer(server *Server, chain ChainAccess) *BlockSyncer {
 	return &BlockSyncer{
-		server:    server,
-		chain:     chain,
-		state:     SyncIdle,
-		pending:   make(map[crypto.Hash]bool),
-		blockChan: make(chan *block.Block, 64),
+		server:         server,
+		chain:          chain,
+		state:          SyncIdle,
+		pending:        make(map[crypto.Hash]bool),
+		blockChan:      make(chan *block.Block, 64),
+		orphans:        make(map[crypto.Hash]*orphanBlock),
+		orphanByParent: make(map[crypto.Hash]map[crypto.Hash]struct{}),
 	}
 }
 
@@ -258,7 +279,12 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 	// Add to chain.
 	newHeight, err := bs.chain.AddBlock(blk)
 	if err != nil {
-		log.Printf("sync: reject block %x from %s: %v", blockHash[:8], peer.Addr, err)
+		// If the block's parent is unknown, store it as an orphan.
+		if strings.Contains(err.Error(), "orphan") {
+			bs.addOrphan(blk, peer)
+		} else {
+			log.Printf("sync: reject block %x from %s: %v", blockHash[:8], peer.Addr, err)
+		}
 		return
 	}
 
@@ -269,6 +295,9 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 
 	// Remove confirmed transactions from mempool.
 	bs.server.mempool.RemoveConfirmed(blk.Transactions)
+
+	// Process any orphan blocks waiting for this parent.
+	bs.processOrphans(blockHash, peer)
 
 	// If we were syncing and have no more pending blocks, request more or finish.
 	bs.mu.Lock()
@@ -287,6 +316,119 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 
 	// Relay to other peers (not the sender).
 	bs.relayBlock(peer, blkMsg)
+}
+
+// addOrphan stores a block whose parent is not yet known and requests the parent.
+func (bs *BlockSyncer) addOrphan(blk *block.Block, peer *Peer) {
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+
+	hash := blk.Header.Hash()
+	parentHash := blk.Header.PrevBlockHash
+
+	// Already in orphan pool?
+	if _, exists := bs.orphans[hash]; exists {
+		return
+	}
+
+	// Evict expired orphans first.
+	bs.evictExpiredOrphansLocked()
+
+	// If pool is still full, drop the oldest orphan.
+	if len(bs.orphans) >= MaxOrphanBlocks {
+		bs.evictOldestOrphanLocked()
+	}
+
+	bs.orphans[hash] = &orphanBlock{
+		Block:      blk,
+		Hash:       hash,
+		ParentHash: parentHash,
+		AddedAt:    time.Now(),
+	}
+	if bs.orphanByParent[parentHash] == nil {
+		bs.orphanByParent[parentHash] = make(map[crypto.Hash]struct{})
+	}
+	bs.orphanByParent[parentHash][hash] = struct{}{}
+
+	log.Printf("sync: orphan block %x (parent %x) stored (%d orphans)",
+		hash[:8], parentHash[:8], len(bs.orphans))
+
+	// Request the missing parent from the peer.
+	peer.SendMessage(bs.server.config.Magic, &MsgGetData{
+		Items: []InvItem{{Type: InvTypeBlock, Hash: parentHash}},
+	})
+}
+
+// processOrphans tries to accept orphan blocks that depend on the accepted block.
+func (bs *BlockSyncer) processOrphans(acceptedHash crypto.Hash, peer *Peer) {
+	bs.mu.Lock()
+	children, exists := bs.orphanByParent[acceptedHash]
+	if !exists || len(children) == 0 {
+		bs.mu.Unlock()
+		return
+	}
+	// Collect orphans to process.
+	toProcess := make([]*orphanBlock, 0, len(children))
+	for childHash := range children {
+		if orphan, ok := bs.orphans[childHash]; ok {
+			toProcess = append(toProcess, orphan)
+		}
+	}
+	// Remove from orphan maps before processing (avoid re-entry issues).
+	delete(bs.orphanByParent, acceptedHash)
+	for _, o := range toProcess {
+		delete(bs.orphans, o.Hash)
+	}
+	bs.mu.Unlock()
+
+	// Try to add each orphan.
+	for _, o := range toProcess {
+		newHeight, err := bs.chain.AddBlock(o.Block)
+		if err != nil {
+			log.Printf("sync: orphan block %x still invalid: %v", o.Hash[:8], err)
+			continue
+		}
+		log.Printf("sync: accepted orphan block %x at height %d", o.Hash[:8], newHeight)
+		bs.server.SetBlockHeight(newHeight)
+		bs.server.mempool.RemoveConfirmed(o.Block.Transactions)
+		// Recursively process orphans that depend on this newly accepted block.
+		bs.processOrphans(o.Hash, peer)
+	}
+}
+
+func (bs *BlockSyncer) evictExpiredOrphansLocked() {
+	now := time.Now()
+	for hash, o := range bs.orphans {
+		if now.Sub(o.AddedAt) > OrphanExpiry {
+			bs.removeOrphanLocked(hash)
+		}
+	}
+}
+
+func (bs *BlockSyncer) evictOldestOrphanLocked() {
+	var oldest *orphanBlock
+	for _, o := range bs.orphans {
+		if oldest == nil || o.AddedAt.Before(oldest.AddedAt) {
+			oldest = o
+		}
+	}
+	if oldest != nil {
+		bs.removeOrphanLocked(oldest.Hash)
+	}
+}
+
+func (bs *BlockSyncer) removeOrphanLocked(hash crypto.Hash) {
+	o, ok := bs.orphans[hash]
+	if !ok {
+		return
+	}
+	delete(bs.orphans, hash)
+	if children, exists := bs.orphanByParent[o.ParentHash]; exists {
+		delete(children, hash)
+		if len(children) == 0 {
+			delete(bs.orphanByParent, o.ParentHash)
+		}
+	}
 }
 
 // handleTx processes a received transaction.

@@ -120,14 +120,15 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 
 	newHeight := parentNode.Height + 1
 
-	// Validate against the parent header and current difficulty.
-	// For reorg branches, we use the same difficulty as the main chain
-	// (full per-branch difficulty tracking is a future enhancement).
+	// Is this block extending the current tip (main chain)?
+	extendsMainChain := parentNode == cs.tipNode
+
+	// Validate header format, VDF, CSP, PoW against the parent header.
+	// UTXO validation uses the main-chain UTXO set, which is only correct
+	// for blocks extending the tip. Side-chain blocks that fail UTXO
+	// validation are stored without it; full validation happens during reorg.
 	if err := ValidateBlock(blk, &parentNode.Header, cs.Difficulty, cs.UTXOSet, newHeight); err != nil {
-		// If this is a side-chain block, validation against main-chain UTXO
-		// may fail. We still need to try reorg. For now, skip UTXO validation
-		// for side-chain blocks and validate during reorg application.
-		if parentNode != cs.tipNode {
+		if !extendsMainChain {
 			// Side-chain block: store in index without UTXO validation.
 			// Full validation will happen during reorganize().
 			return cs.addSideChainBlock(blk, blkHash, parentNode, newHeight)
@@ -148,7 +149,7 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 	cs.blockIndex[blkHash] = node
 
 	// Extends the current tip — normal append.
-	if parentNode == cs.tipNode {
+	if extendsMainChain {
 		undo := cs.UTXOSet.ApplyBlockWithUndo(blk.Transactions, newHeight)
 		cs.undoMap[blkHash] = undo
 		cs.tipNode = node

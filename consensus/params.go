@@ -37,7 +37,7 @@ type CSPUpgrade struct {
 }
 
 // CSPUpgrades is the ordered list of future CSP difficulty upgrades.
-// Empty at launch — CSP difficulty stays at the genesis defaults (8 vars, 1.2 ratio)
+// Empty at launch — CSP difficulty stays at the genesis defaults (12 vars, 1.4 ratio)
 // until a network upgrade is scheduled here.
 var CSPUpgrades = []CSPUpgrade{}
 

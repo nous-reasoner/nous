@@ -64,7 +64,7 @@ func adjustVDF(current uint64, ratio float64) uint64 {
 }
 
 // CSPParamsForHeight returns the CSP parameters for a given block height.
-// Starts at genesis defaults (8 vars, 1.2 ratio) and applies any scheduled
+// Starts at genesis defaults (12 vars, 1.4 ratio) and applies any scheduled
 // upgrades from CSPUpgrades whose ActivationHeight has been reached.
 func CSPParamsForHeight(height uint64) CSPDifficultyParams {
 	vars := 12

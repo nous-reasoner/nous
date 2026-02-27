@@ -649,3 +649,15 @@ func TestValidateRejectsTooManyTransactions(t *testing.T) {
 		t.Fatal("block with too many transactions should be rejected")
 	}
 }
+
+// ============================================================
+// Print CSP difficulty params at key heights
+// ============================================================
+
+func TestCSPParamsAtKeyHeights(t *testing.T) {
+	heights := []uint64{0, 525_000, 1_050_000, 2_100_000, 3_150_000, 5_250_000, 10_500_000, 21_000_000}
+	for _, h := range heights {
+		p := CSPParamsForHeight(h)
+		t.Logf("height %10d | base_variables = %2d | constraint_ratio = %.1f", h, p.BaseVariables, p.ConstraintRatio)
+	}
+}
