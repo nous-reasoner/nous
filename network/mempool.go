@@ -46,10 +46,10 @@ func (mp *Mempool) Add(transaction *tx.Transaction) bool {
 	var totalOut int64
 	for _, out := range transaction.Outputs {
 		// Overflow-safe addition; stop accumulating on overflow.
-		if out.Value > 0 && totalOut > maxInt64-out.Value {
+		if out.Amount > 0 && totalOut > maxInt64-out.Amount {
 			break
 		}
-		totalOut += out.Value
+		totalOut += out.Amount
 	}
 
 	mp.mu.Lock()

@@ -289,7 +289,7 @@ func (w *Wallet) CreateTransaction(to crypto.Address, amount, fee int64, utxoSet
 
 	// Sort by value descending (largest first).
 	sort.Slice(available, func(i, j int) bool {
-		return available[i].utxo.Output.Value > available[j].utxo.Output.Value
+		return available[i].utxo.Output.Amount > available[j].utxo.Output.Amount
 	})
 
 	// Select inputs.
@@ -297,7 +297,7 @@ func (w *Wallet) CreateTransaction(to crypto.Address, amount, fee int64, utxoSet
 	var totalIn int64
 	for _, ou := range available {
 		selected = append(selected, ou)
-		sum, err := safeAdd(totalIn, ou.utxo.Output.Value)
+		sum, err := safeAdd(totalIn, ou.utxo.Output.Amount)
 		if err != nil {
 			return nil, errors.New("wallet: input sum overflow during coin selection")
 		}
@@ -311,26 +311,26 @@ func (w *Wallet) CreateTransaction(to crypto.Address, amount, fee int64, utxoSet
 	}
 
 	// Build unsigned transaction.
-	transaction := &tx.Transaction{Version: 1}
+	transaction := &tx.Transaction{Version: 2, ChainID: tx.ChainIDNous}
 	for _, ou := range selected {
-		transaction.Inputs = append(transaction.Inputs, tx.TxInput{
+		transaction.Inputs = append(transaction.Inputs, tx.TxIn{
 			PrevOut:  ou.utxo.OutPoint,
 			Sequence: 0xFFFFFFFF,
 		})
 	}
 
 	// Output to recipient.
-	transaction.Outputs = append(transaction.Outputs, tx.TxOutput{
-		Value:        amount,
-		ScriptPubKey: tx.CreateP2PKHLockScript(toPKH),
+	transaction.Outputs = append(transaction.Outputs, tx.TxOut{
+		Amount:   amount,
+		PkScript: tx.CreateP2PKHLockScript(toPKH),
 	})
 
 	// Change output.
 	change := totalIn - needed
 	if change > 0 {
-		transaction.Outputs = append(transaction.Outputs, tx.TxOutput{
-			Value:        change,
-			ScriptPubKey: tx.CreateP2PKHLockScript(w.PubKeyHash()),
+		transaction.Outputs = append(transaction.Outputs, tx.TxOut{
+			Amount:   change,
+			PkScript: tx.CreateP2PKHLockScript(w.PubKeyHash()),
 		})
 	}
 
@@ -346,7 +346,7 @@ func (w *Wallet) CreateTransaction(to crypto.Address, amount, fee int64, utxoSet
 			return nil, fmt.Errorf("wallet: sign input %d: %w", i, err)
 		}
 
-		transaction.Inputs[i].ScriptSig = tx.CreateP2PKHUnlockScript(
+		transaction.Inputs[i].SignatureScript = tx.CreateP2PKHUnlockScript(
 			sig.Bytes(),
 			kp.PublicKey.SerializeCompressed(),
 		)

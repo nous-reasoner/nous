@@ -242,13 +242,13 @@ func TestMempoolAddGetRemove(t *testing.T) {
 
 	t1 := &tx.Transaction{
 		Version: 1,
-		Inputs:  []tx.TxInput{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("in1")), Index: 0}, Sequence: 0xFFFFFFFF}},
-		Outputs: []tx.TxOutput{{Value: 100, ScriptPubKey: []byte{0x76}}},
+		Inputs:  []tx.TxIn{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("in1")), Index: 0}, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 100, PkScript: []byte{0x76}}},
 	}
 	t2 := &tx.Transaction{
 		Version: 1,
-		Inputs:  []tx.TxInput{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("in2")), Index: 0}, Sequence: 0xFFFFFFFF}},
-		Outputs: []tx.TxOutput{{Value: 200, ScriptPubKey: []byte{0x76}}},
+		Inputs:  []tx.TxIn{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("in2")), Index: 0}, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 200, PkScript: []byte{0x76}}},
 	}
 
 	// Add.
@@ -294,18 +294,18 @@ func TestMempoolFeeRateSort(t *testing.T) {
 	// Add 3 transactions with different fees.
 	t1 := &tx.Transaction{
 		Version: 1,
-		Inputs:  []tx.TxInput{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("low")), Index: 0}, Sequence: 0xFFFFFFFF}},
-		Outputs: []tx.TxOutput{{Value: 100, ScriptPubKey: []byte{0x76}}},
+		Inputs:  []tx.TxIn{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("low")), Index: 0}, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 100, PkScript: []byte{0x76}}},
 	}
 	t2 := &tx.Transaction{
 		Version: 1,
-		Inputs:  []tx.TxInput{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("high")), Index: 0}, Sequence: 0xFFFFFFFF}},
-		Outputs: []tx.TxOutput{{Value: 50, ScriptPubKey: []byte{0x76}}},
+		Inputs:  []tx.TxIn{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("high")), Index: 0}, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 50, PkScript: []byte{0x76}}},
 	}
 	t3 := &tx.Transaction{
 		Version: 1,
-		Inputs:  []tx.TxInput{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("mid")), Index: 0}, Sequence: 0xFFFFFFFF}},
-		Outputs: []tx.TxOutput{{Value: 75, ScriptPubKey: []byte{0x76}}},
+		Inputs:  []tx.TxIn{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("mid")), Index: 0}, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 75, PkScript: []byte{0x76}}},
 	}
 
 	mp.AddWithFee(t1, 10)   // low fee
@@ -334,13 +334,13 @@ func TestMempoolRemoveConfirmed(t *testing.T) {
 
 	t1 := &tx.Transaction{
 		Version: 1,
-		Inputs:  []tx.TxInput{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("c1")), Index: 0}, Sequence: 0xFFFFFFFF}},
-		Outputs: []tx.TxOutput{{Value: 100, ScriptPubKey: []byte{0x76}}},
+		Inputs:  []tx.TxIn{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("c1")), Index: 0}, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 100, PkScript: []byte{0x76}}},
 	}
 	t2 := &tx.Transaction{
 		Version: 1,
-		Inputs:  []tx.TxInput{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("c2")), Index: 0}, Sequence: 0xFFFFFFFF}},
-		Outputs: []tx.TxOutput{{Value: 200, ScriptPubKey: []byte{0x76}}},
+		Inputs:  []tx.TxIn{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("c2")), Index: 0}, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 200, PkScript: []byte{0x76}}},
 	}
 
 	mp.Add(t1)
@@ -611,7 +611,7 @@ func (mc *mockChain) AddBlock(blk *block.Block) (uint64, error) {
 
 // makeTestBlock creates a simple block linked to the given prev hash.
 func makeTestBlock(prevHash crypto.Hash, height uint32) *block.Block {
-	coinbase := tx.NewCoinbase(height, 50_0000_0000, make([]byte, 20), fmt.Sprintf("block-%d", height))
+	coinbase := tx.NewCoinbaseTx(uint64(height), 50_0000_0000, tx.CreateP2PKHLockScript(make([]byte, 20)), tx.ChainIDNous)
 	txIDs := []crypto.Hash{coinbase.TxID()}
 	merkle := block.ComputeMerkleRoot(txIDs)
 
@@ -784,8 +784,8 @@ func TestMempoolSizeLimit(t *testing.T) {
 	for i := 0; i < MaxMempoolTxCount; i++ {
 		txn := &tx.Transaction{
 			Version: 1,
-			Inputs:  []tx.TxInput{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte(fmt.Sprintf("tx-%d", i))), Index: 0}, Sequence: 0xFFFFFFFF}},
-			Outputs: []tx.TxOutput{{Value: 100, ScriptPubKey: []byte{0x76}}},
+			Inputs:  []tx.TxIn{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte(fmt.Sprintf("tx-%d", i))), Index: 0}, Sequence: 0xFFFFFFFF}},
+			Outputs: []tx.TxOut{{Amount: 100, PkScript: []byte{0x76}}},
 		}
 		if !mp.Add(txn) {
 			t.Fatalf("add tx %d should succeed", i)
@@ -799,8 +799,8 @@ func TestMempoolSizeLimit(t *testing.T) {
 	// Next add should be rejected.
 	overflow := &tx.Transaction{
 		Version: 1,
-		Inputs:  []tx.TxInput{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("overflow")), Index: 0}, Sequence: 0xFFFFFFFF}},
-		Outputs: []tx.TxOutput{{Value: 100, ScriptPubKey: []byte{0x76}}},
+		Inputs:  []tx.TxIn{{PrevOut: tx.OutPoint{TxID: crypto.Sha256([]byte("overflow")), Index: 0}, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 100, PkScript: []byte{0x76}}},
 	}
 	if mp.Add(overflow) {
 		t.Fatal("mempool should reject when full")

@@ -138,10 +138,10 @@ func ValidateBlock(
 	expectedReward := BlockReward(height)
 	var coinbaseTotal int64
 	for i, out := range blk.Transactions[0].Outputs {
-		if out.Value < 0 || out.Value > tx.MaxMoney {
-			return fmt.Errorf("step 6: coinbase output %d value %d out of range", i, out.Value)
+		if out.Amount < 0 || out.Amount > tx.MaxMoney {
+			return fmt.Errorf("step 6: coinbase output %d value %d out of range", i, out.Amount)
 		}
-		sum, err := safeAddInt64(coinbaseTotal, out.Value)
+		sum, err := safeAddInt64(coinbaseTotal, out.Amount)
 		if err != nil {
 			return fmt.Errorf("step 6: coinbase output sum overflow")
 		}
@@ -153,7 +153,7 @@ func ValidateBlock(
 		for _, in := range blk.Transactions[i].Inputs {
 			u := utxoSet.Get(in.PrevOut)
 			if u != nil {
-				sum, err := safeAddInt64(inputSum, u.Output.Value)
+				sum, err := safeAddInt64(inputSum, u.Output.Amount)
 				if err != nil {
 					return fmt.Errorf("step 6: fee input sum overflow in tx %d", i)
 				}
@@ -161,7 +161,7 @@ func ValidateBlock(
 			}
 		}
 		for _, out := range blk.Transactions[i].Outputs {
-			sum, err := safeAddInt64(outputSum, out.Value)
+			sum, err := safeAddInt64(outputSum, out.Amount)
 			if err != nil {
 				return fmt.Errorf("step 6: fee output sum overflow in tx %d", i)
 			}

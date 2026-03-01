@@ -265,7 +265,7 @@ func TestValidateRejectsExcessCoinbase(t *testing.T) {
 	blk := mineTestBlock(t, &genesis.Header, pubKeyHash, params, 1)
 
 	// Inflate coinbase reward.
-	blk.Transactions[0].Outputs[0].Value = 2_00000000 // 2 NOUS instead of 1
+	blk.Transactions[0].Outputs[0].Amount = 2_00000000 // 2 NOUS instead of 1
 
 	utxos := tx.NewUTXOSet()
 	utxos.ApplyBlock(genesis.Transactions, 0)
@@ -359,18 +359,19 @@ func TestValidateRejectsCrossTxDoubleSpend(t *testing.T) {
 	// Build two transactions that spend the same coinbase UTXO.
 	buildSpendTx := func(value int64) *tx.Transaction {
 		spendTx := &tx.Transaction{
-			Version: 1,
-			Inputs: []tx.TxInput{
+			Version: 2,
+			ChainID: tx.ChainIDNous,
+			Inputs: []tx.TxIn{
 				{PrevOut: cbOutPoint, Sequence: 0xFFFFFFFF},
 			},
-			Outputs: []tx.TxOutput{
-				{Value: value, ScriptPubKey: tx.CreateP2PKHLockScript(pkhA)},
+			Outputs: []tx.TxOut{
+				{Amount: value, PkScript: tx.CreateP2PKHLockScript(pkhA)},
 			},
 		}
-		subscript := blk1.Transactions[0].Outputs[0].ScriptPubKey
+		subscript := blk1.Transactions[0].Outputs[0].PkScript
 		sigHash := spendTx.SigHash(0, subscript)
 		sig, _ := crypto.Sign(privA, sigHash)
-		spendTx.Inputs[0].ScriptSig = tx.CreateP2PKHUnlockScript(
+		spendTx.Inputs[0].SignatureScript = tx.CreateP2PKHUnlockScript(
 			sig.Bytes(), pubA.SerializeCompressed())
 		return spendTx
 	}
@@ -407,10 +408,10 @@ func TestValidateRejectsOversizedBlock(t *testing.T) {
 	params := DefaultDifficultyParams()
 
 	bigScript := make([]byte, block.MaxBlockSize+1)
-	coinbase := tx.NewCoinbase(1, 1_00000000, make([]byte, 20), "test")
-	coinbase.Outputs = append(coinbase.Outputs, tx.TxOutput{
-		Value:        0,
-		ScriptPubKey: bigScript,
+	coinbase := tx.NewCoinbaseTx(1, 1_00000000, tx.CreateP2PKHLockScript(make([]byte, 20)), tx.ChainIDNous)
+	coinbase.Outputs = append(coinbase.Outputs, tx.TxOut{
+		Amount:   0,
+		PkScript: bigScript,
 	})
 
 	blk := &block.Block{
@@ -437,7 +438,7 @@ func TestValidateRejectsTooManyTransactions(t *testing.T) {
 	chain := NewChainState(genesis)
 	params := testParams()
 
-	coinbase := tx.NewCoinbase(1, 1_00000000, make([]byte, 20), "test")
+	coinbase := tx.NewCoinbaseTx(1, 1_00000000, tx.CreateP2PKHLockScript(make([]byte, 20)), tx.ChainIDNous)
 	txs := make([]*tx.Transaction, block.MaxBlockTransactions+1)
 	txs[0] = coinbase
 	for i := 1; i < len(txs); i++ {

@@ -11,7 +11,7 @@ import (
 // UTXO represents an unspent transaction output.
 type UTXO struct {
 	OutPoint   OutPoint
-	Output     TxOutput
+	Output     TxOut
 	Height     uint64 // block height where this UTXO was created
 	IsCoinbase bool   // true if this output came from a coinbase transaction
 }
@@ -40,7 +40,7 @@ func NewUTXOSet() *UTXOSet {
 }
 
 // Add inserts a new UTXO into the set.
-func (s *UTXOSet) Add(op OutPoint, output TxOutput, height uint64, isCoinbase bool) {
+func (s *UTXOSet) Add(op OutPoint, output TxOut, height uint64, isCoinbase bool) {
 	s.utxos[op] = &UTXO{OutPoint: op, Output: output, Height: height, IsCoinbase: isCoinbase}
 }
 
@@ -109,7 +109,6 @@ func (s *UTXOSet) RollbackBlock(undo *UndoData) error {
 		return errors.New("utxo: nil undo data")
 	}
 	// Step 1: Remove outputs created by this block.
-	// We must iterate all UTXOs and remove those whose TxID matches any created tx.
 	createdSet := make(map[crypto.Hash]bool, len(undo.CreatedTxs))
 	for _, txid := range undo.CreatedTxs {
 		createdSet[txid] = true
@@ -143,7 +142,7 @@ func (s *UTXOSet) Clone() *UTXOSet {
 	for op, u := range s.utxos {
 		clone.utxos[op] = &UTXO{
 			OutPoint:   u.OutPoint,
-			Output:     TxOutput{Value: u.Output.Value, ScriptPubKey: append([]byte(nil), u.Output.ScriptPubKey...)},
+			Output:     TxOut{Amount: u.Output.Amount, ScriptVersion: u.Output.ScriptVersion, PkScript: append([]byte(nil), u.Output.PkScript...)},
 			Height:     u.Height,
 			IsCoinbase: u.IsCoinbase,
 		}
@@ -151,12 +150,12 @@ func (s *UTXOSet) Clone() *UTXOSet {
 	return clone
 }
 
-// FindByPubKeyHash returns all UTXOs whose ScriptPubKey is a P2PKH script
+// FindByPubKeyHash returns all UTXOs whose PkScript is a P2PKH script
 // paying to the given 20-byte public key hash.
 func (s *UTXOSet) FindByPubKeyHash(pubKeyHash []byte) []*UTXO {
 	var result []*UTXO
 	for _, utxo := range s.utxos {
-		scriptHash := ExtractPubKeyHashFromP2PKH(utxo.Output.ScriptPubKey)
+		scriptHash := ExtractPubKeyHashFromP2PKH(utxo.Output.PkScript)
 		if scriptHash != nil && bytes.Equal(scriptHash, pubKeyHash) {
 			result = append(result, utxo)
 		}
@@ -166,15 +165,15 @@ func (s *UTXOSet) FindByPubKeyHash(pubKeyHash []byte) []*UTXO {
 
 // GetBalance returns the total balance for a given 20-byte public key hash
 // by scanning all UTXOs for matching P2PKH scripts.
-// Uses overflow-safe addition; caps at MaxMoney if sum would overflow.
+// Uses overflow-safe addition; caps at MaxAmount if sum would overflow.
 func (s *UTXOSet) GetBalance(pubKeyHash []byte) int64 {
 	var total int64
 	for _, utxo := range s.utxos {
-		scriptHash := ExtractPubKeyHashFromP2PKH(utxo.Output.ScriptPubKey)
+		scriptHash := ExtractPubKeyHashFromP2PKH(utxo.Output.PkScript)
 		if scriptHash != nil && bytes.Equal(scriptHash, pubKeyHash) {
-			sum, err := safeAdd(total, utxo.Output.Value)
+			sum, err := safeAdd(total, utxo.Output.Amount)
 			if err != nil {
-				return MaxMoney // cap at max if overflow
+				return MaxAmount // cap at max if overflow
 			}
 			total = sum
 		}

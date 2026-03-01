@@ -143,7 +143,7 @@ func fundWallet(t *testing.T, w *Wallet, amount int64) *tx.UTXOSet {
 	t.Helper()
 	utxoSet := tx.NewUTXOSet()
 	pkh := w.PubKeyHash()
-	coinbase := tx.NewCoinbase(1, amount, pkh, "test")
+	coinbase := tx.NewCoinbaseTx(1, amount, tx.CreateP2PKHLockScript(pkh), tx.ChainIDNous)
 	utxoSet.AddTransaction(coinbase, 1)
 	return utxoSet
 }
@@ -184,21 +184,21 @@ func TestCreateTransaction(t *testing.T) {
 	}
 
 	// Output 0: recipient gets amount.
-	if transaction.Outputs[0].Value != amount {
-		t.Fatalf("recipient value: want %d, got %d", amount, transaction.Outputs[0].Value)
+	if transaction.Outputs[0].Amount != amount {
+		t.Fatalf("recipient value: want %d, got %d", amount, transaction.Outputs[0].Amount)
 	}
 
 	// Output 1: change = 100 - 30 - 1 = 69 NOUS.
 	expectedChange := int64(69_0000_0000)
-	if transaction.Outputs[1].Value != expectedChange {
-		t.Fatalf("change value: want %d, got %d", expectedChange, transaction.Outputs[1].Value)
+	if transaction.Outputs[1].Amount != expectedChange {
+		t.Fatalf("change value: want %d, got %d", expectedChange, transaction.Outputs[1].Amount)
 	}
 
 	// Verify the signature is valid via script execution.
 	// The input spends a P2PKH output belonging to sender.
 	senderPKH := sender.PubKeyHash()
 	lockScript := tx.CreateP2PKHLockScript(senderPKH)
-	ok := tx.ExecuteScript(transaction.Inputs[0].ScriptSig, lockScript, transaction, 0)
+	ok := tx.ExecuteScript(transaction.Inputs[0].SignatureScript, lockScript, transaction, 0)
 	if !ok {
 		t.Fatal("script execution should succeed for signed input")
 	}
@@ -278,7 +278,7 @@ func TestCreateTransactionNoChange(t *testing.T) {
 	if len(transaction.Outputs) != 1 {
 		t.Fatalf("outputs: want 1 (no change), got %d", len(transaction.Outputs))
 	}
-	if transaction.Outputs[0].Value != 9_0000_0000 {
-		t.Fatalf("recipient value: want 900000000, got %d", transaction.Outputs[0].Value)
+	if transaction.Outputs[0].Amount != 9_0000_0000 {
+		t.Fatalf("recipient value: want 900000000, got %d", transaction.Outputs[0].Amount)
 	}
 }

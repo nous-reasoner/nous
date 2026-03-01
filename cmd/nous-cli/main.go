@@ -319,7 +319,7 @@ func cmdSend(args []string) error {
 		}
 		utxoSet.Add(
 			tx.OutPoint{TxID: txID, Index: u.Index},
-			tx.TxOutput{Value: u.Value, ScriptPubKey: script},
+			tx.TxOut{Amount: u.Value, PkScript: script},
 			u.Height,
 			false, // coinbase flag not tracked in RPC; maturity enforced at block validation
 		)

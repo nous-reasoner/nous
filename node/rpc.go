@@ -295,8 +295,8 @@ func (r *RPCServer) handleListUnspent(params json.RawMessage) (interface{}, *rpc
 		result = append(result, map[string]interface{}{
 			"txid":   hex.EncodeToString(u.OutPoint.TxID[:]),
 			"index":  u.OutPoint.Index,
-			"value":  u.Output.Value,
-			"script": hex.EncodeToString(u.Output.ScriptPubKey),
+			"value":  u.Output.Amount,
+			"script": hex.EncodeToString(u.Output.PkScript),
 			"height": u.Height,
 		})
 	}
@@ -317,8 +317,8 @@ func txToJSON(t *tx.Transaction, blockHeight int64) map[string]interface{} {
 	outputs := make([]map[string]interface{}, len(t.Outputs))
 	for i, out := range t.Outputs {
 		outputs[i] = map[string]interface{}{
-			"value":  out.Value,
-			"script": hex.EncodeToString(out.ScriptPubKey),
+			"value":  out.Amount,
+			"script": hex.EncodeToString(out.PkScript),
 		}
 	}
 	result := map[string]interface{}{

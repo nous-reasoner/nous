@@ -10,6 +10,9 @@ import (
 	"github.com/nous-chain/nous/crypto"
 )
 
+// ChainIDNous is the chain identifier for the NOUS mainnet.
+var ChainIDNous = [4]byte{0x4E, 0x4F, 0x55, 0x53} // "NOUS"
+
 // OutPoint references a specific output of a previous transaction.
 type OutPoint struct {
 	TxID  crypto.Hash
@@ -23,57 +26,123 @@ const (
 	MaxScriptSize = 10_000
 )
 
-// TxInput represents a transaction input (spending a previous UTXO).
-type TxInput struct {
-	PrevOut   OutPoint
-	ScriptSig []byte
-	Sequence  uint32
+// TxIn represents a transaction input (spending a previous UTXO).
+type TxIn struct {
+	PrevOut         OutPoint
+	SignatureScript []byte
+	Sequence        uint32
 }
 
-// TxOutput represents a transaction output (creating a new UTXO).
-type TxOutput struct {
-	Value        int64 // amount in nou (1 NOUS = 1e8 nou)
-	ScriptPubKey []byte
+// TxOut represents a transaction output (creating a new UTXO).
+type TxOut struct {
+	Amount        int64  // value in nou (1 NOUS = 1e8 nou)
+	ScriptVersion uint16
+	PkScript      []byte
 }
 
 // Transaction represents a NOUS transaction.
 type Transaction struct {
-	Version  uint32
-	Inputs   []TxInput
-	Outputs  []TxOutput
-	LockTime uint32
+	Version      uint32
+	ChainID      [4]byte
+	Inputs       []TxIn
+	Outputs      []TxOut
+	LockTime     uint32
+	ExpiryHeight uint32
 }
 
 // Serialize encodes the transaction into a deterministic byte slice.
+// Wire format:
+//
+//	[4]Version [4]ChainID [varint]#in
+//	  per in: [32]TxID [4]Index [varbytes]SignatureScript [4]Sequence
+//	[varint]#out
+//	  per out: [8]Amount [2]ScriptVersion [varbytes]PkScript
+//	[4]LockTime [4]ExpiryHeight
 func (t *Transaction) Serialize() []byte {
 	var buf bytes.Buffer
 	binary.Write(&buf, binary.LittleEndian, t.Version)
+	buf.Write(t.ChainID[:])
 	writeVarInt(&buf, uint64(len(t.Inputs)))
 	for _, in := range t.Inputs {
 		buf.Write(in.PrevOut.TxID[:])
 		binary.Write(&buf, binary.LittleEndian, in.PrevOut.Index)
-		writeVarBytes(&buf, in.ScriptSig)
+		writeVarBytes(&buf, in.SignatureScript)
 		binary.Write(&buf, binary.LittleEndian, in.Sequence)
 	}
 	writeVarInt(&buf, uint64(len(t.Outputs)))
 	for _, out := range t.Outputs {
-		binary.Write(&buf, binary.LittleEndian, out.Value)
-		writeVarBytes(&buf, out.ScriptPubKey)
+		binary.Write(&buf, binary.LittleEndian, out.Amount)
+		binary.Write(&buf, binary.LittleEndian, out.ScriptVersion)
+		writeVarBytes(&buf, out.PkScript)
 	}
 	binary.Write(&buf, binary.LittleEndian, t.LockTime)
+	binary.Write(&buf, binary.LittleEndian, t.ExpiryHeight)
 	return buf.Bytes()
+}
+
+// SerializeNoWitness encodes the transaction with all SignatureScript fields
+// replaced by empty byte slices. This is used for computing the malleability-
+// resistant TxID.
+func (t *Transaction) SerializeNoWitness() []byte {
+	var buf bytes.Buffer
+	binary.Write(&buf, binary.LittleEndian, t.Version)
+	buf.Write(t.ChainID[:])
+	writeVarInt(&buf, uint64(len(t.Inputs)))
+	for _, in := range t.Inputs {
+		buf.Write(in.PrevOut.TxID[:])
+		binary.Write(&buf, binary.LittleEndian, in.PrevOut.Index)
+		writeVarBytes(&buf, nil) // empty SignatureScript
+		binary.Write(&buf, binary.LittleEndian, in.Sequence)
+	}
+	writeVarInt(&buf, uint64(len(t.Outputs)))
+	for _, out := range t.Outputs {
+		binary.Write(&buf, binary.LittleEndian, out.Amount)
+		binary.Write(&buf, binary.LittleEndian, out.ScriptVersion)
+		writeVarBytes(&buf, out.PkScript)
+	}
+	binary.Write(&buf, binary.LittleEndian, t.LockTime)
+	binary.Write(&buf, binary.LittleEndian, t.ExpiryHeight)
+	return buf.Bytes()
+}
+
+// TxID computes the malleability-resistant transaction identifier.
+// For non-coinbase transactions, it is the double-SHA-256 of the serialized
+// transaction with all SignatureScript fields stripped (SerializeNoWitness).
+// For coinbase transactions, the full serialization is used since coinbase
+// inputs don't have malleatable signatures and the height is encoded in
+// the SignatureScript.
+func (t *Transaction) TxID() crypto.Hash {
+	if t.IsCoinbase() {
+		return crypto.DoubleSha256(t.Serialize())
+	}
+	return crypto.DoubleSha256(t.SerializeNoWitness())
+}
+
+// TxHash computes the full transaction hash including signatures.
+func (t *Transaction) TxHash() crypto.Hash {
+	return crypto.DoubleSha256(t.Serialize())
+}
+
+// IsCoinbase returns true if this is a coinbase (block reward) transaction.
+func (t *Transaction) IsCoinbase() bool {
+	return len(t.Inputs) == 1 &&
+		t.Inputs[0].PrevOut.TxID == crypto.Hash{} &&
+		t.Inputs[0].PrevOut.Index == 0xFFFFFFFF
 }
 
 // Deserialize decodes a transaction from its serialized byte slice.
 func Deserialize(data []byte) (*Transaction, error) {
-	if len(data) < 10 {
-		return nil, fmt.Errorf("tx: data too short (%d bytes, min 10)", len(data))
+	if len(data) < 18 {
+		return nil, fmt.Errorf("tx: data too short (%d bytes, min 18)", len(data))
 	}
 	r := bytes.NewReader(data)
 	t := &Transaction{}
 
 	if err := binary.Read(r, binary.LittleEndian, &t.Version); err != nil {
 		return nil, fmt.Errorf("tx: read version: %w", err)
+	}
+	if _, err := io.ReadFull(r, t.ChainID[:]); err != nil {
+		return nil, fmt.Errorf("tx: read chainID: %w", err)
 	}
 
 	inputCount, err := readVarInt(r)
@@ -83,7 +152,7 @@ func Deserialize(data []byte) (*Transaction, error) {
 	if inputCount > MaxTxInputs {
 		return nil, fmt.Errorf("tx: input count %d exceeds max %d", inputCount, MaxTxInputs)
 	}
-	t.Inputs = make([]TxInput, inputCount)
+	t.Inputs = make([]TxIn, inputCount)
 	for i := uint64(0); i < inputCount; i++ {
 		if _, err := io.ReadFull(r, t.Inputs[i].PrevOut.TxID[:]); err != nil {
 			return nil, fmt.Errorf("tx: read input %d txid: %w", i, err)
@@ -98,8 +167,8 @@ func Deserialize(data []byte) (*Transaction, error) {
 		if scriptLen > MaxScriptSize {
 			return nil, fmt.Errorf("tx: input %d script size %d exceeds max %d", i, scriptLen, MaxScriptSize)
 		}
-		t.Inputs[i].ScriptSig = make([]byte, scriptLen)
-		if _, err := io.ReadFull(r, t.Inputs[i].ScriptSig); err != nil {
+		t.Inputs[i].SignatureScript = make([]byte, scriptLen)
+		if _, err := io.ReadFull(r, t.Inputs[i].SignatureScript); err != nil {
 			return nil, fmt.Errorf("tx: read input %d script: %w", i, err)
 		}
 		if err := binary.Read(r, binary.LittleEndian, &t.Inputs[i].Sequence); err != nil {
@@ -114,10 +183,13 @@ func Deserialize(data []byte) (*Transaction, error) {
 	if outputCount > MaxTxOutputs {
 		return nil, fmt.Errorf("tx: output count %d exceeds max %d", outputCount, MaxTxOutputs)
 	}
-	t.Outputs = make([]TxOutput, outputCount)
+	t.Outputs = make([]TxOut, outputCount)
 	for i := uint64(0); i < outputCount; i++ {
-		if err := binary.Read(r, binary.LittleEndian, &t.Outputs[i].Value); err != nil {
-			return nil, fmt.Errorf("tx: read output %d value: %w", i, err)
+		if err := binary.Read(r, binary.LittleEndian, &t.Outputs[i].Amount); err != nil {
+			return nil, fmt.Errorf("tx: read output %d amount: %w", i, err)
+		}
+		if err := binary.Read(r, binary.LittleEndian, &t.Outputs[i].ScriptVersion); err != nil {
+			return nil, fmt.Errorf("tx: read output %d script version: %w", i, err)
 		}
 		scriptLen, err := readVarInt(r)
 		if err != nil {
@@ -126,8 +198,8 @@ func Deserialize(data []byte) (*Transaction, error) {
 		if scriptLen > MaxScriptSize {
 			return nil, fmt.Errorf("tx: output %d script size %d exceeds max %d", i, scriptLen, MaxScriptSize)
 		}
-		t.Outputs[i].ScriptPubKey = make([]byte, scriptLen)
-		if _, err := io.ReadFull(r, t.Outputs[i].ScriptPubKey); err != nil {
+		t.Outputs[i].PkScript = make([]byte, scriptLen)
+		if _, err := io.ReadFull(r, t.Outputs[i].PkScript); err != nil {
 			return nil, fmt.Errorf("tx: read output %d script: %w", i, err)
 		}
 	}
@@ -135,75 +207,33 @@ func Deserialize(data []byte) (*Transaction, error) {
 	if err := binary.Read(r, binary.LittleEndian, &t.LockTime); err != nil {
 		return nil, fmt.Errorf("tx: read locktime: %w", err)
 	}
+	if err := binary.Read(r, binary.LittleEndian, &t.ExpiryHeight); err != nil {
+		return nil, fmt.Errorf("tx: read expiry height: %w", err)
+	}
 
 	return t, nil
 }
 
-// TxID computes the double-SHA-256 hash of the serialized transaction.
-func (t *Transaction) TxID() crypto.Hash {
-	return crypto.DoubleSha256(t.Serialize())
-}
-
-// IsCoinbase returns true if this is a coinbase (block reward) transaction.
-func (t *Transaction) IsCoinbase() bool {
-	return len(t.Inputs) == 1 &&
-		t.Inputs[0].PrevOut.TxID == crypto.Hash{} &&
-		t.Inputs[0].PrevOut.Index == 0xFFFFFFFF
-}
-
-// NewCoinbase creates a coinbase transaction paying the block reward to the
-// owner of the given public key hash. The scriptSig encodes the block height
-// (BIP34 style) followed by an optional message.
-func NewCoinbase(blockHeight uint32, reward int64, minerPubKeyHash []byte, message string) *Transaction {
-	// Encode block height as varint-sized little-endian bytes in ScriptSig.
-	var sig bytes.Buffer
-	heightBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(heightBytes, blockHeight)
-	// Trim trailing zero bytes for compact encoding, keep at least 1 byte.
-	trimmed := heightBytes
-	for len(trimmed) > 1 && trimmed[len(trimmed)-1] == 0 {
-		trimmed = trimmed[:len(trimmed)-1]
-	}
-	sig.WriteByte(byte(len(trimmed)))
-	sig.Write(trimmed)
-	if len(message) > 0 {
-		sig.Write([]byte(message))
-	}
-
-	return &Transaction{
-		Version: 1,
-		Inputs: []TxInput{
-			{
-				PrevOut:   OutPoint{TxID: crypto.Hash{}, Index: 0xFFFFFFFF},
-				ScriptSig: sig.Bytes(),
-				Sequence:  0xFFFFFFFF,
-			},
-		},
-		Outputs: []TxOutput{
-			{Value: reward, ScriptPubKey: CreateP2PKHLockScript(minerPubKeyHash)},
-		},
-		LockTime: 0,
-	}
-}
-
 // SigHash computes the SIGHASH_ALL hash for signing a specific input.
-// It clears all input scriptSigs, sets the given input's scriptSig to subscript,
-// serializes the modified transaction, and returns the double-SHA-256 hash.
+// It clears all input SignatureScripts, sets the given input's SignatureScript
+// to subscript, serializes the modified transaction, and returns the
+// double-SHA-256 hash.
 func (t *Transaction) SigHash(inputIndex int, subscript []byte) crypto.Hash {
-	// Make a deep-enough copy: we need to modify scriptSigs.
 	txCopy := &Transaction{
-		Version:  t.Version,
-		Inputs:   make([]TxInput, len(t.Inputs)),
-		Outputs:  make([]TxOutput, len(t.Outputs)),
-		LockTime: t.LockTime,
+		Version:      t.Version,
+		ChainID:      t.ChainID,
+		Inputs:       make([]TxIn, len(t.Inputs)),
+		Outputs:      make([]TxOut, len(t.Outputs)),
+		LockTime:     t.LockTime,
+		ExpiryHeight: t.ExpiryHeight,
 	}
 	for i, in := range t.Inputs {
-		txCopy.Inputs[i] = TxInput{
+		txCopy.Inputs[i] = TxIn{
 			PrevOut:  in.PrevOut,
 			Sequence: in.Sequence,
 		}
 		if i == inputIndex {
-			txCopy.Inputs[i].ScriptSig = subscript
+			txCopy.Inputs[i].SignatureScript = subscript
 		}
 	}
 	copy(txCopy.Outputs, t.Outputs)

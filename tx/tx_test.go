@@ -8,29 +8,235 @@ import (
 )
 
 // ============================================================
+// 1. TxID excludes SignatureScript (malleability resistant)
+// ============================================================
+
+func TestTxID_ExcludesSignature(t *testing.T) {
+	txn := &Transaction{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
+			{
+				PrevOut:         OutPoint{TxID: crypto.Sha256([]byte("prev")), Index: 0},
+				SignatureScript: []byte{0x01, 0x02, 0x03},
+				Sequence:        0xFFFFFFFF,
+			},
+		},
+		Outputs: []TxOut{
+			{Amount: 50_0000_0000, PkScript: []byte{0x76, 0xa9}},
+		},
+	}
+
+	id1 := txn.TxID()
+
+	// Change the SignatureScript.
+	txn.Inputs[0].SignatureScript = []byte{0xAA, 0xBB, 0xCC, 0xDD}
+	id2 := txn.TxID()
+
+	if id1 != id2 {
+		t.Fatal("TxID should not change when SignatureScript changes")
+	}
+}
+
+// ============================================================
+// 2. TxHash includes SignatureScript
+// ============================================================
+
+func TestTxHash_IncludesSignature(t *testing.T) {
+	txn := &Transaction{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
+			{
+				PrevOut:         OutPoint{TxID: crypto.Sha256([]byte("prev")), Index: 0},
+				SignatureScript: []byte{0x01, 0x02, 0x03},
+				Sequence:        0xFFFFFFFF,
+			},
+		},
+		Outputs: []TxOut{
+			{Amount: 50_0000_0000, PkScript: []byte{0x76, 0xa9}},
+		},
+	}
+
+	hash1 := txn.TxHash()
+
+	// Change the SignatureScript.
+	txn.Inputs[0].SignatureScript = []byte{0xAA, 0xBB, 0xCC, 0xDD}
+	hash2 := txn.TxHash()
+
+	if hash1 == hash2 {
+		t.Fatal("TxHash should change when SignatureScript changes")
+	}
+}
+
+// ============================================================
+// 3. SumOutputs detects overflow
+// ============================================================
+
+func TestAmountOverflow(t *testing.T) {
+	outs := []TxOut{
+		{Amount: MaxAmount, PkScript: []byte{0x76}},
+		{Amount: 1, PkScript: []byte{0x76}},
+	}
+	_, err := SumOutputs(outs)
+	if err == nil {
+		t.Fatal("SumOutputs should detect overflow past MaxAmount")
+	}
+}
+
+// ============================================================
+// 4. Dust limit: output below DustLimit rejected
+// ============================================================
+
+func TestDustLimit(t *testing.T) {
+	priv, pub, err := crypto.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = priv
+	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
+
+	utxos := NewUTXOSet()
+	fakeOp := OutPoint{TxID: crypto.Sha256([]byte("dust-test")), Index: 0}
+	utxos.Add(fakeOp, TxOut{Amount: 10_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)}, 0, false)
+
+	dustTx := &Transaction{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs:  []TxIn{{PrevOut: fakeOp, Sequence: 0xFFFFFFFF}},
+		Outputs: []TxOut{{Amount: DustLimit - 1, PkScript: CreateP2PKHLockScript(pubKeyHash)}},
+	}
+
+	err = ValidateTx(dustTx, utxos, 100)
+	if err == nil {
+		t.Fatal("output below dust limit should be rejected")
+	}
+}
+
+// ============================================================
+// 5. Coinbase height encoding
+// ============================================================
+
+func TestCoinbase_HeightEncoding(t *testing.T) {
+	tests := []struct {
+		height   uint64
+		expected []byte // first bytes of SignatureScript: [len][bytes...]
+	}{
+		{0, []byte{1, 0}},                // height 0 → [1, 0x00]
+		{1, []byte{1, 1}},                // height 1 → [1, 0x01]
+		{255, []byte{1, 0xFF}},            // height 255 → [1, 0xFF]
+		{256, []byte{2, 0x00, 0x01}},      // height 256 → [2, 0x00, 0x01]
+		{70000, []byte{3, 0x70, 0x11, 0x01}}, // height 70000 → [3, LE bytes]
+	}
+
+	for _, tc := range tests {
+		cb := NewCoinbaseTx(tc.height, Coin, []byte{0x76}, ChainIDNous)
+		ss := cb.Inputs[0].SignatureScript
+
+		if len(ss) < len(tc.expected) {
+			t.Fatalf("height %d: SignatureScript too short: %x", tc.height, ss)
+		}
+		for i, b := range tc.expected {
+			if ss[i] != b {
+				t.Fatalf("height %d: byte %d: want 0x%02x, got 0x%02x (full: %x)",
+					tc.height, i, b, ss[i], ss)
+			}
+		}
+	}
+}
+
+// ============================================================
+// 6. Transaction weight
+// ============================================================
+
+func TestTxWeight(t *testing.T) {
+	txn := &Transaction{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
+			{
+				PrevOut:         OutPoint{TxID: crypto.Sha256([]byte("prev")), Index: 0},
+				SignatureScript: []byte{0x01, 0x02, 0x03, 0x04, 0x05},
+				Sequence:        0xFFFFFFFF,
+			},
+		},
+		Outputs: []TxOut{
+			{Amount: 50_0000_0000, PkScript: CreateP2PKHLockScript(make([]byte, 20))},
+		},
+	}
+
+	w := TxWeight(txn)
+	baseSize := int64(len(txn.SerializeNoWitness()))
+	fullSize := int64(len(txn.Serialize()))
+	sigSize := fullSize - baseSize
+
+	expected := baseSize*UTXOWeight + sigSize*SignatureWeight
+	if w != expected {
+		t.Fatalf("TxWeight: want %d, got %d (base=%d, full=%d, sig=%d)",
+			expected, w, baseSize, fullSize, sigSize)
+	}
+
+	// Weight should be > 0.
+	if w <= 0 {
+		t.Fatal("weight should be positive")
+	}
+}
+
+// ============================================================
+// 7. ChainID mismatch rejected by ValidateTx
+// ============================================================
+
+func TestChainID_Mismatch(t *testing.T) {
+	_, pub, err := crypto.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
+
+	utxos := NewUTXOSet()
+	fakeOp := OutPoint{TxID: crypto.Sha256([]byte("chain-test")), Index: 0}
+	utxos.Add(fakeOp, TxOut{Amount: 10_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)}, 0, false)
+
+	badChain := [4]byte{0xBA, 0xAD, 0xBE, 0xEF}
+	txn := &Transaction{
+		Version: 2,
+		ChainID: badChain,
+		Inputs:  []TxIn{{PrevOut: fakeOp, Sequence: 0xFFFFFFFF}},
+		Outputs: []TxOut{{Amount: 9_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)}},
+	}
+
+	err = ValidateTx(txn, utxos, 100)
+	if err == nil {
+		t.Fatal("wrong ChainID should be rejected")
+	}
+}
+
+// ============================================================
 // Serialize / Deserialize round-trip
 // ============================================================
 
 func TestSerializeDeserializeRoundTrip(t *testing.T) {
 	original := &Transaction{
-		Version: 1,
-		Inputs: []TxInput{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
 			{
-				PrevOut:   OutPoint{TxID: crypto.Sha256([]byte("prev")), Index: 0},
-				ScriptSig: []byte{0x01, 0x02, 0x03},
-				Sequence:  0xFFFFFFFF,
+				PrevOut:         OutPoint{TxID: crypto.Sha256([]byte("prev")), Index: 0},
+				SignatureScript: []byte{0x01, 0x02, 0x03},
+				Sequence:        0xFFFFFFFF,
 			},
 			{
-				PrevOut:   OutPoint{TxID: crypto.Sha256([]byte("prev2")), Index: 1},
-				ScriptSig: []byte{0x04, 0x05},
-				Sequence:  0xFFFFFFFE,
+				PrevOut:         OutPoint{TxID: crypto.Sha256([]byte("prev2")), Index: 1},
+				SignatureScript: []byte{0x04, 0x05},
+				Sequence:        0xFFFFFFFE,
 			},
 		},
-		Outputs: []TxOutput{
-			{Value: 50_0000_0000, ScriptPubKey: []byte{0x76, 0xa9}},
-			{Value: 25_0000_0000, ScriptPubKey: []byte{0x76, 0xa9, 0x14}},
+		Outputs: []TxOut{
+			{Amount: 50_0000_0000, ScriptVersion: 0, PkScript: []byte{0x76, 0xa9}},
+			{Amount: 25_0000_0000, ScriptVersion: 0, PkScript: []byte{0x76, 0xa9, 0x14}},
 		},
-		LockTime: 100,
+		LockTime:     100,
+		ExpiryHeight: 500,
 	}
 
 	data := original.Serialize()
@@ -42,8 +248,14 @@ func TestSerializeDeserializeRoundTrip(t *testing.T) {
 	if original.Version != decoded.Version {
 		t.Fatalf("Version: want %d, got %d", original.Version, decoded.Version)
 	}
+	if original.ChainID != decoded.ChainID {
+		t.Fatalf("ChainID mismatch")
+	}
 	if original.LockTime != decoded.LockTime {
 		t.Fatalf("LockTime: want %d, got %d", original.LockTime, decoded.LockTime)
+	}
+	if original.ExpiryHeight != decoded.ExpiryHeight {
+		t.Fatalf("ExpiryHeight: want %d, got %d", original.ExpiryHeight, decoded.ExpiryHeight)
 	}
 	if len(original.Inputs) != len(decoded.Inputs) {
 		t.Fatalf("input count: want %d, got %d", len(original.Inputs), len(decoded.Inputs))
@@ -52,8 +264,8 @@ func TestSerializeDeserializeRoundTrip(t *testing.T) {
 		if original.Inputs[i].PrevOut != decoded.Inputs[i].PrevOut {
 			t.Fatalf("input %d PrevOut mismatch", i)
 		}
-		if !bytes.Equal(original.Inputs[i].ScriptSig, decoded.Inputs[i].ScriptSig) {
-			t.Fatalf("input %d ScriptSig mismatch", i)
+		if !bytes.Equal(original.Inputs[i].SignatureScript, decoded.Inputs[i].SignatureScript) {
+			t.Fatalf("input %d SignatureScript mismatch", i)
 		}
 		if original.Inputs[i].Sequence != decoded.Inputs[i].Sequence {
 			t.Fatalf("input %d Sequence mismatch", i)
@@ -63,11 +275,14 @@ func TestSerializeDeserializeRoundTrip(t *testing.T) {
 		t.Fatalf("output count: want %d, got %d", len(original.Outputs), len(decoded.Outputs))
 	}
 	for i := range original.Outputs {
-		if original.Outputs[i].Value != decoded.Outputs[i].Value {
-			t.Fatalf("output %d Value: want %d, got %d", i, original.Outputs[i].Value, decoded.Outputs[i].Value)
+		if original.Outputs[i].Amount != decoded.Outputs[i].Amount {
+			t.Fatalf("output %d Amount: want %d, got %d", i, original.Outputs[i].Amount, decoded.Outputs[i].Amount)
 		}
-		if !bytes.Equal(original.Outputs[i].ScriptPubKey, decoded.Outputs[i].ScriptPubKey) {
-			t.Fatalf("output %d ScriptPubKey mismatch", i)
+		if original.Outputs[i].ScriptVersion != decoded.Outputs[i].ScriptVersion {
+			t.Fatalf("output %d ScriptVersion: want %d, got %d", i, original.Outputs[i].ScriptVersion, decoded.Outputs[i].ScriptVersion)
+		}
+		if !bytes.Equal(original.Outputs[i].PkScript, decoded.Outputs[i].PkScript) {
+			t.Fatalf("output %d PkScript mismatch", i)
 		}
 	}
 
@@ -82,23 +297,23 @@ func TestSerializeDeserializeRoundTrip(t *testing.T) {
 // ============================================================
 
 func TestTxIDDeterministic(t *testing.T) {
-	tx := &Transaction{
-		Version: 1,
-		Inputs: []TxInput{
+	txn := &Transaction{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
 			{
-				PrevOut:   OutPoint{TxID: crypto.Hash{}, Index: 0xFFFFFFFF},
-				ScriptSig: []byte{0x04, 0x01, 0x00, 0x00, 0x00},
-				Sequence:  0xFFFFFFFF,
+				PrevOut:         OutPoint{TxID: crypto.Hash{}, Index: 0xFFFFFFFF},
+				SignatureScript: []byte{0x04, 0x01, 0x00, 0x00, 0x00},
+				Sequence:        0xFFFFFFFF,
 			},
 		},
-		Outputs: []TxOutput{
-			{Value: 50_0000_0000, ScriptPubKey: []byte{0x76}},
+		Outputs: []TxOut{
+			{Amount: 50_0000_0000, PkScript: []byte{0x76}},
 		},
-		LockTime: 0,
 	}
 
-	id1 := tx.TxID()
-	id2 := tx.TxID()
+	id1 := txn.TxID()
+	id2 := txn.TxID()
 	if id1 != id2 {
 		t.Fatal("TxID should be deterministic")
 	}
@@ -173,7 +388,7 @@ func TestVarIntEncoding(t *testing.T) {
 }
 
 // ============================================================
-// NewCoinbase
+// NewCoinbaseTx
 // ============================================================
 
 func TestNewCoinbaseStructure(t *testing.T) {
@@ -182,22 +397,22 @@ func TestNewCoinbaseStructure(t *testing.T) {
 		pubKeyHash[i] = byte(i)
 	}
 
-	cb := NewCoinbase(42, 50_0000_0000, pubKeyHash, "test message")
+	cb := NewCoinbaseTx(42, 50_0000_0000, CreateP2PKHLockScript(pubKeyHash), ChainIDNous)
 
 	if !cb.IsCoinbase() {
-		t.Fatal("NewCoinbase should produce a coinbase transaction")
+		t.Fatal("NewCoinbaseTx should produce a coinbase transaction")
 	}
 
 	if len(cb.Outputs) != 1 {
 		t.Fatalf("coinbase should have 1 output, got %d", len(cb.Outputs))
 	}
 
-	if cb.Outputs[0].Value != 50_0000_0000 {
-		t.Fatalf("coinbase reward: want 5000000000, got %d", cb.Outputs[0].Value)
+	if cb.Outputs[0].Amount != 50_0000_0000 {
+		t.Fatalf("coinbase reward: want 5000000000, got %d", cb.Outputs[0].Amount)
 	}
 
 	// Output should be a valid P2PKH script.
-	extracted := ExtractPubKeyHashFromP2PKH(cb.Outputs[0].ScriptPubKey)
+	extracted := ExtractPubKeyHashFromP2PKH(cb.Outputs[0].PkScript)
 	if extracted == nil {
 		t.Fatal("coinbase output should have a P2PKH script")
 	}
@@ -205,9 +420,19 @@ func TestNewCoinbaseStructure(t *testing.T) {
 		t.Fatal("coinbase P2PKH hash mismatch")
 	}
 
-	// ScriptSig should contain the height.
-	if len(cb.Inputs[0].ScriptSig) == 0 {
-		t.Fatal("coinbase ScriptSig should not be empty")
+	// SignatureScript should contain the height.
+	if len(cb.Inputs[0].SignatureScript) == 0 {
+		t.Fatal("coinbase SignatureScript should not be empty")
+	}
+
+	// ChainID should be set.
+	if cb.ChainID != ChainIDNous {
+		t.Fatal("coinbase ChainID should be ChainIDNous")
+	}
+
+	// Version should be 2.
+	if cb.Version != 2 {
+		t.Fatalf("coinbase Version: want 2, got %d", cb.Version)
 	}
 }
 
@@ -223,7 +448,6 @@ func TestP2PKHLockScript(t *testing.T) {
 
 	script := CreateP2PKHLockScript(hash)
 
-	// Expected: OP_DUP OP_HASH160 0x14 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG
 	if len(script) != 25 {
 		t.Fatalf("P2PKH lock script should be 25 bytes, got %d", len(script))
 	}
@@ -253,7 +477,6 @@ func TestP2PKHUnlockScript(t *testing.T) {
 
 	script := CreateP2PKHUnlockScript(sig, pubKey)
 
-	// Expected: <len(sig)> <sig> <len(pubKey)> <pubKey>
 	expectedLen := 1 + len(sig) + 1 + len(pubKey)
 	if len(script) != expectedLen {
 		t.Fatalf("unlock script length: want %d, got %d", expectedLen, len(script))
@@ -285,25 +508,25 @@ func TestScriptEngineValidP2PKH(t *testing.T) {
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
 	// Create a funding transaction (coinbase).
-	fundingTx := NewCoinbase(0, 50_0000_0000, pubKeyHash, "")
+	fundingTx := NewCoinbaseTx(0, 50_0000_0000, CreateP2PKHLockScript(pubKeyHash), ChainIDNous)
 
 	// Create a spending transaction.
 	spendTx := &Transaction{
-		Version: 1,
-		Inputs: []TxInput{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
 			{
 				PrevOut:  OutPoint{TxID: fundingTx.TxID(), Index: 0},
 				Sequence: 0xFFFFFFFF,
 			},
 		},
-		Outputs: []TxOutput{
-			{Value: 50_0000_0000, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)},
+		Outputs: []TxOut{
+			{Amount: 50_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)},
 		},
-		LockTime: 0,
 	}
 
 	// Sign the spending transaction.
-	subscript := fundingTx.Outputs[0].ScriptPubKey
+	subscript := fundingTx.Outputs[0].PkScript
 	sigHash := spendTx.SigHash(0, subscript)
 	sig, err := crypto.Sign(priv, sigHash)
 	if err != nil {
@@ -311,10 +534,10 @@ func TestScriptEngineValidP2PKH(t *testing.T) {
 	}
 
 	// Set the unlock script.
-	spendTx.Inputs[0].ScriptSig = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
+	spendTx.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 
 	// Execute the script.
-	ok := ExecuteScript(spendTx.Inputs[0].ScriptSig, fundingTx.Outputs[0].ScriptPubKey, spendTx, 0)
+	ok := ExecuteScript(spendTx.Inputs[0].SignatureScript, fundingTx.Outputs[0].PkScript, spendTx, 0)
 	if !ok {
 		t.Fatal("valid P2PKH script should verify successfully")
 	}
@@ -331,32 +554,32 @@ func TestScriptEngineWrongSignature(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
-	fundingTx := NewCoinbase(0, 50_0000_0000, pubKeyHash, "")
+	fundingTx := NewCoinbaseTx(0, 50_0000_0000, CreateP2PKHLockScript(pubKeyHash), ChainIDNous)
 
 	spendTx := &Transaction{
-		Version: 1,
-		Inputs: []TxInput{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
 			{
 				PrevOut:  OutPoint{TxID: fundingTx.TxID(), Index: 0},
 				Sequence: 0xFFFFFFFF,
 			},
 		},
-		Outputs: []TxOutput{
-			{Value: 50_0000_0000, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)},
+		Outputs: []TxOut{
+			{Amount: 50_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)},
 		},
-		LockTime: 0,
 	}
 
-	// Sign with a wrong hash (not the actual sighash).
+	// Sign with a wrong hash.
 	wrongHash := crypto.Sha256([]byte("wrong data"))
 	sig, err := crypto.Sign(priv, wrongHash)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	spendTx.Inputs[0].ScriptSig = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
+	spendTx.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 
-	ok := ExecuteScript(spendTx.Inputs[0].ScriptSig, fundingTx.Outputs[0].ScriptPubKey, spendTx, 0)
+	ok := ExecuteScript(spendTx.Inputs[0].SignatureScript, fundingTx.Outputs[0].PkScript, spendTx, 0)
 	if ok {
 		t.Fatal("wrong signature should be rejected")
 	}
@@ -374,7 +597,7 @@ func TestUTXOSetAddSpendGet(t *testing.T) {
 	}
 
 	op := OutPoint{TxID: crypto.Sha256([]byte("tx1")), Index: 0}
-	output := TxOutput{Value: 100, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)}
+	output := TxOut{Amount: 100, PkScript: CreateP2PKHLockScript(pubKeyHash)}
 
 	// Add
 	utxos.Add(op, output, 1, false)
@@ -382,8 +605,8 @@ func TestUTXOSetAddSpendGet(t *testing.T) {
 	if got == nil {
 		t.Fatal("UTXO should exist after Add")
 	}
-	if got.Output.Value != 100 {
-		t.Fatalf("UTXO value: want 100, got %d", got.Output.Value)
+	if got.Output.Amount != 100 {
+		t.Fatalf("UTXO value: want 100, got %d", got.Output.Amount)
 	}
 
 	// Balance
@@ -421,7 +644,7 @@ func TestUTXOSetAddTransaction(t *testing.T) {
 		pubKeyHash[i] = byte(i)
 	}
 
-	cb := NewCoinbase(0, 50_0000_0000, pubKeyHash, "")
+	cb := NewCoinbaseTx(0, 50_0000_0000, CreateP2PKHLockScript(pubKeyHash), ChainIDNous)
 	utxos.AddTransaction(cb, 0)
 
 	txID := cb.TxID()
@@ -429,8 +652,8 @@ func TestUTXOSetAddTransaction(t *testing.T) {
 	if got == nil {
 		t.Fatal("UTXO should exist after AddTransaction")
 	}
-	if got.Output.Value != 50_0000_0000 {
-		t.Fatalf("UTXO value: want 5000000000, got %d", got.Output.Value)
+	if got.Output.Amount != 50_0000_0000 {
+		t.Fatalf("UTXO value: want 5000000000, got %d", got.Output.Amount)
 	}
 
 	bal := utxos.GetBalance(pubKeyHash)
@@ -451,33 +674,33 @@ func TestValidateTransactionValid(t *testing.T) {
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
 	// Create and add coinbase to UTXO set.
-	cb := NewCoinbase(0, 50_0000_0000, pubKeyHash, "")
+	cb := NewCoinbaseTx(0, 50_0000_0000, CreateP2PKHLockScript(pubKeyHash), ChainIDNous)
 	utxos := NewUTXOSet()
 	utxos.AddTransaction(cb, 0)
 
 	// Create spending transaction.
 	spendTx := &Transaction{
-		Version: 1,
-		Inputs: []TxInput{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
 			{
 				PrevOut:  OutPoint{TxID: cb.TxID(), Index: 0},
 				Sequence: 0xFFFFFFFF,
 			},
 		},
-		Outputs: []TxOutput{
-			{Value: 49_0000_0000, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)},
+		Outputs: []TxOut{
+			{Amount: 49_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)},
 		},
-		LockTime: 0,
 	}
 
 	// Sign it.
-	subscript := cb.Outputs[0].ScriptPubKey
+	subscript := cb.Outputs[0].PkScript
 	sigHash := spendTx.SigHash(0, subscript)
 	sig, err := crypto.Sign(priv, sigHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	spendTx.Inputs[0].ScriptSig = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
+	spendTx.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 
 	if err := ValidateTransaction(spendTx, utxos, 100); err != nil {
 		t.Fatalf("valid transaction should pass: %v", err)
@@ -495,28 +718,28 @@ func TestValidateTransactionDoubleSpend(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
-	cb := NewCoinbase(0, 50_0000_0000, pubKeyHash, "")
+	cb := NewCoinbaseTx(0, 50_0000_0000, CreateP2PKHLockScript(pubKeyHash), ChainIDNous)
 	utxos := NewUTXOSet()
 	utxos.AddTransaction(cb, 0)
 
 	// First spend.
 	spend1 := &Transaction{
-		Version: 1,
-		Inputs: []TxInput{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
 			{
 				PrevOut:  OutPoint{TxID: cb.TxID(), Index: 0},
 				Sequence: 0xFFFFFFFF,
 			},
 		},
-		Outputs: []TxOutput{
-			{Value: 50_0000_0000, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)},
+		Outputs: []TxOut{
+			{Amount: 50_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)},
 		},
-		LockTime: 0,
 	}
-	subscript := cb.Outputs[0].ScriptPubKey
+	subscript := cb.Outputs[0].PkScript
 	sigHash := spend1.SigHash(0, subscript)
 	sig, _ := crypto.Sign(priv, sigHash)
-	spend1.Inputs[0].ScriptSig = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
+	spend1.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 
 	// Validate and apply first spend.
 	if err := ValidateTransaction(spend1, utxos, 100); err != nil {
@@ -526,21 +749,21 @@ func TestValidateTransactionDoubleSpend(t *testing.T) {
 
 	// Second spend of the same UTXO should fail.
 	spend2 := &Transaction{
-		Version: 1,
-		Inputs: []TxInput{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
 			{
 				PrevOut:  OutPoint{TxID: cb.TxID(), Index: 0},
 				Sequence: 0xFFFFFFFF,
 			},
 		},
-		Outputs: []TxOutput{
-			{Value: 50_0000_0000, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)},
+		Outputs: []TxOut{
+			{Amount: 50_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)},
 		},
-		LockTime: 0,
 	}
 	sigHash2 := spend2.SigHash(0, subscript)
 	sig2, _ := crypto.Sign(priv, sigHash2)
-	spend2.Inputs[0].ScriptSig = CreateP2PKHUnlockScript(sig2.Bytes(), pub.SerializeCompressed())
+	spend2.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig2.Bytes(), pub.SerializeCompressed())
 
 	err = ValidateTransaction(spend2, utxos, 100)
 	if err == nil {
@@ -559,30 +782,29 @@ func TestValidateTransactionInsufficientFunds(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
-	// Coinbase with 10 NOUS.
-	cb := NewCoinbase(0, 10_0000_0000, pubKeyHash, "")
+	cb := NewCoinbaseTx(0, 10_0000_0000, CreateP2PKHLockScript(pubKeyHash), ChainIDNous)
 	utxos := NewUTXOSet()
 	utxos.AddTransaction(cb, 0)
 
 	// Try to spend 20 NOUS (more than available).
 	spendTx := &Transaction{
-		Version: 1,
-		Inputs: []TxInput{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
 			{
 				PrevOut:  OutPoint{TxID: cb.TxID(), Index: 0},
 				Sequence: 0xFFFFFFFF,
 			},
 		},
-		Outputs: []TxOutput{
-			{Value: 20_0000_0000, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)},
+		Outputs: []TxOut{
+			{Amount: 20_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)},
 		},
-		LockTime: 0,
 	}
 
-	subscript := cb.Outputs[0].ScriptPubKey
+	subscript := cb.Outputs[0].PkScript
 	sigHash := spendTx.SigHash(0, subscript)
 	sig, _ := crypto.Sign(priv, sigHash)
-	spendTx.Inputs[0].ScriptSig = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
+	spendTx.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 
 	err = ValidateTransaction(spendTx, utxos, 100)
 	if err == nil {
@@ -596,7 +818,7 @@ func TestValidateTransactionInsufficientFunds(t *testing.T) {
 
 func TestValidateCoinbase(t *testing.T) {
 	pubKeyHash := make([]byte, 20)
-	cb := NewCoinbase(0, 50_0000_0000, pubKeyHash, "")
+	cb := NewCoinbaseTx(0, 50_0000_0000, CreateP2PKHLockScript(pubKeyHash), ChainIDNous)
 
 	err := ValidateTransaction(cb, NewUTXOSet(), 0)
 	if err != nil {
@@ -615,29 +837,28 @@ func TestValidateTransactionDuplicateInput(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
-	cb := NewCoinbase(0, 10_0000_0000, pubKeyHash, "")
+	cb := NewCoinbaseTx(0, 10_0000_0000, CreateP2PKHLockScript(pubKeyHash), ChainIDNous)
 	utxos := NewUTXOSet()
 	utxos.AddTransaction(cb, 0)
 
 	// Build a transaction that references the same UTXO twice.
 	dupTx := &Transaction{
-		Version: 1,
-		Inputs: []TxInput{
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs: []TxIn{
 			{PrevOut: OutPoint{TxID: cb.TxID(), Index: 0}, Sequence: 0xFFFFFFFF},
 			{PrevOut: OutPoint{TxID: cb.TxID(), Index: 0}, Sequence: 0xFFFFFFFF},
 		},
-		Outputs: []TxOutput{
-			{Value: 19_0000_0000, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)},
+		Outputs: []TxOut{
+			{Amount: 19_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)},
 		},
-		LockTime: 0,
 	}
 
-	// Sign both inputs (same UTXO, different SigHash because inputIndex differs).
-	subscript := cb.Outputs[0].ScriptPubKey
+	subscript := cb.Outputs[0].PkScript
 	for i := 0; i < 2; i++ {
 		sigHash := dupTx.SigHash(i, subscript)
 		sig, _ := crypto.Sign(priv, sigHash)
-		dupTx.Inputs[i].ScriptSig = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
+		dupTx.Inputs[i].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 	}
 
 	err = ValidateTransaction(dupTx, utxos, 100)
@@ -658,33 +879,34 @@ func TestValidateTransactionImmatureCoinbase(t *testing.T) {
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
 	// Coinbase created at height 50.
-	cb := NewCoinbase(50, 10_0000_0000, pubKeyHash, "")
+	cb := NewCoinbaseTx(50, 10_0000_0000, CreateP2PKHLockScript(pubKeyHash), ChainIDNous)
 	utxos := NewUTXOSet()
 	utxos.AddTransaction(cb, 50)
 
 	spendTx := &Transaction{
-		Version: 1,
-		Inputs:  []TxInput{{PrevOut: OutPoint{TxID: cb.TxID(), Index: 0}, Sequence: 0xFFFFFFFF}},
-		Outputs: []TxOutput{{Value: 9_0000_0000, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)}},
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs:  []TxIn{{PrevOut: OutPoint{TxID: cb.TxID(), Index: 0}, Sequence: 0xFFFFFFFF}},
+		Outputs: []TxOut{{Amount: 9_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)}},
 	}
-	subscript := cb.Outputs[0].ScriptPubKey
+	subscript := cb.Outputs[0].PkScript
 	sigHash := spendTx.SigHash(0, subscript)
 	sig, _ := crypto.Sign(priv, sigHash)
-	spendTx.Inputs[0].ScriptSig = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
+	spendTx.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 
-	// At height 51 (only 1 confirmation), should fail.
+	// At height 51, should fail.
 	err = ValidateTransaction(spendTx, utxos, 51)
 	if err == nil {
 		t.Fatal("spending immature coinbase should be rejected")
 	}
 
-	// At height 149 (99 confirmations), should still fail.
+	// At height 149, should still fail.
 	err = ValidateTransaction(spendTx, utxos, 149)
 	if err == nil {
 		t.Fatal("spending coinbase at 99 confirmations should be rejected")
 	}
 
-	// At height 150 (100 confirmations), should pass.
+	// At height 150, should pass.
 	err = ValidateTransaction(spendTx, utxos, 150)
 	if err != nil {
 		t.Fatalf("spending mature coinbase should pass: %v", err)
@@ -692,28 +914,27 @@ func TestValidateTransactionImmatureCoinbase(t *testing.T) {
 }
 
 // ============================================================
-// Overflow: output value exceeding MaxMoney rejected
+// Overflow: output value exceeding MaxAmount rejected
 // ============================================================
 
 func TestValidateTransactionOverflowOutputValue(t *testing.T) {
 	_, pub, _ := crypto.GenerateKeyPair()
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
-	// Create a non-coinbase UTXO with a sane value.
 	utxos := NewUTXOSet()
 	fakeOp := OutPoint{TxID: crypto.Sha256([]byte("fake")), Index: 0}
-	utxos.Add(fakeOp, TxOutput{Value: 10_0000_0000, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)}, 0, false)
+	utxos.Add(fakeOp, TxOut{Amount: 10_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)}, 0, false)
 
-	// Transaction with output exceeding MaxMoney.
 	spendTx := &Transaction{
-		Version: 1,
-		Inputs:  []TxInput{{PrevOut: fakeOp, Sequence: 0xFFFFFFFF}},
-		Outputs: []TxOutput{{Value: MaxMoney + 1, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)}},
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs:  []TxIn{{PrevOut: fakeOp, Sequence: 0xFFFFFFFF}},
+		Outputs: []TxOut{{Amount: MaxAmount + 1, PkScript: CreateP2PKHLockScript(pubKeyHash)}},
 	}
 
 	err := ValidateTransaction(spendTx, utxos, 100)
 	if err == nil {
-		t.Fatal("output value exceeding MaxMoney should be rejected")
+		t.Fatal("output value exceeding MaxAmount should be rejected")
 	}
 }
 
@@ -727,7 +948,7 @@ func TestDeserializeTooShort(t *testing.T) {
 	if err == nil {
 		t.Fatal("nil data should fail")
 	}
-	// Less than minimum (10 bytes).
+	// Less than minimum (18 bytes).
 	_, err = Deserialize([]byte{0x01, 0x00, 0x00, 0x00})
 	if err == nil {
 		t.Fatal("4-byte data should fail")
@@ -741,11 +962,12 @@ func TestDeserializeTooShort(t *testing.T) {
 func TestDeserializeHugeInputCount(t *testing.T) {
 	var buf bytes.Buffer
 	buf.Write([]byte{0x01, 0x00, 0x00, 0x00}) // version = 1
+	buf.Write([]byte{0x4E, 0x4F, 0x55, 0x53}) // ChainID = NOUS
 	// VarInt 0xFF followed by a huge uint64 for input count.
 	buf.WriteByte(0xFF)
-	buf.Write([]byte{0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00}) // 65536 > MaxTxInputs=10000? No, 65536 > 10000. Yes.
-	// Pad to reach minimum 10 bytes.
-	for buf.Len() < 20 {
+	buf.Write([]byte{0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00}) // 65536 > MaxTxInputs
+	// Pad.
+	for buf.Len() < 30 {
 		buf.WriteByte(0x00)
 	}
 
@@ -756,7 +978,7 @@ func TestDeserializeHugeInputCount(t *testing.T) {
 }
 
 // ============================================================
-// Dust output: value below DustLimit rejected
+// Dust output: value below DustLimit rejected via ValidateTransaction
 // ============================================================
 
 func TestValidateTransactionDustOutput(t *testing.T) {
@@ -768,14 +990,14 @@ func TestValidateTransactionDustOutput(t *testing.T) {
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
 	utxos := NewUTXOSet()
-	fakeOp := OutPoint{TxID: crypto.Sha256([]byte("dust-test")), Index: 0}
-	utxos.Add(fakeOp, TxOutput{Value: 10_0000_0000, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)}, 0, false)
+	fakeOp := OutPoint{TxID: crypto.Sha256([]byte("dust-test2")), Index: 0}
+	utxos.Add(fakeOp, TxOut{Amount: 10_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)}, 0, false)
 
-	// Transaction with output value = DustLimit - 1.
 	dustTx := &Transaction{
-		Version: 1,
-		Inputs:  []TxInput{{PrevOut: fakeOp, Sequence: 0xFFFFFFFF}},
-		Outputs: []TxOutput{{Value: DustLimit - 1, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)}},
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs:  []TxIn{{PrevOut: fakeOp, Sequence: 0xFFFFFFFF}},
+		Outputs: []TxOut{{Amount: DustLimit - 1, PkScript: CreateP2PKHLockScript(pubKeyHash)}},
 	}
 
 	err = ValidateTransaction(dustTx, utxos, 100)
@@ -783,17 +1005,17 @@ func TestValidateTransactionDustOutput(t *testing.T) {
 		t.Fatal("output below dust limit should be rejected")
 	}
 
-	// Transaction with output value = DustLimit should pass (at least the dust check).
+	// Output at exactly DustLimit should pass the dust check.
 	okTx := &Transaction{
-		Version: 1,
-		Inputs:  []TxInput{{PrevOut: fakeOp, Sequence: 0xFFFFFFFF}},
-		Outputs: []TxOutput{{Value: DustLimit, ScriptPubKey: CreateP2PKHLockScript(pubKeyHash)}},
+		Version: 2,
+		ChainID: ChainIDNous,
+		Inputs:  []TxIn{{PrevOut: fakeOp, Sequence: 0xFFFFFFFF}},
+		Outputs: []TxOut{{Amount: DustLimit, PkScript: CreateP2PKHLockScript(pubKeyHash)}},
 	}
 
 	err = ValidateTransaction(okTx, utxos, 100)
-	// This may fail on script verification (unsigned), but should NOT fail on dust.
+	// May fail on script verification (unsigned), but should NOT fail on dust.
 	if err != nil && err.Error() != "" {
-		// Check it's not a dust error.
 		if bytes.Contains([]byte(err.Error()), []byte("dust")) {
 			t.Fatalf("output at dust limit should not be rejected for dust: %v", err)
 		}

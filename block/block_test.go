@@ -320,8 +320,8 @@ func TestGenesisBlock(t *testing.T) {
 	}
 
 	// Reward should be 1 NOUS = 1_00000000 nou.
-	if genesis.Transactions[0].Outputs[0].Value != 1_00000000 {
-		t.Fatalf("genesis reward: want 100000000, got %d", genesis.Transactions[0].Outputs[0].Value)
+	if genesis.Transactions[0].Outputs[0].Amount != 1_00000000 {
+		t.Fatalf("genesis reward: want 100000000, got %d", genesis.Transactions[0].Outputs[0].Amount)
 	}
 
 	// Version.
@@ -357,19 +357,19 @@ func TestBlockWithMultipleTransactions(t *testing.T) {
 	_, pub, _ := crypto.GenerateKeyPair()
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
-	coinbase := tx.NewCoinbase(1, 1_00000000, pubKeyHash, "")
+	coinbase := tx.NewCoinbaseTx(1, 1_00000000, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDNous)
 	regular := &tx.Transaction{
 		Version: 1,
-		Inputs: []tx.TxInput{
+		Inputs: []tx.TxIn{
 			{
-				PrevOut:   tx.OutPoint{TxID: coinbase.TxID(), Index: 0},
-				ScriptSig: []byte{0x01, 0x02},
-				Sequence:  0xFFFFFFFF,
+				PrevOut:         tx.OutPoint{TxID: coinbase.TxID(), Index: 0},
+				SignatureScript: []byte{0x01, 0x02},
+				Sequence:        0xFFFFFFFF,
 			},
 		},
-		Outputs: []tx.TxOutput{
-			{Value: 5000_0000, ScriptPubKey: []byte{0x76}},
-			{Value: 4999_0000, ScriptPubKey: []byte{0x76}},
+		Outputs: []tx.TxOut{
+			{Amount: 5000_0000, PkScript: []byte{0x76}},
+			{Amount: 4999_0000, PkScript: []byte{0x76}},
 		},
 		LockTime: 0,
 	}

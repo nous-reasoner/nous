@@ -137,7 +137,7 @@ func GenesisBlock(pubKeyHash []byte, timestamp uint32) *Block {
 		timestamp = uint32(time.Now().Unix())
 	}
 
-	coinbase := tx.NewCoinbase(0, genesisReward, pubKeyHash, "Cogito, ergo sum")
+	coinbase := tx.NewCoinbaseTx(0, genesisReward, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDNous)
 	txIDs := []crypto.Hash{coinbase.TxID()}
 	merkleRoot := ComputeMerkleRoot(txIDs)
 

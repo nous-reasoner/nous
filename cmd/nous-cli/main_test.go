@@ -233,7 +233,7 @@ func TestSendTransactionFormat(t *testing.T) {
 	utxoSet := tx.NewUTXOSet()
 	utxoSet.Add(
 		tx.OutPoint{TxID: fakeTxID, Index: 0},
-		tx.TxOutput{Value: fakeValue, ScriptPubKey: fakeScript},
+		tx.TxOut{Amount: fakeValue, PkScript: fakeScript},
 		1,
 		false,
 	)
@@ -250,8 +250,8 @@ func TestSendTransactionFormat(t *testing.T) {
 	}
 
 	// Verify transaction structure.
-	if transaction.Version != 1 {
-		t.Fatalf("tx version: want 1, got %d", transaction.Version)
+	if transaction.Version != 2 {
+		t.Fatalf("tx version: want 2, got %d", transaction.Version)
 	}
 	if len(transaction.Inputs) != 1 {
 		t.Fatalf("input count: want 1, got %d", len(transaction.Inputs))
@@ -268,15 +268,15 @@ func TestSendTransactionFormat(t *testing.T) {
 	if len(transaction.Outputs) != 2 {
 		t.Fatalf("output count: want 2, got %d", len(transaction.Outputs))
 	}
-	if transaction.Outputs[0].Value != sendAmount {
-		t.Fatalf("output[0] value: want %d, got %d", sendAmount, transaction.Outputs[0].Value)
+	if transaction.Outputs[0].Amount != sendAmount {
+		t.Fatalf("output[0] value: want %d, got %d", sendAmount, transaction.Outputs[0].Amount)
 	}
-	if transaction.Outputs[1].Value != expectedChange {
-		t.Fatalf("change value: want %d, got %d", expectedChange, transaction.Outputs[1].Value)
+	if transaction.Outputs[1].Amount != expectedChange {
+		t.Fatalf("change value: want %d, got %d", expectedChange, transaction.Outputs[1].Amount)
 	}
 
 	// ScriptSig should be non-empty (signed).
-	if len(transaction.Inputs[0].ScriptSig) == 0 {
+	if len(transaction.Inputs[0].SignatureScript) == 0 {
 		t.Fatal("input scriptSig is empty (unsigned)")
 	}
 

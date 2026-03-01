@@ -211,7 +211,7 @@ func TestUTXORollback(t *testing.T) {
 
 	pkh := make([]byte, 20)
 	pkh[0] = 0x42
-	cb := tx.NewCoinbase(0, 1000, pkh, "test")
+	cb := tx.NewCoinbaseTx(0, 1000, tx.CreateP2PKHLockScript(pkh), tx.ChainIDNous)
 	cbTxID := cb.TxID()
 
 	undo0 := utxos.ApplyBlockWithUndo([]*tx.Transaction{cb}, 0)
@@ -221,16 +221,16 @@ func TestUTXORollback(t *testing.T) {
 
 	spendTx := &tx.Transaction{
 		Version: 1,
-		Inputs: []tx.TxInput{
+		Inputs: []tx.TxIn{
 			{PrevOut: tx.OutPoint{TxID: cbTxID, Index: 0}, Sequence: 0xFFFFFFFF},
 		},
-		Outputs: []tx.TxOutput{
-			{Value: 500, ScriptPubKey: tx.CreateP2PKHLockScript(pkh)},
-			{Value: 500, ScriptPubKey: tx.CreateP2PKHLockScript(pkh)},
+		Outputs: []tx.TxOut{
+			{Amount: 500, PkScript: tx.CreateP2PKHLockScript(pkh)},
+			{Amount: 500, PkScript: tx.CreateP2PKHLockScript(pkh)},
 		},
 	}
 
-	cb1 := tx.NewCoinbase(1, 1000, pkh, "")
+	cb1 := tx.NewCoinbaseTx(1, 1000, tx.CreateP2PKHLockScript(pkh), tx.ChainIDNous)
 	undo1 := utxos.ApplyBlockWithUndo([]*tx.Transaction{cb1, spendTx}, 1)
 
 	if utxos.Count() != 3 {

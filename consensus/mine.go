@@ -41,7 +41,7 @@ func MineBlock(
 			for _, in := range t.Inputs {
 				u := utxoSet.Get(in.PrevOut)
 				if u != nil {
-					s, err := safeAddInt64(inputSum, u.Output.Value)
+					s, err := safeAddInt64(inputSum, u.Output.Amount)
 					if err != nil {
 						return nil, errors.New("consensus: input sum overflow in fee calculation")
 					}
@@ -49,7 +49,7 @@ func MineBlock(
 				}
 			}
 			for _, out := range t.Outputs {
-				s, err := safeAddInt64(outputSum, out.Value)
+				s, err := safeAddInt64(outputSum, out.Amount)
 				if err != nil {
 					return nil, errors.New("consensus: output sum overflow in fee calculation")
 				}
@@ -64,7 +64,7 @@ func MineBlock(
 			}
 		}
 	}
-	coinbase := tx.NewCoinbase(uint32(height), reward+totalFees, pubKeyHash, "")
+	coinbase := tx.NewCoinbaseTx(height, reward+totalFees, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDNous)
 	allTxs := make([]*tx.Transaction, 0, 1+len(txs))
 	allTxs = append(allTxs, coinbase)
 	allTxs = append(allTxs, txs...)
