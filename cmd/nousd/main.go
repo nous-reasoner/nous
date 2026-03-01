@@ -19,12 +19,11 @@ import (
 	"github.com/nous-chain/nous/crypto"
 	"github.com/nous-chain/nous/network"
 	"github.com/nous-chain/nous/node"
-	"github.com/nous-chain/nous/solver"
 	"github.com/nous-chain/nous/storage"
 	"github.com/nous-chain/nous/wallet"
 )
 
-const version = "0.1.0-dev"
+const version = "0.2.0-dev"
 
 func main() {
 	// CLI flags.
@@ -32,15 +31,10 @@ func main() {
 	port := flag.Int("port", network.DefaultPort, "P2P listen port")
 	rpcPort := flag.Int("rpcport", 9332, "JSON-RPC listen port")
 	seeds := flag.String("seeds", "", "comma-separated seed node addresses")
-	mine := flag.Bool("mine", false, "enable mining")
-	minerKeyFile := flag.String("miner-key", "", "path to miner wallet file")
-	minerPassword := flag.String("miner-password", "", "miner wallet password")
+	reason := flag.Bool("reason", false, "enable reasoning (mining)")
+	keyFile := flag.String("key", "", "path to wallet file for reasoning")
+	password := flag.String("password", "", "wallet password")
 	testnet := flag.Bool("testnet", false, "use testnet")
-	solverType := flag.String("solver", "brute", "CSP solver type (ollama, remote, brute)")
-	solverEndpoint := flag.String("solver-endpoint", "", "solver API endpoint")
-	solverModel := flag.String("solver-model", "", "solver model name")
-	solverAPIKey := flag.String("solver-apikey", "", "solver API key (remote mode)")
-	solverProvider := flag.String("solver-provider", "openai", "remote API provider (openai, anthropic, deepseek)")
 	logLevel := flag.String("loglevel", "info", "log level (debug, info, warn, error)")
 	showVersion := flag.Bool("version", false, "show version and exit")
 	flag.Parse()
@@ -69,7 +63,6 @@ func main() {
 	chain := consensus.NewChainState(genesis)
 	if *testnet {
 		chain.Difficulty = consensus.TestnetDifficultyParams()
-		log.Printf("testnet: VDF iterations=%d", chain.Difficulty.VDFIterations)
 	}
 
 	// Save genesis block if not already stored.
@@ -141,26 +134,21 @@ func main() {
 		}
 	}()
 
-	// Start miner if enabled.
-	var miner *node.Miner
-	if *mine {
-		privKey, pubKey, err := loadMinerKey(*minerKeyFile, *minerPassword)
+	// Start reasoner if enabled.
+	var reasoner *node.Reasoner
+	if *reason {
+		_, pubKey, err := loadKey(*keyFile, *password)
 		if err != nil {
-			log.Fatalf("miner key: %v", err)
+			log.Fatalf("key: %v", err)
 		}
-		miner = node.NewMiner(chain, server, store, privKey, pubKey)
-
-		// Configure CSP solver.
-		cspSolver := initSolver(*solverType, *solverEndpoint, *solverModel, *solverAPIKey, *solverProvider)
-		miner.SetSolver(cspSolver)
-
-		miner.Start()
-		log.Printf("mining enabled (solver: %s)", *solverType)
+		reasoner = node.NewReasoner(chain, server, store, pubKey)
+		reasoner.Start()
+		log.Println("reasoning enabled")
 	}
 
 	// Start RPC server.
 	rpcAddr := fmt.Sprintf(":%d", *rpcPort)
-	rpc := node.NewRPCServer(rpcAddr, chain, server, store, miner)
+	rpc := node.NewRPCServer(rpcAddr, chain, server, store, reasoner)
 	rpc.Start()
 
 	// Wait for shutdown signal.
@@ -169,11 +157,11 @@ func main() {
 	sig := <-sigCh
 	log.Printf("received %s, shutting down...", sig)
 
-	// Graceful shutdown: sync → miner → RPC → P2P → save state.
+	// Graceful shutdown: sync → reasoner → RPC → P2P → save state.
 	close(syncQuit)
-	if miner != nil {
-		miner.Stop()
-		log.Println("miner stopped")
+	if reasoner != nil {
+		reasoner.Stop()
+		log.Println("reasoner stopped")
 	}
 	rpc.Stop()
 	log.Println("rpc stopped")
@@ -225,7 +213,7 @@ func trimSpace(s string) string {
 	return s[i:j]
 }
 
-func loadMinerKey(keyFile, password string) (*crypto.PrivateKey, *crypto.PublicKey, error) {
+func loadKey(keyFile, password string) (*crypto.PrivateKey, *crypto.PublicKey, error) {
 	if keyFile != "" {
 		w, err := wallet.LoadFromFile(keyFile, password)
 		if err != nil {
@@ -235,32 +223,10 @@ func loadMinerKey(keyFile, password string) (*crypto.PrivateKey, *crypto.PublicK
 		return kp.PrivateKey, kp.PublicKey, nil
 	}
 	// No wallet file — generate an ephemeral key.
-	log.Println("warning: no miner wallet specified, using ephemeral key")
+	log.Println("warning: no wallet specified, using ephemeral key")
 	priv, pub, err := crypto.GenerateKeyPair()
 	if err != nil {
 		return nil, nil, err
 	}
 	return priv, pub, nil
-}
-
-func initSolver(solverType, endpoint, model, apiKey, provider string) consensus.CSPSolver {
-	mgr := solver.NewSolverManager()
-
-	switch solverType {
-	case "ollama":
-		primary := solver.NewOllamaSolver(endpoint, model)
-		mgr.SetPrimary(primary)
-		mgr.SetFallback(solver.NewBruteForceSolver())
-		log.Printf("solver: ollama (%s @ %s) with brute-force fallback", model, endpoint)
-	case "remote":
-		primary := solver.NewRemoteAPISolver(endpoint, apiKey, model, provider)
-		mgr.SetPrimary(primary)
-		mgr.SetFallback(solver.NewBruteForceSolver())
-		log.Printf("solver: remote %s (%s) with brute-force fallback", provider, model)
-	default:
-		mgr.SetPrimary(solver.NewBruteForceSolver())
-		log.Println("solver: brute-force only")
-	}
-
-	return mgr
 }

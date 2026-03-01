@@ -1,145 +1,137 @@
 package consensus
 
 import (
-	"math"
 	"math/big"
 
 	"github.com/nous-chain/nous/crypto"
 )
 
-// AdjustmentWindow is the number of recent blocks used for adjustment.
-const AdjustmentWindow = 144
+// ASERTHalflife is the time in seconds for the target to halve or double
+// when blocks deviate from the ideal schedule. 12 hours.
+const ASERTHalflife int64 = 43200
 
-// MinVDFIterations is the absolute minimum VDF iteration count.
-// 1024 squarings ≈ milliseconds — prevents VDF from becoming trivially fast.
-const MinVDFIterations uint64 = 1 << 10
+// IdealBlockTime is the target interval between blocks in seconds.
+const IdealBlockTime int64 = 150
 
-// BlockInfo carries the minimal per-block data needed for difficulty adjustment.
-type BlockInfo struct {
+// ASERTAnchor is the fixed reference point for the ASERT calculation.
+// Typically set from the genesis block.
+type ASERTAnchor struct {
+	Height    uint64
 	Timestamp uint32
+	Target    crypto.Hash
 }
 
-// AdjustDifficulty computes new difficulty parameters based on recent block history.
-// chain must contain the most recent AdjustmentWindow blocks (oldest first).
-// currentHeight is the height at which the new params take effect.
-func AdjustDifficulty(current *DifficultyParams, chain []BlockInfo, currentHeight uint64) *DifficultyParams {
-	n := len(chain)
-	if n < 2 {
-		return copyParams(current)
+// AdjustDifficultyASERT computes the PoW target for a block at the given
+// height and timestamp using the ASERT algorithm.
+//
+//	target = anchor_target × 2^((timestamp - expected_timestamp) / halflife)
+//	expected_timestamp = anchor.Timestamp + IdealBlockTime × (height - anchor.Height)
+//
+// The exponent is decomposed into an integer quotient (applied via bit shift)
+// and a fractional remainder (applied via a 3rd-order Taylor expansion of 2^x).
+// All arithmetic is pure big.Int — no floating point.
+func AdjustDifficultyASERT(anchor *ASERTAnchor, height uint64, timestamp uint32) crypto.Hash {
+	expectedTimestamp := int64(anchor.Timestamp) + IdealBlockTime*int64(height-anchor.Height)
+	timeDiff := int64(timestamp) - expectedTimestamp
+
+	// Floor-divide timeDiff by halflife so that 0 <= remainder < halflife.
+	quotient := timeDiff / ASERTHalflife
+	remainder := timeDiff % ASERTHalflife
+	if remainder < 0 {
+		quotient--
+		remainder += ASERTHalflife
 	}
 
-	// Actual time span.
-	actualSpan := int64(chain[n-1].Timestamp) - int64(chain[0].Timestamp)
-	if actualSpan <= 0 {
-		actualSpan = 1
+	anchorTarget := new(big.Int).SetBytes(anchor.Target[:])
+
+	// Apply 2^quotient via bit shifting.
+	if quotient >= 0 {
+		anchorTarget = shiftTargetLeft(anchorTarget, uint(quotient))
+	} else {
+		anchorTarget = shiftTargetRight(anchorTarget, uint(-quotient))
 	}
-	expectedSpan := int64(n-1) * int64(TargetBlockTime)
-	ratio := float64(actualSpan) / float64(expectedSpan)
 
-	next := copyParams(current)
+	// Apply 2^(remainder/halflife) via rational approximation.
+	anchorTarget = adjustTargetFraction(anchorTarget, remainder, ASERTHalflife)
 
-	// --- Layer 1: VDF iterations ---
-	next.VDFIterations = adjustVDF(current.VDFIterations, ratio)
+	// Clamp to [1, 2^256 - 1].
+	maxTarget := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+	if anchorTarget.Cmp(maxTarget) > 0 {
+		anchorTarget = maxTarget
+	}
+	if anchorTarget.Sign() <= 0 {
+		anchorTarget.SetInt64(1)
+	}
 
-	// --- Layer 2: CSP difficulty (deterministic, height-based) ---
-	next.CSPDifficulty = CSPParamsForHeight(currentHeight)
-
-	// --- Layer 3: PoW target ---
-	next.PoWTarget = adjustPoWTarget(current.PoWTarget, ratio)
-
-	return next
-}
-
-func adjustVDF(current uint64, ratio float64) uint64 {
-	// Inverse ratio: if blocks are too fast (ratio < 1), increase iterations.
-	adjustment := 1.0 / ratio
-	adjustment = clampAdjustment(adjustment, ratio)
-
-	newT := float64(current) * adjustment
-	result := uint64(math.Round(newT))
-	if result < MinVDFIterations {
-		result = MinVDFIterations
+	var result crypto.Hash
+	b := anchorTarget.Bytes()
+	if len(b) <= 32 {
+		copy(result[32-len(b):], b)
 	}
 	return result
 }
 
-// CSPParamsForHeight returns the CSP parameters for a given block height.
-// Base growth: base_variables = 12 + (height / CSPGrowthInterval), ratio = 1.4.
-// CSPUpgrades can override these defaults at specific activation heights.
-func CSPParamsForHeight(height uint64) CSPDifficultyParams {
-	era := height / CSPGrowthInterval
-	vars := 12 + int(era)
-	ratio := 1.4
-	for _, u := range CSPUpgrades {
-		if height >= u.ActivationHeight {
-			vars = u.BaseVariables
-			ratio = u.ConstraintRatio
-		}
-	}
-	return CSPDifficultyParams{
-		BaseVariables:   vars,
-		ConstraintRatio: ratio,
-	}
+// shiftTargetLeft multiplies target by 2^n (makes mining easier).
+func shiftTargetLeft(target *big.Int, n uint) *big.Int {
+	return new(big.Int).Lsh(target, n)
 }
 
-func adjustPoWTarget(current crypto.Hash, ratio float64) crypto.Hash {
-	// ratio > 1 means blocks are too slow → make target easier (larger).
-	// ratio < 1 means blocks are too fast → make target harder (smaller).
-	adjustment := ratio
-	adjustment = clampAdjustment(adjustment, ratio)
-
-	t := new(big.Int).SetBytes(current[:])
-	// Multiply by adjustment using fixed-point: (t * adjNum) / adjDen.
-	adjNum := int64(math.Round(adjustment * 10000))
-	if adjNum <= 0 {
-		adjNum = 1
+// shiftTargetRight divides target by 2^n (makes mining harder).
+// The result is clamped to a minimum of 1.
+func shiftTargetRight(target *big.Int, n uint) *big.Int {
+	result := new(big.Int).Rsh(target, n)
+	if result.Sign() <= 0 {
+		result.SetInt64(1)
 	}
-	t.Mul(t, big.NewInt(adjNum))
-	t.Div(t, big.NewInt(10000))
-
-	// Ensure target doesn't go to zero.
-	if t.Sign() <= 0 {
-		t.SetInt64(1)
-	}
-
-	// Cap at maximum target.
-	maxTarget := new(big.Int).Lsh(big.NewInt(1), 256)
-	maxTarget.Sub(maxTarget, big.NewInt(1))
-	if t.Cmp(maxTarget) > 0 {
-		t = maxTarget
-	}
-
-	var h crypto.Hash
-	b := t.Bytes()
-	if len(b) <= 32 {
-		copy(h[32-len(b):], b)
-	}
-	return h
+	return result
 }
 
-// clampAdjustment applies the ±25% normal cap and -50% extreme emergency cap.
-// ratio is actualSpan/expectedSpan.
-// adjustment is the raw multiplier to apply to the difficulty parameter.
-func clampAdjustment(adjustment float64, ratio float64) float64 {
-	// Extreme case: blocks are 10x slower than target → allow single -50% reduction.
-	if ratio >= 10.0 {
-		if adjustment > 2.0 {
-			adjustment = 2.0 // cap at doubling the target (50% easier)
-		}
-		return adjustment
+// adjustTargetFraction computes target × 2^(remainder/halflife) using a
+// 3rd-order Taylor expansion of 2^x = e^(x·ln2):
+//
+//	2^x ≈ 1 + u + u²/2 + u³/6    where u = x·ln(2)
+//
+// All arithmetic uses big.Int with a 10^18 precision factor.
+func adjustTargetFraction(target *big.Int, remainder, halflife int64) *big.Int {
+	if remainder == 0 {
+		return target
 	}
 
-	// Normal cap: ±25%.
-	if adjustment > 1.25 {
-		adjustment = 1.25
-	}
-	if adjustment < 0.75 {
-		adjustment = 0.75
-	}
-	return adjustment
-}
+	// Precision factor: 10^18.
+	precision := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 
-func copyParams(p *DifficultyParams) *DifficultyParams {
-	cp := *p
-	return &cp
+	// ln(2) scaled by 10^18 ≈ 693147180559945309.
+	ln2 := big.NewInt(693147180559945309)
+
+	// x = remainder / halflife, scaled by precision.
+	xScaled := new(big.Int).Mul(big.NewInt(remainder), precision)
+	xScaled.Div(xScaled, big.NewInt(halflife))
+
+	// u = x · ln(2), scaled by precision.
+	u := new(big.Int).Mul(xScaled, ln2)
+	u.Div(u, precision)
+
+	// term1 = u                              (scaled by precision)
+	term1 := new(big.Int).Set(u)
+
+	// term2 = u² / (2 · precision)           (scaled by precision)
+	term2 := new(big.Int).Mul(u, u)
+	term2.Div(term2, new(big.Int).Mul(big.NewInt(2), precision))
+
+	// term3 = u³ / (6 · precision²)          (scaled by precision)
+	term3 := new(big.Int).Mul(u, u)
+	term3.Mul(term3, u)
+	precSq := new(big.Int).Mul(precision, precision)
+	term3.Div(term3, new(big.Int).Mul(big.NewInt(6), precSq))
+
+	// factor = precision + term1 + term2 + term3 = (1 + u + u²/2 + u³/6) · precision
+	factor := new(big.Int).Add(precision, term1)
+	factor.Add(factor, term2)
+	factor.Add(factor, term3)
+
+	// result = target × factor / precision
+	result := new(big.Int).Mul(target, factor)
+	result.Div(result, precision)
+
+	return result
 }

@@ -42,7 +42,7 @@ type RPCServer struct {
 	chain  *consensus.ChainState
 	server *network.Server
 	store  *storage.BlockStore
-	miner  *Miner
+	reasoner *Reasoner
 	http   *http.Server
 	addr   string // actual bound address after Start
 }
@@ -53,13 +53,13 @@ func NewRPCServer(
 	chain *consensus.ChainState,
 	server *network.Server,
 	store *storage.BlockStore,
-	miner *Miner,
+	reasoner *Reasoner,
 ) *RPCServer {
 	rpc := &RPCServer{
-		chain:  chain,
-		server: server,
-		store:  store,
-		miner:  miner,
+		chain:    chain,
+		server:   server,
+		store:    store,
+		reasoner: reasoner,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rpc", rpc.handleRPC)
@@ -170,7 +170,7 @@ func (r *RPCServer) handleGetBlock(params json.RawMessage) (interface{}, *rpcErr
 		"prev_hash":    hex.EncodeToString(blk.Header.PrevBlockHash[:]),
 		"merkle_root":  hex.EncodeToString(blk.Header.MerkleRoot[:]),
 		"difficulty":   blk.Header.DifficultyBits,
-		"nonce":        blk.Header.Nonce,
+		"seed":         blk.Header.Seed,
 		"tx_count":     len(blk.Transactions),
 		"transactions": txIDs,
 	}, nil
@@ -260,9 +260,8 @@ func (r *RPCServer) handleGetMiningInfo() interface{} {
 	return map[string]interface{}{
 		"height":          r.chain.Height,
 		"difficulty_bits": consensus.TargetToCompact(diff.PoWTarget),
-		"vdf_iterations":  diff.VDFIterations,
 		"mempool_size":    r.server.Mempool().Count(),
-		"mining":          r.miner != nil && r.miner.IsRunning(),
+		"reasoning":       r.reasoner != nil && r.reasoner.IsRunning(),
 	}
 }
 

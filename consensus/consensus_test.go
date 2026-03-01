@@ -1,32 +1,23 @@
 package consensus
 
 import (
+	"math/big"
 	"testing"
 	"time"
 
 	"github.com/nous-chain/nous/block"
 	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/csp"
+	"github.com/nous-chain/nous/sat"
 	"github.com/nous-chain/nous/tx"
-	"github.com/nous-chain/nous/vdf"
 )
 
-// testVDFT is a small T value for fast tests (VDF is slow at real values).
-const testVDFT = 100
-
-// testParams returns difficulty params with very easy PoW and small VDF T.
+// testParams returns difficulty params with trivially easy PoW.
 func testParams() *DifficultyParams {
-	// All-0xFF target = trivially easy PoW.
 	var easyTarget crypto.Hash
 	for i := range easyTarget {
 		easyTarget[i] = 0xFF
 	}
 	return &DifficultyParams{
-		VDFIterations: testVDFT,
-		CSPDifficulty: CSPDifficultyParams{
-			BaseVariables:   5,
-			ConstraintRatio: 1.2,
-		},
 		PoWTarget: easyTarget,
 	}
 }
@@ -38,17 +29,16 @@ func makeGenesis(pubKeyHash []byte) *block.Block {
 	return block.GenesisBlock(pubKeyHash, uint32(time.Now().Unix())-60)
 }
 
-// mineTestBlock is a helper that mines a block with small VDF T and easy PoW.
+// mineTestBlock is a helper that mines a block with easy PoW.
 func mineTestBlock(
 	t *testing.T,
 	prevHeader *block.Header,
-	priv *crypto.PrivateKey,
-	pub *crypto.PublicKey,
+	pubKeyHash []byte,
 	params *DifficultyParams,
 	height uint64,
 ) *block.Block {
 	t.Helper()
-	blk, err := MineBlock(prevHeader, nil, priv, pub, params, height, nil)
+	blk, err := MineBlock(prevHeader, nil, pubKeyHash, params, height, nil)
 	if err != nil {
 		t.Fatalf("MineBlock failed at height %d: %v", height, err)
 	}
@@ -56,7 +46,7 @@ func mineTestBlock(
 }
 
 // ============================================================
-// 1. BlockReward: constant emission until MaxTotalSupply
+// 1. BlockReward: constant 1 NOUS (infinite supply)
 // ============================================================
 
 func TestBlockRewardConstantEmission(t *testing.T) {
@@ -64,13 +54,11 @@ func TestBlockRewardConstantEmission(t *testing.T) {
 		height uint64
 		reward int64
 	}{
-		{0, 10_0000_0000},                 // first block
-		{1, 10_0000_0000},                 // second block
-		{1_050_000, 10_0000_0000},         // still constant (no halving)
-		{2_099_999_999, 10_0000_0000},     // last full reward block
-		{2_100_000_000, 0},                // supply exhausted
-		{2_100_000_001, 0},                // well past cap
-		{10_000_000_000, 0},               // far future
+		{0, 1_00000000},
+		{1, 1_00000000},
+		{1_050_000, 1_00000000},
+		{2_100_000_000, 1_00000000},
+		{10_000_000_000, 1_00000000},
 	}
 	for _, tc := range tests {
 		got := BlockReward(tc.height)
@@ -81,170 +69,99 @@ func TestBlockRewardConstantEmission(t *testing.T) {
 }
 
 // ============================================================
-// 2. Difficulty adjustment: blocks too fast → difficulty up
+// 2. ASERT: blocks too fast → target decreases (harder)
 // ============================================================
 
-func TestAdjustDifficultyBlocksTooFast(t *testing.T) {
-	params := DefaultDifficultyParams()
-
-	// Simulate 144 blocks in half the expected time.
-	chain := make([]BlockInfo, 145)
-	expectedSpan := 144 * TargetBlockTime
-	actualSpan := expectedSpan / 2 // 2x too fast
-	for i := range chain {
-		chain[i] = BlockInfo{
-			Timestamp: uint32(1000000 + uint64(i)*actualSpan/144),
-		}
+func TestASERTBlocksTooFast(t *testing.T) {
+	anchor := &ASERTAnchor{
+		Height:    0,
+		Timestamp: 1000000,
+		Target:    DefaultDifficultyParams().PoWTarget,
 	}
 
-	next := AdjustDifficulty(params, chain, 144)
+	// Block at height 100, but timestamp is only 50s after genesis.
+	// Expected timestamp = 1000000 + 150*100 = 1015000.
+	// Actual = 1000050 → timeDiff = -14950 (blocks way too fast).
+	target := AdjustDifficultyASERT(anchor, 100, 1000050)
 
-	// VDF iterations should increase (blocks too fast → need more work).
-	if next.VDFIterations <= params.VDFIterations {
-		t.Fatalf("VDF iterations should increase: was %d, got %d",
-			params.VDFIterations, next.VDFIterations)
-	}
-
-	// PoW target should decrease (harder).
-	if next.PoWTarget.Compare(params.PoWTarget) >= 0 {
-		t.Fatal("PoW target should decrease (harder) when blocks are too fast")
+	if target.Compare(anchor.Target) >= 0 {
+		t.Fatal("target should decrease (harder) when blocks are too fast")
 	}
 }
 
 // ============================================================
-// 3. Difficulty adjustment: blocks too slow → difficulty down
+// 3. ASERT: blocks too slow → target increases (easier)
 // ============================================================
 
-func TestAdjustDifficultyBlocksTooSlow(t *testing.T) {
-	params := DefaultDifficultyParams()
-
-	// Simulate 144 blocks in double the expected time.
-	chain := make([]BlockInfo, 145)
-	expectedSpan := 144 * TargetBlockTime
-	actualSpan := expectedSpan * 2 // 2x too slow
-	for i := range chain {
-		chain[i] = BlockInfo{
-			Timestamp: uint32(1000000 + uint64(i)*actualSpan/144),
-		}
+func TestASERTBlocksTooSlow(t *testing.T) {
+	anchor := &ASERTAnchor{
+		Height:    0,
+		Timestamp: 1000000,
+		Target:    DefaultDifficultyParams().PoWTarget,
 	}
 
-	next := AdjustDifficulty(params, chain, 144)
+	// Block at height 100, but timestamp is 2x the expected time.
+	// Expected timestamp = 1000000 + 150*100 = 1015000.
+	// Use 1030000 → timeDiff = +15000 (blocks way too slow).
+	target := AdjustDifficultyASERT(anchor, 100, 1030000)
 
-	// VDF iterations should decrease.
-	if next.VDFIterations >= params.VDFIterations {
-		t.Fatalf("VDF iterations should decrease: was %d, got %d",
-			params.VDFIterations, next.VDFIterations)
-	}
-
-	// PoW target should increase (easier).
-	if next.PoWTarget.Compare(params.PoWTarget) <= 0 {
-		t.Fatal("PoW target should increase (easier) when blocks are too slow")
+	if target.Compare(anchor.Target) <= 0 {
+		t.Fatal("target should increase (easier) when blocks are too slow")
 	}
 }
 
 // ============================================================
-// 4. Extreme case triggers 50% reduction
+// 4. ASERT: on-schedule blocks produce near-anchor target
 // ============================================================
 
-func TestAdjustDifficultyExtreme(t *testing.T) {
-	params := DefaultDifficultyParams()
-
-	// Simulate 144 blocks in 15x the expected time (extreme).
-	chain := make([]BlockInfo, 145)
-	expectedSpan := 144 * TargetBlockTime
-	actualSpan := expectedSpan * 15
-	for i := range chain {
-		chain[i] = BlockInfo{
-			Timestamp: uint32(1000000 + uint64(i)*actualSpan/144),
-		}
+func TestASERTOnSchedule(t *testing.T) {
+	anchor := &ASERTAnchor{
+		Height:    0,
+		Timestamp: 1000000,
+		Target:    DefaultDifficultyParams().PoWTarget,
 	}
 
-	next := AdjustDifficulty(params, chain, 144)
+	// Block at height 100, exactly on schedule.
+	// Expected = 1000000 + 150*100 = 1015000.
+	target := AdjustDifficultyASERT(anchor, 100, 1015000)
 
-	// With 15x slowdown, PoW target increase should exceed 25% (normal cap).
-	// The extreme cap allows up to 2x (100% increase).
-	targetRatio := float64(0)
-	// Compare as big ints.
-	import_big := func(h crypto.Hash) float64 {
-		var sum float64
-		for _, b := range h {
-			sum = sum*256 + float64(b)
-		}
-		return sum
-	}
-	oldT := import_big(params.PoWTarget)
-	newT := import_big(next.PoWTarget)
-	if oldT > 0 {
-		targetRatio = newT / oldT
-	}
-
-	// Should be more than 1.25 (normal cap) but at most 2.0.
-	if targetRatio <= 1.25 {
-		t.Fatalf("extreme case should exceed 25%% cap: ratio = %.2f", targetRatio)
-	}
-	if targetRatio > 2.05 { // small tolerance for rounding
-		t.Fatalf("extreme case should not exceed 2x: ratio = %.2f", targetRatio)
+	// Target should equal the anchor target (timeDiff = 0).
+	if target != anchor.Target {
+		t.Fatalf("on-schedule target should equal anchor target, got %x vs %x",
+			target[:8], anchor.Target[:8])
 	}
 }
 
 // ============================================================
-// 5. ±25% cap enforced
+// 5. ASERT: halflife doubling/halving
 // ============================================================
 
-func TestAdjustDifficulty25PercentCap(t *testing.T) {
-	params := DefaultDifficultyParams()
-
-	// 5x too fast → ratio=0.2, adjustment would be 5x, but capped at 1.25.
-	chain := make([]BlockInfo, 145)
-	expectedSpan := 144 * TargetBlockTime
-	actualSpan := expectedSpan / 5
-	for i := range chain {
-		chain[i] = BlockInfo{
-			Timestamp: uint32(1000000 + uint64(i)*actualSpan/144),
-		}
+func TestASERTHalflife(t *testing.T) {
+	anchor := &ASERTAnchor{
+		Height:    0,
+		Timestamp: 1000000,
+		Target:    DefaultDifficultyParams().PoWTarget,
 	}
 
-	next := AdjustDifficulty(params, chain, 144)
+	// If timestamp is exactly one halflife ahead of schedule,
+	// target should approximately double.
+	// Expected for height 1 = 1000000 + 150 = 1000150.
+	// Set timestamp = 1000150 + 43200 = 1043350.
+	target := AdjustDifficultyASERT(anchor, 1, 1043350)
 
-	// VDF increase should be capped at 25%.
-	maxExpected := float64(params.VDFIterations) * 1.26 // slight tolerance
-	if float64(next.VDFIterations) > maxExpected {
-		t.Fatalf("VDF increase should be capped at ~25%%: was %d, got %d (max ~%.0f)",
-			params.VDFIterations, next.VDFIterations, maxExpected)
+	anchorBig := new(big.Int).SetBytes(anchor.Target[:])
+	targetBig := new(big.Int).SetBytes(target[:])
+
+	// ratio = target / anchor should be ~2.0.
+	// Use fixed-point: ratio*1000 = target*1000/anchor.
+	ratio1000 := new(big.Int).Mul(targetBig, big.NewInt(1000))
+	ratio1000.Div(ratio1000, anchorBig)
+
+	// Allow 1% tolerance: 1980..2020.
+	r := ratio1000.Int64()
+	if r < 1980 || r > 2020 {
+		t.Fatalf("expected ~2.0x ratio after +1 halflife, got %.3f", float64(r)/1000)
 	}
-}
-
-// ============================================================
-// 5. VDF minimum floor: extreme reduction cannot go below MinVDFIterations
-// ============================================================
-
-func TestAdjustVDFMinimumFloor(t *testing.T) {
-	// Start with a small VDF iteration count (2000).
-	params := DefaultDifficultyParams()
-	params.VDFIterations = 2000
-
-	// Simulate extreme slowdown: 15x expected time.
-	// adjustment = 1/15 ≈ 0.067, so 2000 * 0.067 ≈ 133 < MinVDFIterations.
-	chain := make([]BlockInfo, 145)
-	expectedSpan := 144 * TargetBlockTime
-	actualSpan := expectedSpan * 15
-	for i := range chain {
-		chain[i] = BlockInfo{
-			Timestamp: uint32(1000000 + uint64(i)*actualSpan/144),
-		}
-	}
-
-	next := AdjustDifficulty(params, chain, 144)
-
-	if next.VDFIterations < MinVDFIterations {
-		t.Fatalf("VDF iterations fell below MinVDFIterations: got %d, min %d",
-			next.VDFIterations, MinVDFIterations)
-	}
-	if next.VDFIterations != MinVDFIterations {
-		t.Fatalf("VDF iterations should be clamped to MinVDFIterations: got %d, want %d",
-			next.VDFIterations, MinVDFIterations)
-	}
-	t.Logf("VDF floor enforced: 2000 → %d (min=%d)", next.VDFIterations, MinVDFIterations)
 }
 
 // ============================================================
@@ -252,7 +169,7 @@ func TestAdjustVDFMinimumFloor(t *testing.T) {
 // ============================================================
 
 func TestMineBlockAndValidate(t *testing.T) {
-	priv, pub, err := crypto.GenerateKeyPair()
+	_, pub, err := crypto.GenerateKeyPair()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +177,7 @@ func TestMineBlockAndValidate(t *testing.T) {
 	genesis := makeGenesis(pubKeyHash)
 	params := testParams()
 
-	blk := mineTestBlock(t, &genesis.Header, priv, pub, params, 1)
+	blk := mineTestBlock(t, &genesis.Header, pubKeyHash, params, 1)
 
 	utxos := tx.NewUTXOSet()
 	utxos.ApplyBlock(genesis.Transactions, 0)
@@ -271,11 +188,11 @@ func TestMineBlockAndValidate(t *testing.T) {
 }
 
 // ============================================================
-// 7. Validation rejects tampered VDF proof
+// 7. Validation rejects tampered SAT solution
 // ============================================================
 
-func TestValidateRejectsTamperedVDF(t *testing.T) {
-	priv, pub, err := crypto.GenerateKeyPair()
+func TestValidateRejectsTamperedSAT(t *testing.T) {
+	_, pub, err := crypto.GenerateKeyPair()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,38 +200,11 @@ func TestValidateRejectsTamperedVDF(t *testing.T) {
 	genesis := makeGenesis(pubKeyHash)
 	params := testParams()
 
-	blk := mineTestBlock(t, &genesis.Header, priv, pub, params, 1)
+	blk := mineTestBlock(t, &genesis.Header, pubKeyHash, params, 1)
 
-	// Tamper with VDF proof.
-	blk.Header.VDFProof[len(blk.Header.VDFProof)/2] ^= 0x01
-
-	utxos := tx.NewUTXOSet()
-	utxos.ApplyBlock(genesis.Transactions, 0)
-
-	err = ValidateBlock(blk, &genesis.Header, params, utxos, 1)
-	if err == nil {
-		t.Fatal("should reject tampered VDF proof")
-	}
-}
-
-// ============================================================
-// 8. Validation rejects tampered CSP solution
-// ============================================================
-
-func TestValidateRejectsTamperedCSP(t *testing.T) {
-	priv, pub, err := crypto.GenerateKeyPair()
-	if err != nil {
-		t.Fatal(err)
-	}
-	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
-	genesis := makeGenesis(pubKeyHash)
-	params := testParams()
-
-	blk := mineTestBlock(t, &genesis.Header, priv, pub, params, 1)
-
-	// Tamper with CSP solution (change a value).
-	if len(blk.CSPSolution.Values) > 0 {
-		blk.CSPSolution.Values[0] += 999
+	// Tamper with SAT solution.
+	if len(blk.SATSolution) > 0 {
+		blk.SATSolution[0] = !blk.SATSolution[0]
 	}
 
 	utxos := tx.NewUTXOSet()
@@ -322,16 +212,16 @@ func TestValidateRejectsTamperedCSP(t *testing.T) {
 
 	err = ValidateBlock(blk, &genesis.Header, params, utxos, 1)
 	if err == nil {
-		t.Fatal("should reject tampered CSP solution")
+		t.Fatal("should reject tampered SAT solution")
 	}
 }
 
 // ============================================================
-// 9. Validation rejects bad nonce (PoW doesn't meet target)
+// 8. Validation rejects bad PoW (hash doesn't meet target)
 // ============================================================
 
-func TestValidateRejectsBadNonce(t *testing.T) {
-	priv, pub, err := crypto.GenerateKeyPair()
+func TestValidateRejectsBadPoW(t *testing.T) {
+	_, pub, err := crypto.GenerateKeyPair()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,14 +236,13 @@ func TestValidateRejectsBadNonce(t *testing.T) {
 	hardTarget[2] = 0x01 // very small target
 	params.PoWTarget = hardTarget
 
-	// Mine with easy target first (to get a valid block), then validate with hard.
+	// Mine with easy target first, then validate with hard.
 	easyParams := testParams()
-	blk := mineTestBlock(t, &genesis.Header, priv, pub, easyParams, 1)
+	blk := mineTestBlock(t, &genesis.Header, pubKeyHash, easyParams, 1)
 
 	utxos := tx.NewUTXOSet()
 	utxos.ApplyBlock(genesis.Transactions, 0)
 
-	// The block was mined with easy target; validating with hard target should fail.
 	err = ValidateBlock(blk, &genesis.Header, params, utxos, 1)
 	if err == nil {
 		t.Fatal("should reject block that doesn't meet hard PoW target")
@@ -361,11 +250,11 @@ func TestValidateRejectsBadNonce(t *testing.T) {
 }
 
 // ============================================================
-// 10. Validation rejects excess coinbase reward
+// 9. Validation rejects excess coinbase reward
 // ============================================================
 
 func TestValidateRejectsExcessCoinbase(t *testing.T) {
-	priv, pub, err := crypto.GenerateKeyPair()
+	_, pub, err := crypto.GenerateKeyPair()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,10 +262,10 @@ func TestValidateRejectsExcessCoinbase(t *testing.T) {
 	genesis := makeGenesis(pubKeyHash)
 	params := testParams()
 
-	blk := mineTestBlock(t, &genesis.Header, priv, pub, params, 1)
+	blk := mineTestBlock(t, &genesis.Header, pubKeyHash, params, 1)
 
 	// Inflate coinbase reward.
-	blk.Transactions[0].Outputs[0].Value = 20_0000_0000 // 20 NOUS instead of 10
+	blk.Transactions[0].Outputs[0].Value = 2_00000000 // 2 NOUS instead of 1
 
 	utxos := tx.NewUTXOSet()
 	utxos.ApplyBlock(genesis.Transactions, 0)
@@ -392,7 +281,6 @@ func TestValidateRejectsExcessCoinbase(t *testing.T) {
 // ============================================================
 
 func TestCompactTargetRoundTrip(t *testing.T) {
-	// Standard Bitcoin genesis target.
 	bits := uint32(0x1d00ffff)
 	target := CompactToTarget(bits)
 	if target.IsZero() {
@@ -407,85 +295,45 @@ func TestCompactTargetRoundTrip(t *testing.T) {
 }
 
 // ============================================================
-// Helper: HashSolutionValues deterministic
+// SAT solution is valid and verifiable
 // ============================================================
 
-func TestHashSolutionDeterministic(t *testing.T) {
-	vals := []int{1, 2, 3, 4, 5}
-	h1 := HashSolutionValues(vals)
-	h2 := HashSolutionValues(vals)
-	if h1 != h2 {
-		t.Fatal("HashSolutionValues should be deterministic")
-	}
-	if h1.IsZero() {
-		t.Fatal("hash should not be zero")
-	}
-}
-
-// ============================================================
-// Helper: BruteForceSolve works for generated problems
-// ============================================================
-
-func TestBruteForceSolve(t *testing.T) {
-	// Create a tiny hand-crafted problem that brute force can handle.
-	prob := &csp.Problem{
-		Variables: []csp.Variable{
-			{Name: "x0", Lower: 1, Upper: 3},
-			{Name: "x1", Lower: 1, Upper: 3},
-		},
-		Constraints: []csp.Constraint{
-			// 1*X + 1*Y = 4 → (1,3), (2,2), (3,1)
-			{Type: csp.CtLinear, Vars: []int{0, 1}, Params: []int{1, 1, 4}},
-		},
-		Level: csp.Standard,
-	}
-
-	sol := BruteForceSolve(prob)
-	if sol == nil {
-		t.Fatal("BruteForceSolve should find a solution for a tiny problem")
-	}
-	if !csp.VerifySolution(prob, sol) {
-		t.Fatal("brute force solution should verify")
-	}
-	if sol.Values[0]+sol.Values[1] != 4 {
-		t.Fatalf("expected sum 4, got %d+%d=%d", sol.Values[0], sol.Values[1], sol.Values[0]+sol.Values[1])
-	}
-}
-
-// ============================================================
-// Integration: VDF + CSP pipeline
-// ============================================================
-
-func TestVDFCSPPipeline(t *testing.T) {
-	// Simulate the mining pipeline with small T.
-	_, pub, _ := crypto.GenerateKeyPair()
-	prevHash := crypto.Sha256([]byte("prev"))
-	input := vdf.MakeInput(prevHash, pub)
-
-	vdfParams := vdf.NewParams(testVDFT)
-	output, err := vdf.Evaluate(vdfParams, input)
+func TestMineBlockProducesValidSAT(t *testing.T) {
+	_, pub, err := crypto.GenerateKeyPair()
 	if err != nil {
 		t.Fatal(err)
 	}
+	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
+	genesis := makeGenesis(pubKeyHash)
+	params := testParams()
 
-	// Generate CSP from VDF output.
-	seed := crypto.Sha256(output.Y)
-	prob, sol := csp.GenerateProblem(seed, csp.Standard)
+	blk := mineTestBlock(t, &genesis.Header, pubKeyHash, params, 1)
 
-	if !csp.VerifySolution(prob, sol) {
-		t.Fatal("candidate solution should verify")
+	// Block must contain a SAT solution.
+	if len(blk.SATSolution) == 0 {
+		t.Fatal("block has no SAT solution")
 	}
 
-	// Solution hash should be deterministic.
-	h1 := HashSolutionValues(sol.Values)
-	h2 := HashSolutionValues(sol.Values)
-	if h1 != h2 {
-		t.Fatal("solution hash should be deterministic")
+	// Regenerate the formula and verify.
+	prevHash := genesis.Header.Hash()
+	satSeed := makeSATSeed(prevHash, blk.Header.Seed)
+	formula := sat.GenerateFormula(satSeed, SATVariables, SATClausesRatio)
+
+	if !sat.Verify(formula, blk.SATSolution) {
+		t.Fatal("SAT solution does not verify against regenerated formula")
+	}
+
+	// Verify solution hash in header matches.
+	solBytes := sat.SerializeAssignment(blk.SATSolution)
+	solHash := crypto.Sha256(solBytes)
+	if solHash != blk.Header.SATSolutionHash {
+		t.Fatalf("SAT solution hash mismatch: header=%x computed=%x",
+			blk.Header.SATSolutionHash[:8], solHash[:8])
 	}
 }
 
 // ============================================================
-// 14. Cross-tx double-spend within a single block is rejected
+// Cross-tx double-spend within a single block is rejected
 // ============================================================
 
 func TestValidateRejectsCrossTxDoubleSpend(t *testing.T) {
@@ -498,7 +346,7 @@ func TestValidateRejectsCrossTxDoubleSpend(t *testing.T) {
 	// Mine block 1 so miner A has a spendable UTXO.
 	genesis := makeGenesis(pkhA)
 	params := testParams()
-	blk1 := mineTestBlock(t, &genesis.Header, privA, pubA, params, 1)
+	blk1 := mineTestBlock(t, &genesis.Header, pkhA, params, 1)
 
 	utxos := tx.NewUTXOSet()
 	utxos.ApplyBlock(genesis.Transactions, 0)
@@ -527,12 +375,11 @@ func TestValidateRejectsCrossTxDoubleSpend(t *testing.T) {
 		return spendTx
 	}
 
-	spendA := buildSpendTx(5_0000_0000)
-	spendB := buildSpendTx(4_0000_0000)
+	spendA := buildSpendTx(5000_0000)
+	spendB := buildSpendTx(4000_0000)
 
-	// Mine block 2 with both txs included. We inject them manually
-	// by mining a valid block first, then replacing transactions.
-	blk2 := mineTestBlock(t, &blk1.Header, privA, pubA, params, 2)
+	// Mine block 2 with both txs included.
+	blk2 := mineTestBlock(t, &blk1.Header, pkhA, params, 2)
 
 	// Replace block 2's transactions: keep coinbase, add two double-spends.
 	blk2.Transactions = append(blk2.Transactions[:1], spendA, spendB)
@@ -558,12 +405,9 @@ func TestValidateRejectsOversizedBlock(t *testing.T) {
 	genesis := makeGenesis(make([]byte, 20))
 	chain := NewChainState(genesis)
 	params := DefaultDifficultyParams()
-	params.VDFIterations = testVDFT
 
-	// Create a block with an output large enough to exceed MaxBlockSize.
-	// We don't need it to pass other validations — just check the size gate.
 	bigScript := make([]byte, block.MaxBlockSize+1)
-	coinbase := tx.NewCoinbase(1, 10_0000_0000, make([]byte, 20), "test")
+	coinbase := tx.NewCoinbase(1, 1_00000000, make([]byte, 20), "test")
 	coinbase.Outputs = append(coinbase.Outputs, tx.TxOutput{
 		Value:        0,
 		ScriptPubKey: bigScript,
@@ -574,9 +418,6 @@ func TestValidateRejectsOversizedBlock(t *testing.T) {
 			Version:       1,
 			PrevBlockHash: genesis.Header.Hash(),
 			Timestamp:     uint32(time.Now().Unix()),
-			VDFOutput:     []byte{0x01},
-			VDFProof:      []byte{0x01},
-			MinerPubKey:   []byte{0x01},
 		},
 		Transactions: []*tx.Transaction{coinbase},
 	}
@@ -584,34 +425,6 @@ func TestValidateRejectsOversizedBlock(t *testing.T) {
 	err := ValidateBlock(blk, &genesis.Header, params, chain.UTXOSet, 1)
 	if err == nil {
 		t.Fatal("oversized block should be rejected")
-	}
-}
-
-// ============================================================
-// VDF iterations mismatch rejected
-// ============================================================
-
-func TestValidateRejectsWrongVDFIterations(t *testing.T) {
-	genesis := makeGenesis(make([]byte, 20))
-	chain := NewChainState(genesis)
-	params := testParams()
-
-	privKey, pubKey, err := crypto.GenerateKeyPair()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	blk, err := MineBlock(&genesis.Header, nil, privKey, pubKey, params, 1, nil)
-	if err != nil {
-		t.Fatalf("mine block: %v", err)
-	}
-
-	// Tamper: set header VDFIterations to a different value.
-	blk.Header.VDFIterations = params.VDFIterations + 1
-
-	err = ValidateBlock(blk, &genesis.Header, params, chain.UTXOSet, 1)
-	if err == nil {
-		t.Fatal("mismatched VDFIterations should be rejected")
 	}
 }
 
@@ -624,8 +437,7 @@ func TestValidateRejectsTooManyTransactions(t *testing.T) {
 	chain := NewChainState(genesis)
 	params := testParams()
 
-	// Create a block with MaxBlockTransactions + 1 transactions.
-	coinbase := tx.NewCoinbase(1, 10_0000_0000, make([]byte, 20), "test")
+	coinbase := tx.NewCoinbase(1, 1_00000000, make([]byte, 20), "test")
 	txs := make([]*tx.Transaction, block.MaxBlockTransactions+1)
 	txs[0] = coinbase
 	for i := 1; i < len(txs); i++ {
@@ -637,9 +449,6 @@ func TestValidateRejectsTooManyTransactions(t *testing.T) {
 			Version:       1,
 			PrevBlockHash: genesis.Header.Hash(),
 			Timestamp:     uint32(time.Now().Unix()),
-			VDFOutput:     []byte{0x01},
-			VDFProof:      []byte{0x01},
-			MinerPubKey:   []byte{0x01},
 		},
 		Transactions: txs,
 	}
@@ -647,22 +456,5 @@ func TestValidateRejectsTooManyTransactions(t *testing.T) {
 	err := ValidateBlock(blk, &genesis.Header, params, chain.UTXOSet, 1)
 	if err == nil {
 		t.Fatal("block with too many transactions should be rejected")
-	}
-}
-
-// ============================================================
-// Print CSP difficulty params at key heights
-// ============================================================
-
-func TestCSPParamsAtKeyHeights(t *testing.T) {
-	heights := []uint64{
-		0, 525_000, 1_050_000, 5_250_000,
-		10_499_999, 10_500_000, 21_000_000,
-		52_500_000, 105_000_000, 1_050_000_000,
-	}
-	for _, h := range heights {
-		p := CSPParamsForHeight(h)
-		t.Logf("height %12d | era %3d | base_variables = %3d | constraint_ratio = %.1f",
-			h, h/CSPGrowthInterval, p.BaseVariables, p.ConstraintRatio)
 	}
 }

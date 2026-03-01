@@ -43,8 +43,8 @@ type ChainState struct {
 	Height     uint64
 	UTXOSet    *tx.UTXOSet
 	Difficulty *DifficultyParams
-	// Recent blocks for difficulty adjustment (sliding window).
-	RecentBlocks []BlockInfo
+	// ASERT anchor point for per-block difficulty adjustment.
+	Anchor *ASERTAnchor
 
 	// Block index: all known blocks (main chain + side chains).
 	blockIndex map[crypto.Hash]*blockNode
@@ -75,8 +75,10 @@ func NewChainState(genesis *block.Block) *ChainState {
 		Height:     0,
 		UTXOSet:    utxos,
 		Difficulty: DefaultDifficultyParams(),
-		RecentBlocks: []BlockInfo{
-			{Timestamp: genesis.Header.Timestamp},
+		Anchor: &ASERTAnchor{
+			Height:    0,
+			Timestamp: genesis.Header.Timestamp,
+			Target:    DefaultDifficultyParams().PoWTarget,
 		},
 		blockIndex: make(map[crypto.Hash]*blockNode),
 		undoMap:    make(map[crypto.Hash]*tx.UndoData),
@@ -123,7 +125,7 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 	// Is this block extending the current tip (main chain)?
 	extendsMainChain := parentNode == cs.tipNode
 
-	// Validate header format, VDF, CSP, PoW against the parent header.
+	// Validate header format, SAT solution, and PoW against the parent header.
 	// UTXO validation uses the main-chain UTXO set, which is only correct
 	// for blocks extending the tip. Side-chain blocks that fail UTXO
 	// validation are stored without it; full validation happens during reorg.
@@ -155,7 +157,7 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 		cs.tipNode = node
 		cs.Tip = &blk.Header
 		cs.Height = newHeight
-		cs.appendRecentBlock(blk.Header.Timestamp, newHeight)
+		cs.appendASERT(blk.Header.Timestamp, newHeight)
 		return nil
 	}
 
@@ -245,8 +247,10 @@ func (cs *ChainState) reorganize(newTip *blockNode) error {
 	cs.Tip = &newTip.Header
 	cs.Height = newTip.Height
 
-	// Rebuild recent blocks for difficulty adjustment from the new chain.
-	cs.rebuildRecentBlocks()
+	// Recalculate difficulty from ASERT for the new tip.
+	cs.Difficulty = &DifficultyParams{
+		PoWTarget: AdjustDifficultyASERT(cs.Anchor, cs.Height, cs.Tip.Timestamp),
+	}
 
 	return nil
 }
@@ -271,40 +275,10 @@ func findForkPoint(a, b *blockNode) *blockNode {
 	return a
 }
 
-// rebuildRecentBlocks reconstructs the RecentBlocks sliding window from the
-// current tip's chain, used after a reorganization.
-func (cs *ChainState) rebuildRecentBlocks() {
-	cs.RecentBlocks = nil
-	// Walk back at most AdjustmentWindow blocks.
-	var nodes []*blockNode
-	n := cs.tipNode
-	for n != nil && len(nodes) <= AdjustmentWindow {
-		nodes = append(nodes, n)
-		n = n.Parent
-	}
-	// Reverse to get oldest-first order.
-	for i, j := 0, len(nodes)-1; i < j; i, j = i+1, j-1 {
-		nodes[i], nodes[j] = nodes[j], nodes[i]
-	}
-	for _, nd := range nodes {
-		cs.RecentBlocks = append(cs.RecentBlocks, BlockInfo{Timestamp: nd.Header.Timestamp})
-	}
-
-	// Re-run difficulty adjustment if the new height is on a boundary.
-	if cs.Height%DifficultyAdjustInterval == 0 && len(cs.RecentBlocks) >= 2 {
-		cs.Difficulty = AdjustDifficulty(cs.Difficulty, cs.RecentBlocks, cs.Height)
-	}
-}
-
-// appendRecentBlock adds a block timestamp to the sliding window and
-// triggers difficulty adjustment if needed.
-func (cs *ChainState) appendRecentBlock(timestamp uint32, height uint64) {
-	cs.RecentBlocks = append(cs.RecentBlocks, BlockInfo{Timestamp: timestamp})
-	if len(cs.RecentBlocks) > AdjustmentWindow+1 {
-		cs.RecentBlocks = cs.RecentBlocks[len(cs.RecentBlocks)-AdjustmentWindow-1:]
-	}
-	if height%DifficultyAdjustInterval == 0 && len(cs.RecentBlocks) >= 2 {
-		cs.Difficulty = AdjustDifficulty(cs.Difficulty, cs.RecentBlocks, height)
+// appendASERT updates difficulty using ASERT after each accepted block.
+func (cs *ChainState) appendASERT(timestamp uint32, height uint64) {
+	cs.Difficulty = &DifficultyParams{
+		PoWTarget: AdjustDifficultyASERT(cs.Anchor, height, timestamp),
 	}
 }
 
@@ -354,6 +328,6 @@ func (cs *ChainState) AddBlockUnchecked(blk *block.Block) error {
 	cs.tipNode = node
 	cs.Tip = &blk.Header
 	cs.Height = newHeight
-	cs.appendRecentBlock(blk.Header.Timestamp, newHeight)
+	cs.appendASERT(blk.Header.Timestamp, newHeight)
 	return nil
 }

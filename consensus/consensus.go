@@ -1,26 +1,25 @@
-// Package consensus implements the NOUS consensus engine.
+// Package consensus implements the NOUS Cogito Consensus engine.
 //
-// The consensus mechanism combines three layers:
-//   - VDF (Verifiable Delay Function) for time-gating
-//   - CSP (Constraint Satisfaction Problem) for AI-proof-of-work
-//   - PoW (Proof of Work) for final difficulty tuning
+// The consensus mechanism uses:
+//   - 3-SAT: formula generation and solving (proof of reasoning)
+//   - SHA-256: block hashing for proof of work
+//   - PoW target: difficulty-adjusted hash target
 //
 // Mining flow (mine.go):
-//  1. Compute VDF(prevBlockHash, minerPubKey)
-//  2. Generate CSP from VDF output seed
-//  3. Solve CSP using AI model (brute-force placeholder)
-//  4. Find nonce such that Hash(header) < target
+//  1. For each seed value, generate 3-SAT formula
+//  2. Solve formula using ProbSAT
+//  3. Check if block hash < target
 //
 // Validation flow (validate.go):
-//  1. Verify VDF proof (O(log T))
-//  2. Re-derive CSP from VDF output
-//  3. Check CSP solution against constraints (no AI needed)
+//  1. Regenerate 3-SAT formula from seed
+//  2. Verify SAT solution satisfies all clauses
+//  3. Verify solution hash matches header
 //  4. Verify PoW hash < target
 //  5. Verify all transactions and UTXO consistency
 //
 // Difficulty adjustment (adjust.go):
-//   Three-layer independent adjustment every 144 blocks,
-//   with ±25% cap (normal) and -50% emergency cap.
+//   PoW target adjustment every 1008 blocks,
+//   with ±25% cap (normal) and 2x emergency cap (ratio >= 4).
 //
 // Chain state (chain.go):
 //   Tracks tip, UTXO set, and current difficulty parameters.

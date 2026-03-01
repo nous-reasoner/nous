@@ -1,7 +1,6 @@
 package block
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/nous-chain/nous/crypto"
@@ -14,20 +13,21 @@ import (
 
 func TestSerializeDeserializeRoundTrip(t *testing.T) {
 	h := &Header{
-		Version:               1,
-		PrevBlockHash:         crypto.Sha256([]byte("prev")),
-		MerkleRoot:            crypto.Sha256([]byte("merkle")),
-		Timestamp:             1700000000,
-		DifficultyBits:        0x1d00ffff,
-		VDFOutput:             []byte{0xAA, 0xBB, 0xCC},
-		VDFProof:              []byte{0xDD, 0xEE},
-		VDFIterations:         100000,
-		CSPSolutionHash: crypto.Sha256([]byte("csp")),
-		MinerPubKey:     []byte{0x02, 0x01, 0x02, 0x03},
-		Nonce:                 42,
+		Version:         1,
+		PrevBlockHash:   crypto.Sha256([]byte("prev")),
+		MerkleRoot:      crypto.Sha256([]byte("merkle")),
+		Timestamp:       1700000000,
+		DifficultyBits:  0x1d00ffff,
+		Seed:            42,
+		SATSolutionHash: crypto.Sha256([]byte("sat")),
+		UTXOSetHash:     crypto.Sha256([]byte("utxo")),
 	}
 
 	data := h.Serialize()
+	if len(data) != HeaderSize {
+		t.Fatalf("serialized header size: want %d, got %d", HeaderSize, len(data))
+	}
+
 	h2, err := DeserializeHeader(data)
 	if err != nil {
 		t.Fatalf("DeserializeHeader failed: %v", err)
@@ -48,52 +48,26 @@ func TestSerializeDeserializeRoundTrip(t *testing.T) {
 	if h.DifficultyBits != h2.DifficultyBits {
 		t.Fatalf("DifficultyBits: want %d, got %d", h.DifficultyBits, h2.DifficultyBits)
 	}
-	if !bytes.Equal(h.VDFOutput, h2.VDFOutput) {
-		t.Fatal("VDFOutput mismatch")
+	if h.Seed != h2.Seed {
+		t.Fatalf("Seed: want %d, got %d", h.Seed, h2.Seed)
 	}
-	if !bytes.Equal(h.VDFProof, h2.VDFProof) {
-		t.Fatal("VDFProof mismatch")
+	if h.SATSolutionHash != h2.SATSolutionHash {
+		t.Fatal("SATSolutionHash mismatch")
 	}
-	if h.VDFIterations != h2.VDFIterations {
-		t.Fatalf("VDFIterations: want %d, got %d", h.VDFIterations, h2.VDFIterations)
-	}
-	if h.CSPSolutionHash != h2.CSPSolutionHash {
-		t.Fatal("CSPSolutionHash mismatch")
-	}
-	if !bytes.Equal(h.MinerPubKey, h2.MinerPubKey) {
-		t.Fatal("MinerPubKey mismatch")
-	}
-	if h.Nonce != h2.Nonce {
-		t.Fatalf("Nonce: want %d, got %d", h.Nonce, h2.Nonce)
+	if h.UTXOSetHash != h2.UTXOSetHash {
+		t.Fatal("UTXOSetHash mismatch")
 	}
 }
 
-func TestSerializeDeserializeEmptyVarFields(t *testing.T) {
+func TestHeaderFixedSize(t *testing.T) {
 	h := &Header{
 		Version:    1,
 		Timestamp:  1700000000,
-		VDFOutput:  []byte{},
-		VDFProof:   []byte{},
-		MinerPubKey: []byte{},
 	}
 
 	data := h.Serialize()
-	h2, err := DeserializeHeader(data)
-	if err != nil {
-		t.Fatalf("DeserializeHeader failed: %v", err)
-	}
-
-	if h.Version != h2.Version {
-		t.Fatalf("Version mismatch")
-	}
-	if len(h2.VDFOutput) != 0 {
-		t.Fatalf("VDFOutput should be empty, got %d bytes", len(h2.VDFOutput))
-	}
-	if len(h2.VDFProof) != 0 {
-		t.Fatalf("VDFProof should be empty, got %d bytes", len(h2.VDFProof))
-	}
-	if len(h2.MinerPubKey) != 0 {
-		t.Fatalf("MinerPubKey should be empty, got %d bytes", len(h2.MinerPubKey))
+	if len(data) != HeaderSize {
+		t.Fatalf("header size: want %d, got %d", HeaderSize, len(data))
 	}
 }
 
@@ -103,16 +77,12 @@ func TestSerializeDeserializeEmptyVarFields(t *testing.T) {
 
 func TestHashDeterministic(t *testing.T) {
 	h := &Header{
-		Version:       1,
-		PrevBlockHash: crypto.Sha256([]byte("prev")),
-		MerkleRoot:    crypto.Sha256([]byte("merkle")),
-		Timestamp:     1700000000,
+		Version:        1,
+		PrevBlockHash:  crypto.Sha256([]byte("prev")),
+		MerkleRoot:     crypto.Sha256([]byte("merkle")),
+		Timestamp:      1700000000,
 		DifficultyBits: 0x1d00ffff,
-		VDFOutput:     []byte{0x01, 0x02},
-		VDFProof:      []byte{0x03},
-		VDFIterations: 5000,
-		MinerPubKey:   []byte{0x02, 0xAA},
-		Nonce:         99,
+		Seed:           99,
 	}
 
 	hash1 := h.Hash()
@@ -133,20 +103,16 @@ func TestFieldMutationChangesHash(t *testing.T) {
 		MerkleRoot:     crypto.Sha256([]byte("merkle")),
 		Timestamp:      1700000000,
 		DifficultyBits: 0x1d00ffff,
-		VDFOutput:      []byte{0x01},
-		VDFProof:       []byte{0x02},
-		VDFIterations:  1000,
-		MinerPubKey:    []byte{0x02},
-		Nonce:          0,
+		Seed:           0,
 	}
 	original := h.Hash()
 
-	// Mutate Nonce
-	h.Nonce = 1
+	// Mutate Seed
+	h.Seed = 1
 	if h.Hash() == original {
-		t.Fatal("changing Nonce should change the hash")
+		t.Fatal("changing Seed should change the hash")
 	}
-	h.Nonce = 0
+	h.Seed = 0
 
 	// Mutate Timestamp
 	h.Timestamp = 1700000001
@@ -168,13 +134,6 @@ func TestFieldMutationChangesHash(t *testing.T) {
 		t.Fatal("changing DifficultyBits should change the hash")
 	}
 	h.DifficultyBits = 0x1d00ffff
-
-	// Mutate VDFIterations
-	h.VDFIterations = 2000
-	if h.Hash() == original {
-		t.Fatal("changing VDFIterations should change the hash")
-	}
-	h.VDFIterations = 1000
 
 	// Mutate PrevBlockHash
 	h.PrevBlockHash = crypto.Sha256([]byte("other"))
@@ -228,7 +187,6 @@ func TestMerkleRootThreeTx(t *testing.T) {
 	h1 := crypto.Sha256([]byte("tx1"))
 	h2 := crypto.Sha256([]byte("tx2"))
 
-	// Level 1: [H(h0||h1), H(h2||h2)]  (h2 duplicated because odd)
 	var pair01, pair22 [64]byte
 	copy(pair01[:32], h0[:])
 	copy(pair01[32:], h1[:])
@@ -238,7 +196,6 @@ func TestMerkleRootThreeTx(t *testing.T) {
 	copy(pair22[32:], h2[:])
 	right := crypto.DoubleSha256(pair22[:])
 
-	// Level 2: H(left||right)
 	var combined [64]byte
 	copy(combined[:32], left[:])
 	copy(combined[32:], right[:])
@@ -261,7 +218,6 @@ func TestMerkleRootFiveTx(t *testing.T) {
 		t.Fatal("5-tx merkle root should not be zero")
 	}
 
-	// Deterministic
 	root2 := ComputeMerkleRoot(hashes)
 	if root != root2 {
 		t.Fatal("merkle root should be deterministic")
@@ -279,8 +235,6 @@ func TestMerkleRootEightTx(t *testing.T) {
 		t.Fatal("8-tx merkle root should not be zero")
 	}
 
-	// 8 is a power of 2, so no duplication should occur.
-	// Verify by manual bottom-up computation.
 	level := make([]crypto.Hash, 8)
 	copy(level, hashes)
 	for len(level) > 1 {
@@ -303,8 +257,6 @@ func TestMerkleRootOddDuplication(t *testing.T) {
 	h1 := crypto.Sha256([]byte("b"))
 	h2 := crypto.Sha256([]byte("c"))
 
-	// With 3 hashes, h2 is duplicated at level 1.
-	// Root should differ from both 2-hash and 4-hash trees.
 	root3 := ComputeMerkleRoot([]crypto.Hash{h0, h1, h2})
 	root2 := ComputeMerkleRoot([]crypto.Hash{h0, h1})
 
@@ -312,7 +264,6 @@ func TestMerkleRootOddDuplication(t *testing.T) {
 		t.Fatal("3-hash tree should differ from 2-hash tree")
 	}
 
-	// Adding the duplicate explicitly should produce the same result.
 	root4explicit := ComputeMerkleRoot([]crypto.Hash{h0, h1, h2, h2})
 	if root3 != root4explicit {
 		t.Fatal("3-hash tree should equal 4-hash tree with last element duplicated")
@@ -353,32 +304,32 @@ func TestGenesisBlock(t *testing.T) {
 		t.Fatal("GenesisBlock returned nil")
 	}
 
-	// PrevBlockHash should be zero
+	// PrevBlockHash should be zero.
 	if !genesis.Header.PrevBlockHash.IsZero() {
 		t.Fatal("genesis PrevBlockHash should be zero")
 	}
 
-	// Should have exactly 1 transaction (coinbase)
+	// Should have exactly 1 transaction (coinbase).
 	if len(genesis.Transactions) != 1 {
 		t.Fatalf("genesis should have 1 tx, got %d", len(genesis.Transactions))
 	}
 
-	// Coinbase check
+	// Coinbase check.
 	if !genesis.Transactions[0].IsCoinbase() {
 		t.Fatal("genesis tx should be a coinbase")
 	}
 
-	// Reward should be 10 NOUS = 10_0000_0000 nou
-	if genesis.Transactions[0].Outputs[0].Value != 10_0000_0000 {
-		t.Fatalf("genesis reward: want 1000000000, got %d", genesis.Transactions[0].Outputs[0].Value)
+	// Reward should be 1 NOUS = 1_00000000 nou.
+	if genesis.Transactions[0].Outputs[0].Value != 1_00000000 {
+		t.Fatalf("genesis reward: want 100000000, got %d", genesis.Transactions[0].Outputs[0].Value)
 	}
 
-	// Version
+	// Version.
 	if genesis.Header.Version != 1 {
 		t.Fatalf("genesis version: want 1, got %d", genesis.Header.Version)
 	}
 
-	// MerkleRoot should match the single coinbase tx
+	// MerkleRoot should match the single coinbase tx.
 	expectedMerkle := ComputeMerkleRoot([]crypto.Hash{genesis.Transactions[0].TxID()})
 	if genesis.Header.MerkleRoot != expectedMerkle {
 		t.Fatal("genesis MerkleRoot does not match coinbase TxID")
@@ -389,7 +340,7 @@ func TestGenesisBlockDeterministic(t *testing.T) {
 	_, pub, _ := crypto.GenerateKeyPair()
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
-	ts := uint32(1735689600) // fixed timestamp for determinism test
+	ts := uint32(1735689600)
 	g1 := GenesisBlock(pubKeyHash, ts)
 	g2 := GenesisBlock(pubKeyHash, ts)
 
@@ -406,7 +357,7 @@ func TestBlockWithMultipleTransactions(t *testing.T) {
 	_, pub, _ := crypto.GenerateKeyPair()
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
-	coinbase := tx.NewCoinbase(1, 10_0000_0000, pubKeyHash, "")
+	coinbase := tx.NewCoinbase(1, 1_00000000, pubKeyHash, "")
 	regular := &tx.Transaction{
 		Version: 1,
 		Inputs: []tx.TxInput{
@@ -417,8 +368,8 @@ func TestBlockWithMultipleTransactions(t *testing.T) {
 			},
 		},
 		Outputs: []tx.TxOutput{
-			{Value: 5_0000_0000, ScriptPubKey: []byte{0x76}},
-			{Value: 4_9999_0000, ScriptPubKey: []byte{0x76}},
+			{Value: 5000_0000, ScriptPubKey: []byte{0x76}},
+			{Value: 4999_0000, ScriptPubKey: []byte{0x76}},
 		},
 		LockTime: 0,
 	}
@@ -431,20 +382,17 @@ func TestBlockWithMultipleTransactions(t *testing.T) {
 			Version:    1,
 			MerkleRoot: merkleRoot,
 			Timestamp:  1700000000,
-			VDFOutput:  []byte{},
-			VDFProof:   []byte{},
-			MinerPubKey: []byte{},
 		},
 		Transactions: []*tx.Transaction{coinbase, regular},
 	}
 
-	// Verify MerkleRoot consistency
+	// Verify MerkleRoot consistency.
 	recomputed := ComputeMerkleRoot(txIDs)
 	if blk.Header.MerkleRoot != recomputed {
 		t.Fatal("MerkleRoot should be consistent")
 	}
 
-	// Block hash should be non-zero
+	// Block hash should be non-zero.
 	if blk.Header.Hash().IsZero() {
 		t.Fatal("block hash should not be zero")
 	}
@@ -465,9 +413,9 @@ func TestDeserializeHeaderTooShort(t *testing.T) {
 	if err == nil {
 		t.Fatal("10-byte data should fail")
 	}
-	// Just under minimum (126).
-	_, err = DeserializeHeader(make([]byte, 125))
+	// Just under minimum (148).
+	_, err = DeserializeHeader(make([]byte, 147))
 	if err == nil {
-		t.Fatal("125-byte data should fail")
+		t.Fatal("147-byte data should fail")
 	}
 }

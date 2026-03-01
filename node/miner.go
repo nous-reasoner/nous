@@ -1,4 +1,4 @@
-// Package node provides the mining loop and JSON-RPC server for the NOUS daemon.
+// Package node provides the reasoning loop and JSON-RPC server for the NOUS daemon.
 package node
 
 import (
@@ -17,14 +17,12 @@ import (
 // MaxBlockTxs is the maximum number of mempool transactions per block.
 const MaxBlockTxs = 500
 
-// Miner runs the mining loop in a background goroutine.
-type Miner struct {
+// Reasoner runs the reasoning (mining) loop in a background goroutine.
+type Reasoner struct {
 	chain   *consensus.ChainState
 	server  *network.Server
 	store   *storage.BlockStore
-	privKey *crypto.PrivateKey
 	pubKey  *crypto.PublicKey
-	solver  consensus.CSPSolver
 
 	mu      sync.Mutex
 	running bool
@@ -32,167 +30,165 @@ type Miner struct {
 	done    chan struct{}
 }
 
-// NewMiner creates a new miner.
-func NewMiner(
+// NewReasoner creates a new reasoner.
+func NewReasoner(
 	chain *consensus.ChainState,
 	server *network.Server,
 	store *storage.BlockStore,
-	privKey *crypto.PrivateKey,
 	pubKey *crypto.PublicKey,
-) *Miner {
-	return &Miner{
-		chain:   chain,
-		server:  server,
-		store:   store,
-		privKey: privKey,
-		pubKey:  pubKey,
+) *Reasoner {
+	return &Reasoner{
+		chain:  chain,
+		server: server,
+		store:  store,
+		pubKey: pubKey,
 	}
 }
 
-// SetSolver configures the CSP solver used during mining.
-func (m *Miner) SetSolver(s consensus.CSPSolver) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.solver = s
-}
-
-// Start begins the mining loop in a background goroutine.
-func (m *Miner) Start() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.running {
+// Start begins the reasoning loop in a background goroutine.
+func (r *Reasoner) Start() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.running {
 		return
 	}
-	m.running = true
-	m.quit = make(chan struct{})
-	m.done = make(chan struct{})
-	go m.loop()
+	r.running = true
+	r.quit = make(chan struct{})
+	r.done = make(chan struct{})
+	go r.loop()
 }
 
-// Stop signals the mining loop to stop and waits for it to finish.
-func (m *Miner) Stop() {
-	m.mu.Lock()
-	if !m.running {
-		m.mu.Unlock()
+// StartReasoning is an alias for Start.
+func (r *Reasoner) StartReasoning() {
+	r.Start()
+}
+
+// Stop signals the reasoning loop to stop and waits for it to finish.
+func (r *Reasoner) Stop() {
+	r.mu.Lock()
+	if !r.running {
+		r.mu.Unlock()
 		return
 	}
-	m.running = false
-	close(m.quit)
-	m.mu.Unlock()
-	<-m.done
+	r.running = false
+	close(r.quit)
+	r.mu.Unlock()
+	<-r.done
 }
 
-// IsRunning returns whether the miner is active.
-func (m *Miner) IsRunning() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.running
+// IsRunning returns whether the reasoner is active.
+func (r *Reasoner) IsRunning() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.running
 }
 
 // ApplyBlock adds an externally received block to the chain state and store.
-func (m *Miner) ApplyBlock(blk *block.Block) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (r *Reasoner) ApplyBlock(blk *block.Block) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	newHeight := m.chain.Height + 1
-	if err := m.chain.AddBlock(blk); err != nil {
+	newHeight := r.chain.Height + 1
+	if err := r.chain.AddBlock(blk); err != nil {
 		return err
 	}
-	if err := m.store.SaveBlock(blk, newHeight); err != nil {
-		log.Printf("miner: save block %d: %v", newHeight, err)
+	if err := r.store.SaveBlock(blk, newHeight); err != nil {
+		log.Printf("reasoner: save block %d: %v", newHeight, err)
 	}
 	tipHash := blk.Header.Hash()
-	m.store.SaveChainTip(storage.ChainTip{Hash: tipHash, Height: newHeight})
-	m.server.SetBlockHeight(newHeight)
-	m.server.Mempool().RemoveConfirmed(blk.Transactions)
+	r.store.SaveChainTip(storage.ChainTip{Hash: tipHash, Height: newHeight})
+	r.server.SetBlockHeight(newHeight)
+	r.server.Mempool().RemoveConfirmed(blk.Transactions)
 	return nil
 }
 
 // Chain returns the chain state (for RPC queries).
-func (m *Miner) Chain() *consensus.ChainState {
-	return m.chain
+func (r *Reasoner) Chain() *consensus.ChainState {
+	return r.chain
 }
 
-func (m *Miner) loop() {
-	defer close(m.done)
-	log.Println("miner: started")
+func (r *Reasoner) loop() {
+	defer close(r.done)
+	log.Println("reasoner: started")
 
 	for {
 		select {
-		case <-m.quit:
-			log.Println("miner: stopped")
+		case <-r.quit:
+			log.Println("reasoner: stopped")
 			return
 		default:
 		}
 
-		m.mineOne()
+		r.reasonOne()
 
-		// Brief pause between mining attempts.
+		// Brief pause between reasoning attempts.
 		select {
-		case <-m.quit:
+		case <-r.quit:
 			return
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
 }
 
-func (m *Miner) mineOne() {
-	m.mu.Lock()
-	tip := m.chain.Tip
-	height := m.chain.Height + 1
-	diff := m.chain.GetDifficulty()
-	m.mu.Unlock()
+func (r *Reasoner) reasonOne() {
+	r.mu.Lock()
+	tip := r.chain.Tip
+	height := r.chain.Height + 1
+	diff := r.chain.GetDifficulty()
+	r.mu.Unlock()
+
+	pubKeyHash := crypto.Hash160(r.pubKey.SerializeCompressed())
 
 	// Gather mempool transactions.
-	mempoolTxs := m.server.Mempool().GetTopN(MaxBlockTxs)
+	mempoolTxs := r.server.Mempool().GetTopN(MaxBlockTxs)
 
 	// Filter valid transactions against current UTXO set.
 	var validTxs []*tx.Transaction
 	for _, t := range mempoolTxs {
-		if err := tx.ValidateTransaction(t, m.chain.UTXOSet, height); err == nil {
+		if err := tx.ValidateTransaction(t, r.chain.UTXOSet, height); err == nil {
 			validTxs = append(validTxs, t)
 		}
 	}
 
-	log.Printf("miner: mining block %d (%d txs)...", height, len(validTxs))
+	log.Printf("reasoner: reasoning block %d (%d txs)...", height, len(validTxs))
 
-	blk, err := consensus.MineBlock(tip, validTxs, m.privKey, m.pubKey, diff, height, m.solver, m.chain.UTXOSet)
+	blk, err := consensus.MineBlock(tip, validTxs, pubKeyHash, diff, height, r.chain.UTXOSet)
 	if err != nil {
-		log.Printf("miner: block %d failed: %v", height, err)
+		log.Printf("reasoner: block %d failed: %v", height, err)
 		return
 	}
 
 	// Apply to our own chain.
-	m.mu.Lock()
-	// Check tip hasn't changed while we were mining.
-	if m.chain.Tip.Hash() != tip.Hash() {
-		m.mu.Unlock()
-		log.Printf("miner: block %d stale, tip changed", height)
+	r.mu.Lock()
+	// Check tip hasn't changed while we were reasoning.
+	if r.chain.Tip.Hash() != tip.Hash() {
+		r.mu.Unlock()
+		log.Printf("reasoner: block %d stale, tip changed", height)
 		return
 	}
 
-	if err := m.chain.AddBlockUnchecked(blk); err != nil {
-		m.mu.Unlock()
-		log.Printf("miner: apply block %d: %v", height, err)
+	if err := r.chain.AddBlockUnchecked(blk); err != nil {
+		r.mu.Unlock()
+		log.Printf("reasoner: apply block %d: %v", height, err)
 		return
 	}
 
-	if err := m.store.SaveBlock(blk, height); err != nil {
-		log.Printf("miner: save block %d: %v", height, err)
+	if err := r.store.SaveBlock(blk, height); err != nil {
+		log.Printf("reasoner: save block %d: %v", height, err)
 	}
 	tipHash := blk.Header.Hash()
-	m.store.SaveChainTip(storage.ChainTip{Hash: tipHash, Height: height})
-	m.server.SetBlockHeight(height)
-	m.server.Mempool().RemoveConfirmed(blk.Transactions)
-	m.mu.Unlock()
+	r.store.SaveChainTip(storage.ChainTip{Hash: tipHash, Height: height})
+	r.server.SetBlockHeight(height)
+	r.server.Mempool().RemoveConfirmed(blk.Transactions)
+	r.mu.Unlock()
 
-	log.Printf("miner: mined block %d hash=%x", height, tipHash[:8])
+	log.Printf("reasoner: mined block %d hash=%x", height, tipHash[:8])
 
-	// Broadcast to peers (gob-encoded full block, matching sync.go's DecodeBlock).
+	// Broadcast to peers.
 	payload, err := network.EncodeBlock(blk)
 	if err != nil {
-		log.Printf("miner: encode block %d for broadcast: %v", height, err)
+		log.Printf("reasoner: encode block %d for broadcast: %v", height, err)
 		return
 	}
-	m.server.BroadcastMessage(&network.MsgBlock{Payload: payload})
+	r.server.BroadcastMessage(&network.MsgBlock{Payload: payload})
 }

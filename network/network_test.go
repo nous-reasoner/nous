@@ -621,9 +621,6 @@ func makeTestBlock(prevHash crypto.Hash, height uint32) *block.Block {
 			PrevBlockHash: prevHash,
 			MerkleRoot:    merkle,
 			Timestamp:     1735689600 + height*600,
-			VDFOutput:     []byte{},
-			VDFProof:      []byte{},
-			MinerPubKey:   []byte{},
 		},
 		Transactions: []*tx.Transaction{coinbase},
 	}

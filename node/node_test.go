@@ -16,7 +16,6 @@ import (
 )
 
 // helper: create a test node with the given genesis block.
-// If genesis is nil, a fresh one is created.
 func setupTestNode(t *testing.T, genesis *block.Block) (*consensus.ChainState, *storage.BlockStore, *network.Server) {
 	t.Helper()
 	if genesis == nil {
@@ -42,10 +41,8 @@ func setupTestNode(t *testing.T, genesis *block.Block) (*consensus.ChainState, *
 	return chain, store, server
 }
 
-// easyDifficulty returns difficulty params suitable for fast testing:
-// minimal VDF iterations and the easiest possible PoW target.
+// easyDifficulty returns difficulty params suitable for fast testing.
 func easyDifficulty() *consensus.DifficultyParams {
-	// Max 256-bit target = 2^256 - 1 (any hash passes).
 	maxTarget := new(big.Int).Lsh(big.NewInt(1), 256)
 	maxTarget.Sub(maxTarget, big.NewInt(1))
 	var target crypto.Hash
@@ -53,11 +50,6 @@ func easyDifficulty() *consensus.DifficultyParams {
 	copy(target[32-len(b):], b)
 
 	return &consensus.DifficultyParams{
-		VDFIterations: 1, // single iteration
-		CSPDifficulty: consensus.CSPDifficultyParams{
-			BaseVariables:   12,
-			ConstraintRatio: 1.4,
-		},
 		PoWTarget: target,
 	}
 }
@@ -100,7 +92,6 @@ func TestRPCGetBlockCount(t *testing.T) {
 	}
 	defer rpc.Stop()
 
-	// Give the HTTP server a moment to start serving.
 	time.Sleep(50 * time.Millisecond)
 
 	body := `{"jsonrpc":"2.0","method":"getblockcount","params":[],"id":1}`
@@ -118,7 +109,6 @@ func TestRPCGetBlockCount(t *testing.T) {
 		t.Fatalf("rpc error: %s", result.Error.Message)
 	}
 
-	// Result should be 0 (genesis height).
 	count, ok := result.Result.(float64)
 	if !ok {
 		t.Fatalf("result type: want float64, got %T", result.Result)
@@ -135,26 +125,26 @@ func TestRPCGetBlockCount(t *testing.T) {
 func TestMiningProducesBlock(t *testing.T) {
 	chain, store, server := setupTestNode(t, nil)
 	chain.Difficulty = easyDifficulty()
+	chain.Anchor.Target = easyDifficulty().PoWTarget
 
 	if err := server.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer server.Stop()
 
-	privKey, pubKey, err := crypto.GenerateKeyPair()
+	_, pubKey, err := crypto.GenerateKeyPair()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	miner := NewMiner(chain, server, store, privKey, pubKey)
-	miner.Start()
+	reasoner := NewReasoner(chain, server, store, pubKey)
+	reasoner.Start()
 
-	// Wait for at least one block to be mined (with timeout).
 	deadline := time.After(120 * time.Second)
 	for {
 		select {
 		case <-deadline:
-			miner.Stop()
+			reasoner.Stop()
 			t.Fatal("timeout waiting for block to be mined")
 		default:
 		}
@@ -163,13 +153,12 @@ func TestMiningProducesBlock(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	miner.Stop()
+	reasoner.Stop()
 
 	if chain.Height < 1 {
 		t.Fatalf("expected height >= 1, got %d", chain.Height)
 	}
 
-	// Verify the mined block is persisted.
 	blk, err := store.LoadBlockByHeight(1)
 	if err != nil {
 		t.Fatalf("load block 1: %v", err)
@@ -187,31 +176,29 @@ func TestMiningProducesBlock(t *testing.T) {
 // ============================================================
 
 func TestTwoNodeSync(t *testing.T) {
-	// Shared genesis block so both nodes have the same chain root.
 	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
 
-	// Node A: mines a block.
 	chainA, storeA, serverA := setupTestNode(t, genesis)
 	chainA.Difficulty = easyDifficulty()
+	chainA.Anchor.Target = easyDifficulty().PoWTarget
 	if err := serverA.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer serverA.Stop()
 
-	privKey, pubKey, err := crypto.GenerateKeyPair()
+	_, pubKey, err := crypto.GenerateKeyPair()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	minerA := NewMiner(chainA, serverA, storeA, privKey, pubKey)
-	minerA.Start()
+	reasonerA := NewReasoner(chainA, serverA, storeA, pubKey)
+	reasonerA.Start()
 
-	// Wait for node A to mine a block.
 	deadline := time.After(120 * time.Second)
 	for {
 		select {
 		case <-deadline:
-			minerA.Stop()
+			reasonerA.Stop()
 			t.Fatal("timeout waiting for node A to mine")
 		default:
 		}
@@ -220,25 +207,24 @@ func TestTwoNodeSync(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	minerA.Stop()
+	reasonerA.Stop()
 
-	// Node B: connect to A and receive the block.
 	chainB, storeB, serverB := setupTestNode(t, genesis)
 	chainB.Difficulty = easyDifficulty()
+	chainB.Anchor.Target = easyDifficulty().PoWTarget
 	if err := serverB.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer serverB.Stop()
 
-	minerB := NewMiner(chainB, serverB, storeB, privKey, pubKey)
+	reasonerB := NewReasoner(chainB, serverB, storeB, pubKey)
 
-	// Load the block mined by A and apply it to B.
 	blk, err := storeA.LoadBlockByHeight(1)
 	if err != nil {
 		t.Fatalf("load block from A: %v", err)
 	}
 
-	if err := minerB.ApplyBlock(blk); err != nil {
+	if err := reasonerB.ApplyBlock(blk); err != nil {
 		t.Fatalf("apply block to B: %v", err)
 	}
 
@@ -246,7 +232,6 @@ func TestTwoNodeSync(t *testing.T) {
 		t.Fatalf("node B height: want 1, got %d", chainB.Height)
 	}
 
-	// Verify block 1 hashes match on both nodes.
 	blkA, err := storeA.LoadBlockByHeight(1)
 	if err != nil {
 		t.Fatalf("load block 1 from A: %v", err)

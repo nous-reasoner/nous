@@ -8,7 +8,6 @@ import (
 	"github.com/nous-chain/nous/block"
 	"github.com/nous-chain/nous/consensus"
 	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/csp"
 	"github.com/nous-chain/nous/network"
 	"github.com/nous-chain/nous/node"
 	"github.com/nous-chain/nous/storage"
@@ -18,8 +17,7 @@ import (
 
 const NOU = int64(1_0000_0000)
 
-// easyDifficulty returns params suitable for fast testing:
-// minimal VDF iterations and the easiest possible PoW target.
+// easyDifficulty returns params suitable for fast testing.
 func easyDifficulty() *consensus.DifficultyParams {
 	maxTarget := new(big.Int).Lsh(big.NewInt(1), 256)
 	maxTarget.Sub(maxTarget, big.NewInt(1))
@@ -28,11 +26,6 @@ func easyDifficulty() *consensus.DifficultyParams {
 	copy(target[32-len(b):], b)
 
 	return &consensus.DifficultyParams{
-		VDFIterations: 1,
-		CSPDifficulty: consensus.CSPDifficultyParams{
-			BaseVariables:   12,
-			ConstraintRatio: 1.4,
-		},
 		PoWTarget: target,
 	}
 }
@@ -42,20 +35,19 @@ func easyDifficulty() *consensus.DifficultyParams {
 // ============================================================
 
 func TestFullMiningCycle(t *testing.T) {
-	// Generate miner key.
-	privKey, pubKey, err := crypto.GenerateKeyPair()
+	_, pubKey, err := crypto.GenerateKeyPair()
 	if err != nil {
 		t.Fatal(err)
 	}
 	minerPKH := crypto.Hash160(pubKey.SerializeCompressed())
 
-	// Initialize chain with genesis block.
 	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
 	chain := consensus.NewChainState(genesis)
 	chain.Difficulty = easyDifficulty()
+	chain.Anchor.Target = easyDifficulty().PoWTarget
 
 	// Mine block 1.
-	blk1, err := consensus.MineBlock(&genesis.Header, nil, privKey, pubKey, chain.Difficulty, 1, nil)
+	blk1, err := consensus.MineBlock(&genesis.Header, nil, minerPKH, chain.Difficulty, 1, nil)
 	if err != nil {
 		t.Fatalf("mine block 1: %v", err)
 	}
@@ -63,16 +55,16 @@ func TestFullMiningCycle(t *testing.T) {
 		t.Fatalf("add block 1: %v", err)
 	}
 
-	// Verify miner balance = 10 NOUS after block 1.
+	// Verify miner balance = 1 NOUS after block 1.
 	balance := chain.UTXOSet.GetBalance(minerPKH)
-	if balance != 10*NOU {
-		t.Fatalf("balance after block 1: want %d, got %d", 10*NOU, balance)
+	if balance != 1*NOU {
+		t.Fatalf("balance after block 1: want %d, got %d", 1*NOU, balance)
 	}
 
 	// Mine 5 more blocks (total height = 6).
 	prev := &blk1.Header
 	for h := uint64(2); h <= 6; h++ {
-		blk, err := consensus.MineBlock(prev, nil, privKey, pubKey, chain.Difficulty, h, nil)
+		blk, err := consensus.MineBlock(prev, nil, minerPKH, chain.Difficulty, h, nil)
 		if err != nil {
 			t.Fatalf("mine block %d: %v", h, err)
 		}
@@ -82,15 +74,14 @@ func TestFullMiningCycle(t *testing.T) {
 		prev = &blk.Header
 	}
 
-	// Verify height = 6.
 	if chain.Height != 6 {
 		t.Fatalf("height: want 6, got %d", chain.Height)
 	}
 
-	// Verify miner balance = 60 NOUS (6 blocks × 10 NOUS).
+	// Verify miner balance = 6 NOUS (6 blocks × 1 NOUS).
 	balance = chain.UTXOSet.GetBalance(minerPKH)
-	if balance != 60*NOU {
-		t.Fatalf("balance after 6 blocks: want %d, got %d", 60*NOU, balance)
+	if balance != 6*NOU {
+		t.Fatalf("balance after 6 blocks: want %d, got %d", 6*NOU, balance)
 	}
 }
 
@@ -99,7 +90,6 @@ func TestFullMiningCycle(t *testing.T) {
 // ============================================================
 
 func TestTransferBetweenWallets(t *testing.T) {
-	// Create wallet A and wallet B.
 	walletA, err := wallet.NewWallet()
 	if err != nil {
 		t.Fatal(err)
@@ -109,18 +99,17 @@ func TestTransferBetweenWallets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	privA := walletA.Keys[walletA.Primary].PrivateKey
 	pubA := walletA.Keys[walletA.Primary].PublicKey
 	pkhA := walletA.PubKeyHash()
 	pkhB := walletB.PubKeyHash()
 
-	// Initialize chain with genesis (zero PKH).
 	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
 	chain := consensus.NewChainState(genesis)
 	chain.Difficulty = easyDifficulty()
+	chain.Anchor.Target = easyDifficulty().PoWTarget
 
-	// Mine block 1 with wallet A's key → A gets 10 NOUS.
-	blk1, err := consensus.MineBlock(&genesis.Header, nil, privA, pubA, chain.Difficulty, 1, nil)
+	// Mine block 1 with wallet A's key → A gets 1 NOUS.
+	blk1, err := consensus.MineBlock(&genesis.Header, nil, pkhA, chain.Difficulty, 1, nil)
 	if err != nil {
 		t.Fatalf("mine block 1: %v", err)
 	}
@@ -131,7 +120,7 @@ func TestTransferBetweenWallets(t *testing.T) {
 	// Mine 100 more blocks so block 1's coinbase matures (CoinbaseMaturity=100).
 	prev := &blk1.Header
 	for h := uint64(2); h <= 101; h++ {
-		blk, err := consensus.MineBlock(prev, nil, privA, pubA, chain.Difficulty, h, nil)
+		blk, err := consensus.MineBlock(prev, nil, pkhA, chain.Difficulty, h, nil)
 		if err != nil {
 			t.Fatalf("mine block %d: %v", h, err)
 		}
@@ -142,22 +131,22 @@ func TestTransferBetweenWallets(t *testing.T) {
 	}
 
 	balA := chain.UTXOSet.GetBalance(pkhA)
-	// 101 blocks × 10 NOUS = 1010 NOUS (only first block's coinbase is mature enough to spend).
-	if balA != 101*10*NOU {
-		t.Fatalf("A balance after 101 blocks: want %d, got %d", 101*10*NOU, balA)
+	// 101 blocks × 1 NOUS = 101 NOUS.
+	if balA != 101*NOU {
+		t.Fatalf("A balance after 101 blocks: want %d, got %d", 101*NOU, balA)
 	}
 
-	// Create transfer: A sends 5 NOUS to B with 0.001 NOUS fee.
+	// Create transfer: A sends 0.5 NOUS to B with 0.001 NOUS fee.
 	fee := int64(100_000) // 0.001 NOUS
 	addrB := walletB.GetAddress()
 	nextHeight := chain.Height + 1
-	transfer, err := walletA.CreateTransaction(addrB, 5*NOU, fee, chain.UTXOSet, nextHeight)
+	transfer, err := walletA.CreateTransaction(addrB, NOU/2, fee, chain.UTXOSet, nextHeight)
 	if err != nil {
 		t.Fatalf("create transfer: %v", err)
 	}
 
-	// Mine block 102 with wallet A's key, including the transfer tx.
-	blk102, err := consensus.MineBlock(prev, []*tx.Transaction{transfer}, privA, pubA, chain.Difficulty, nextHeight, nil, chain.UTXOSet)
+	// Mine block 102 including the transfer tx.
+	blk102, err := consensus.MineBlock(prev, []*tx.Transaction{transfer}, pkhA, chain.Difficulty, nextHeight, chain.UTXOSet)
 	if err != nil {
 		t.Fatalf("mine block 102: %v", err)
 	}
@@ -165,20 +154,22 @@ func TestTransferBetweenWallets(t *testing.T) {
 		t.Fatalf("add block 102: %v", err)
 	}
 
-	// Verify B balance = 5 NOUS.
+	// Verify B balance = 0.5 NOUS.
 	balB := chain.UTXOSet.GetBalance(pkhB)
-	if balB != 5*NOU {
-		t.Fatalf("B balance: want %d, got %d", 5*NOU, balB)
+	if balB != NOU/2 {
+		t.Fatalf("B balance: want %d, got %d", NOU/2, balB)
 	}
 
-	// Verify A balance = 1015 NOUS.
-	// 102 blocks × 10 NOUS = 1020 - sent (5) = 1015.
+	// Verify A balance.
+	// 102 blocks × 1 NOUS = 102 NOUS total mined, minus 0.5 sent to B.
 	// Fee (0.001) paid by A is recovered as miner of block 102.
-	expectedA := int64(1020-5) * NOU
+	expectedA := int64(102)*NOU - NOU/2
 	balA = chain.UTXOSet.GetBalance(pkhA)
 	if balA != expectedA {
 		t.Fatalf("A balance: want %d, got %d", expectedA, balA)
 	}
+
+	_ = pubA // used for mining key derivation
 }
 
 // ============================================================
@@ -186,18 +177,18 @@ func TestTransferBetweenWallets(t *testing.T) {
 // ============================================================
 
 func TestTwoNodeSync(t *testing.T) {
-	// Shared miner key.
-	privKey, pubKey, err := crypto.GenerateKeyPair()
+	_, pubKey, err := crypto.GenerateKeyPair()
 	if err != nil {
 		t.Fatal(err)
 	}
+	pubKeyHash := crypto.Hash160(pubKey.SerializeCompressed())
 
-	// Shared genesis so both nodes have the same chain root.
 	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
 
 	// --- Node A: mine 3 blocks ---
 	chainA := consensus.NewChainState(genesis)
 	chainA.Difficulty = easyDifficulty()
+	chainA.Anchor.Target = easyDifficulty().PoWTarget
 
 	storeA, err := storage.NewBlockStore(t.TempDir())
 	if err != nil {
@@ -214,15 +205,15 @@ func TestTwoNodeSync(t *testing.T) {
 	}
 	defer serverA.Stop()
 
-	minerA := node.NewMiner(chainA, serverA, storeA, privKey, pubKey)
+	reasonerA := node.NewReasoner(chainA, serverA, storeA, pubKey)
 
 	prev := &genesis.Header
 	for h := uint64(1); h <= 3; h++ {
-		blk, err := consensus.MineBlock(prev, nil, privKey, pubKey, chainA.Difficulty, h, nil)
+		blk, err := consensus.MineBlock(prev, nil, pubKeyHash, chainA.Difficulty, h, nil)
 		if err != nil {
 			t.Fatalf("mine block %d: %v", h, err)
 		}
-		if err := minerA.ApplyBlock(blk); err != nil {
+		if err := reasonerA.ApplyBlock(blk); err != nil {
 			t.Fatalf("apply block %d to A: %v", h, err)
 		}
 		prev = &blk.Header
@@ -235,6 +226,7 @@ func TestTwoNodeSync(t *testing.T) {
 	// --- Node B: start empty, sync blocks from A ---
 	chainB := consensus.NewChainState(genesis)
 	chainB.Difficulty = easyDifficulty()
+	chainB.Anchor.Target = easyDifficulty().PoWTarget
 
 	storeB, err := storage.NewBlockStore(t.TempDir())
 	if err != nil {
@@ -251,25 +243,22 @@ func TestTwoNodeSync(t *testing.T) {
 	}
 	defer serverB.Stop()
 
-	minerB := node.NewMiner(chainB, serverB, storeB, privKey, pubKey)
+	reasonerB := node.NewReasoner(chainB, serverB, storeB, pubKey)
 
-	// Transfer all 3 blocks from A to B.
 	for h := uint64(1); h <= 3; h++ {
 		blk, err := storeA.LoadBlockByHeight(h)
 		if err != nil {
 			t.Fatalf("load block %d from A: %v", h, err)
 		}
-		if err := minerB.ApplyBlock(blk); err != nil {
+		if err := reasonerB.ApplyBlock(blk); err != nil {
 			t.Fatalf("apply block %d to B: %v", h, err)
 		}
 	}
 
-	// Verify B synced to height 3.
 	if chainB.Height != 3 {
 		t.Fatalf("node B height: want 3, got %d", chainB.Height)
 	}
 
-	// Verify chain tip hashes match.
 	tipA := chainA.Tip.Hash()
 	tipB := chainB.Tip.Hash()
 	if tipA != tipB {
@@ -278,21 +267,23 @@ func TestTwoNodeSync(t *testing.T) {
 }
 
 // ============================================================
-// 4. TestMiningWithCSPSolver
+// 4. TestMiningWithSAT
 // ============================================================
 
-func TestMiningWithCSPSolver(t *testing.T) {
-	privKey, pubKey, err := crypto.GenerateKeyPair()
+func TestMiningWithSAT(t *testing.T) {
+	_, pubKey, err := crypto.GenerateKeyPair()
 	if err != nil {
 		t.Fatal(err)
 	}
+	pubKeyHash := crypto.Hash160(pubKey.SerializeCompressed())
 
 	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
 	chain := consensus.NewChainState(genesis)
 	chain.Difficulty = easyDifficulty()
+	chain.Anchor.Target = easyDifficulty().PoWTarget
 
 	// Mine a single block.
-	blk, err := consensus.MineBlock(&genesis.Header, nil, privKey, pubKey, chain.Difficulty, 1, nil)
+	blk, err := consensus.MineBlock(&genesis.Header, nil, pubKeyHash, chain.Difficulty, 1, nil)
 	if err != nil {
 		t.Fatalf("mine block: %v", err)
 	}
@@ -300,23 +291,11 @@ func TestMiningWithCSPSolver(t *testing.T) {
 		t.Fatalf("add block: %v", err)
 	}
 
-	// Block must contain a valid standard CSP solution.
-	if blk.CSPSolution == nil {
-		t.Fatal("block has no CSP solution")
+	// Block must contain a valid SAT solution.
+	if len(blk.SATSolution) == 0 {
+		t.Fatal("block has no SAT solution")
 	}
-
-	// Regenerate the CSP problem from the same VDF output and verify.
-	seed := crypto.Sha256(blk.Header.VDFOutput)
-	problem, _ := csp.GenerateProblem(seed, csp.Standard)
-
-	if !csp.VerifySolution(problem, blk.CSPSolution) {
-		t.Fatal("CSP solution does not verify against regenerated problem")
-	}
-
-	// Verify solution hash in header matches.
-	solHash := consensus.HashSolutionValues(blk.CSPSolution.Values)
-	if solHash != blk.Header.CSPSolutionHash {
-		t.Fatalf("CSP solution hash mismatch: header=%x computed=%x",
-			blk.Header.CSPSolutionHash[:8], solHash[:8])
+	if len(blk.SATSolution) != consensus.SATVariables {
+		t.Fatalf("SAT solution length: want %d, got %d", consensus.SATVariables, len(blk.SATSolution))
 	}
 }

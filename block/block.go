@@ -9,40 +9,32 @@ import (
 	"time"
 
 	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/csp"
 	"github.com/nous-chain/nous/tx"
 )
 
+// HeaderSize is the fixed size of a serialized Cogito Consensus header.
+// 4 (Version) + 32 (PrevBlockHash) + 32 (MerkleRoot) + 4 (Timestamp) +
+// 4 (DifficultyBits) + 8 (Seed) + 32 (SATSolutionHash) + 32 (UTXOSetHash) = 148 bytes.
+const HeaderSize = 148
+
 // Header contains the metadata of a block.
-// Serialization uses little-endian for fixed-size fields and
-// length-prefixed encoding for variable-length fields.
+// All fields are fixed-size; serialization uses little-endian byte order.
 type Header struct {
-	Version        uint32
-	PrevBlockHash  crypto.Hash
-	MerkleRoot     crypto.Hash
-	Timestamp      uint32 // Unix epoch seconds
-	DifficultyBits uint32 // compact difficulty representation
-
-	// VDF fields
-	VDFOutput      []byte // y = g^(2^T) mod N
-	VDFProof       []byte // Wesolowski proof π
-	VDFIterations  uint64 // T parameter
-
-	// CSP fields
-	CSPSolutionHash crypto.Hash // hash of the standard CSP solution
-
-	// Miner identity
-	MinerPubKey []byte // compressed secp256k1 public key (33 bytes)
-
-	// PoW
-	Nonce uint32
+	Version         uint32
+	PrevBlockHash   crypto.Hash
+	MerkleRoot      crypto.Hash
+	Timestamp       uint32 // Unix epoch seconds
+	DifficultyBits  uint32 // compact difficulty representation
+	Seed            uint64 // SAT formula seed nonce
+	SATSolutionHash crypto.Hash // SHA256 of serialized SAT assignment
+	UTXOSetHash     crypto.Hash // commitment to UTXO set state
 }
 
 // Block represents a full block: header + body.
 type Block struct {
 	Header       Header
 	Transactions []*tx.Transaction
-	CSPSolution  *csp.Solution // standard-tier solution
+	SATSolution  []bool // SAT assignment (256 booleans)
 }
 
 // MaxBlockSize is the maximum allowed serialized block size (1 MB).
@@ -53,48 +45,42 @@ const MaxBlockSize = 1_000_000
 const MaxBlockTransactions = 10_000
 
 // WireSize returns the approximate serialized size of the block in bytes.
-// It sums the header size, all transaction sizes, and the CSP solution size.
+// It sums the header size, all transaction sizes, and the SAT solution size.
 func (b *Block) WireSize() int {
-	size := len(b.Header.Serialize())
+	size := HeaderSize
 	for _, t := range b.Transactions {
 		size += len(t.Serialize())
 	}
-	if b.CSPSolution != nil {
-		// 4 bytes for value count + 4 bytes per value.
-		size += 4 + len(b.CSPSolution.Values)*4
+	// SAT solution: 4-byte length prefix + ceil(len/8) bytes.
+	if len(b.SATSolution) > 0 {
+		size += 4 + (len(b.SATSolution)+7)/8
 	}
 	return size
 }
 
-// Serialize encodes the block header into a deterministic byte slice.
-// Fixed-size fields are written in little-endian order.
-// Variable-length fields (VDFOutput, VDFProof, MinerPubKey) are
-// length-prefixed with a uint16 LE length.
+// Serialize encodes the block header into a deterministic 148-byte slice.
+// All fields are fixed-size and written in little-endian order.
 func (h *Header) Serialize() []byte {
-	var buf bytes.Buffer
+	buf := make([]byte, HeaderSize)
+	off := 0
 
-	// Fixed-size fields
-	binary.Write(&buf, binary.LittleEndian, h.Version)
-	buf.Write(h.PrevBlockHash[:])
-	buf.Write(h.MerkleRoot[:])
-	binary.Write(&buf, binary.LittleEndian, h.Timestamp)
-	binary.Write(&buf, binary.LittleEndian, h.DifficultyBits)
+	binary.LittleEndian.PutUint32(buf[off:], h.Version)
+	off += 4
+	copy(buf[off:], h.PrevBlockHash[:])
+	off += 32
+	copy(buf[off:], h.MerkleRoot[:])
+	off += 32
+	binary.LittleEndian.PutUint32(buf[off:], h.Timestamp)
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], h.DifficultyBits)
+	off += 4
+	binary.LittleEndian.PutUint64(buf[off:], h.Seed)
+	off += 8
+	copy(buf[off:], h.SATSolutionHash[:])
+	off += 32
+	copy(buf[off:], h.UTXOSetHash[:])
 
-	// Variable-length VDF fields
-	writeVarField(&buf, h.VDFOutput)
-	writeVarField(&buf, h.VDFProof)
-	binary.Write(&buf, binary.LittleEndian, h.VDFIterations)
-
-	// CSP hash
-	buf.Write(h.CSPSolutionHash[:])
-
-	// Miner pubkey (variable length)
-	writeVarField(&buf, h.MinerPubKey)
-
-	// Nonce
-	binary.Write(&buf, binary.LittleEndian, h.Nonce)
-
-	return buf.Bytes()
+	return buf
 }
 
 // Hash computes the double-SHA-256 hash of the serialized block header.
@@ -103,14 +89,10 @@ func (h *Header) Hash() crypto.Hash {
 }
 
 // DeserializeHeader decodes a block header from its serialized form.
-// Returns an error if the data is too short or malformed.
-//
-// The minimum header size is 4 (version) + 32 (prev) + 32 (merkle) +
-// 4 (timestamp) + 4 (difficulty) + 2+0 (VDF output) + 2+0 (VDF proof) +
-// 8 (VDF iterations) + 32 (CSP hash) + 2+0 (miner pubkey) + 4 (nonce) = 126 bytes.
+// Expects exactly 148 bytes.
 func DeserializeHeader(data []byte) (*Header, error) {
-	if len(data) < 126 {
-		return nil, fmt.Errorf("block: header data too short (%d bytes, min 126)", len(data))
+	if len(data) < HeaderSize {
+		return nil, fmt.Errorf("block: header data too short (%d bytes, need %d)", len(data), HeaderSize)
 	}
 	r := bytes.NewReader(data)
 	h := &Header{}
@@ -130,30 +112,13 @@ func DeserializeHeader(data []byte) (*Header, error) {
 	if err := binary.Read(r, binary.LittleEndian, &h.DifficultyBits); err != nil {
 		return nil, err
 	}
-
-	var err error
-	h.VDFOutput, err = readVarField(r)
-	if err != nil {
+	if err := binary.Read(r, binary.LittleEndian, &h.Seed); err != nil {
 		return nil, err
 	}
-	h.VDFProof, err = readVarField(r)
-	if err != nil {
+	if _, err := r.Read(h.SATSolutionHash[:]); err != nil {
 		return nil, err
 	}
-	if err := binary.Read(r, binary.LittleEndian, &h.VDFIterations); err != nil {
-		return nil, err
-	}
-
-	if _, err := r.Read(h.CSPSolutionHash[:]); err != nil {
-		return nil, err
-	}
-
-	h.MinerPubKey, err = readVarField(r)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := binary.Read(r, binary.LittleEndian, &h.Nonce); err != nil {
+	if _, err := r.Read(h.UTXOSetHash[:]); err != nil {
 		return nil, err
 	}
 
@@ -164,16 +129,15 @@ func DeserializeHeader(data []byte) (*Header, error) {
 // The genesis block has a zero PrevBlockHash and contains a single
 // coinbase transaction paying the initial reward to the given public key hash.
 //
-// If timestamp is 0, the current wall-clock time is used. For mainnet launch
-// this will be replaced with a hardcoded timestamp and embedded news headline.
+// If timestamp is 0, the current wall-clock time is used.
 func GenesisBlock(pubKeyHash []byte, timestamp uint32) *Block {
-	const genesisReward int64 = 10_0000_0000 // 10 NOUS in nou
+	const genesisReward int64 = 1_00000000 // 1 NOUS in nou
 
 	if timestamp == 0 {
 		timestamp = uint32(time.Now().Unix())
 	}
 
-	coinbase := tx.NewCoinbase(0, genesisReward, pubKeyHash, "NOUS genesis")
+	coinbase := tx.NewCoinbase(0, genesisReward, pubKeyHash, "Cogito, ergo sum")
 	txIDs := []crypto.Hash{coinbase.TxID()}
 	merkleRoot := ComputeMerkleRoot(txIDs)
 
@@ -184,33 +148,7 @@ func GenesisBlock(pubKeyHash []byte, timestamp uint32) *Block {
 			MerkleRoot:     merkleRoot,
 			Timestamp:      timestamp,
 			DifficultyBits: 0x1d00ffff, // initial difficulty (Bitcoin-style compact)
-			VDFOutput:      []byte{},
-			VDFProof:       []byte{},
-			VDFIterations:  0,
-			MinerPubKey:    []byte{},
-			Nonce:          0,
 		},
 		Transactions: []*tx.Transaction{coinbase},
 	}
-}
-
-// --- encoding helpers ---
-
-// writeVarField writes a uint16 LE length prefix followed by the data.
-func writeVarField(buf *bytes.Buffer, data []byte) {
-	binary.Write(buf, binary.LittleEndian, uint16(len(data)))
-	buf.Write(data)
-}
-
-// readVarField reads a uint16 LE length prefix followed by that many bytes.
-func readVarField(r *bytes.Reader) ([]byte, error) {
-	var length uint16
-	if err := binary.Read(r, binary.LittleEndian, &length); err != nil {
-		return nil, err
-	}
-	data := make([]byte, length)
-	if _, err := r.Read(data); err != nil {
-		return nil, err
-	}
-	return data, nil
 }
