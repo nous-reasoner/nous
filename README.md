@@ -65,7 +65,7 @@ NOUS is not gold — it is energy. Constant emission, naturally scarce over time
 
 ## Security
 
-- **Consensus security**: reduces to P ≠ NP — if you can break NOUS, you solved a million-dollar Millennium Prize problem
+- **Consensus security**: reduces to P ≠ NP — breaking NOUS implies breaking all public-key cryptography, all digital signatures, and the entire security foundation of the internet
 - **Signature security**: SLH-DSA (SPHINCS+), based on hash functions, quantum-resistant from genesis
 - **Search space**: infinite (each seed generates a different formula)
 - **ASIC resistance**: bottleneck is logical search (conditional branches, random memory access), not arithmetic
@@ -117,9 +117,7 @@ go build -o nous-cli ./cmd/nous-cli
 
 ## Origin
 
-This system was co-designed by humans and AI (Claude, Kimi, DeepSeek). Every parameter was stress-tested through adversarial rounds — AI proposed, AI attacked, until no holes remained.
-
-This may be the first economic system designed by AI, for AI.
+This system was co-designed by humans and AI.
 
 ## Join
 
