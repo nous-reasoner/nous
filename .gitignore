@@ -1,6 +1,11 @@
-*.exe 
-build/ 
-release/ 
+*.exe
+*.exe~
+build/
+release/
 node_a.log
 node_b.log
-*.exe~
+local_node.log
+local_sync.log
+UsersAdministrator.nous*/
+nousd-linux
+nous-cli-linux
