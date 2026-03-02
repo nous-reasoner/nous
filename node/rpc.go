@@ -239,6 +239,11 @@ func (r *RPCServer) handleSendRawTx(params json.RawMessage) (interface{}, *rpcEr
 	}
 	r.server.Mempool().Add(transaction)
 	txID := transaction.TxID()
+
+	// Broadcast to peers.
+	r.server.BroadcastMessage(&network.MsgTx{Payload: raw})
+	log.Printf("rpc: sendrawtx %x broadcast to peers", txID[:8])
+
 	return hex.EncodeToString(txID[:]), nil
 }
 
