@@ -56,45 +56,53 @@ func main() {
 		log.Fatalf("storage: %v", err)
 	}
 
-	// Determine genesis pubkey hash (placeholder for mainnet).
-	genesisPKH := make([]byte, 20) // zero hash for genesis
-	genesisBits := uint32(0x1d00ffff) // mainnet
-	if *testnet {
-		genesisBits = uint32(0x2000ffff) // testnet
-	}
-	genesisTimestamp := uint32(0) // mainnet: will be set to a fixed value before launch
-	if *testnet {
-		genesisTimestamp = 1735689600 // 2025-01-01 00:00:00 UTC
-	}
-	genesis := block.GenesisBlock(genesisPKH, genesisTimestamp, genesisBits)
-
-	// Initialize chain state.
-	chain := consensus.NewChainState(genesis)
-
-	// Save genesis block if not already stored.
-	if !store.HasBlock(0) {
+	// Load or create genesis block.
+	var genesis *block.Block
+	if store.HasBlock(0) {
+		// Existing data — load stored genesis.
+		genesis, err = store.LoadBlockByHeight(0)
+		if err != nil {
+			log.Fatalf("load genesis: %v", err)
+		}
+		gh := genesis.Header.Hash()
+		log.Printf("genesis loaded: %x", gh[:8])
+	} else {
+		// Fresh start — create and save genesis.
+		genesisPKH := make([]byte, 20) // zero hash for genesis
+		genesisBits := uint32(0x1d00ffff) // mainnet
+		if *testnet {
+			genesisBits = uint32(0x2000ffff) // testnet
+		}
+		var genesisTimestamp uint32
+		if *testnet {
+			genesisTimestamp = uint32(time.Now().Unix()) - 150
+		}
+		genesis = block.GenesisBlock(genesisPKH, genesisTimestamp, genesisBits)
 		if err := store.SaveBlock(genesis, 0); err != nil {
 			log.Fatalf("save genesis: %v", err)
 		}
 		genesisHash := genesis.Header.Hash()
 		store.SaveChainTip(storage.ChainTip{Hash: genesisHash, Height: 0})
-		log.Printf("genesis block saved: %x", genesisHash[:8])
-	} else {
-		// Recover chain state from previously stored blocks.
-		tip, tipErr := store.GetChainTip()
-		if tipErr == nil && tip.Height > 0 {
-			log.Printf("recovering chain state from %d stored blocks...", tip.Height)
-			for h := uint64(1); h <= tip.Height; h++ {
-				blk, err := store.LoadBlockByHeight(h)
-				if err != nil {
-					log.Fatalf("recovery: load block %d: %v", h, err)
-				}
-				if err := chain.AddBlockUnchecked(blk); err != nil {
-					log.Fatalf("recovery: apply block %d: %v", h, err)
-				}
+		log.Printf("genesis block created: %x (timestamp=%d)", genesisHash[:8], genesisTimestamp)
+	}
+
+	// Initialize chain state.
+	chain := consensus.NewChainState(genesis)
+
+	// Recover chain from stored blocks.
+	tip, tipErr := store.GetChainTip()
+	if tipErr == nil && tip.Height > 0 {
+		log.Printf("recovering chain state from %d stored blocks...", tip.Height)
+		for h := uint64(1); h <= tip.Height; h++ {
+			blk, err := store.LoadBlockByHeight(h)
+			if err != nil {
+				log.Fatalf("recovery: load block %d: %v", h, err)
 			}
-			log.Printf("chain state recovered: height=%d", chain.Height)
+			if err := chain.AddBlockUnchecked(blk); err != nil {
+				log.Fatalf("recovery: apply block %d: %v", h, err)
+			}
 		}
+		log.Printf("chain state recovered: height=%d", chain.Height)
 	}
 
 	// Configure P2P network.
