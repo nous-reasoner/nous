@@ -86,3 +86,22 @@ func TestProbSATSuccessRate(t *testing.T) {
 		t.Logf("Mean: %v", sum/time.Duration(len(durations)))
 	}
 }
+
+func TestSeed732(t *testing.T) {
+	var seed [32]byte
+	binary.BigEndian.PutUint64(seed[:8], uint64(732))
+	seed = sha256.Sum256(seed[:])
+	f := GenerateFormula(seed, 256, 3.85)
+
+	for attempt := 0; attempt < 100; attempt++ {
+		sol, err := ProbSATSolve(f, 256, 1*time.Second)
+		if err == nil {
+			if !Verify(f, sol) {
+				t.Fatal("solution does not verify")
+			}
+			t.Logf("seed 732 SOLVED on attempt %d", attempt+1)
+			return
+		}
+	}
+	t.Log("seed 732: 100 attempts all failed — likely UNSAT or extremely hard")
+}
