@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"math/big"
+	"strings"
 
 	"golang.org/x/crypto/ripemd160"
 )
@@ -127,4 +128,45 @@ func base58Decode(s string) ([]byte, error) {
 	out := make([]byte, numLeadingZeros+len(b))
 	copy(out[numLeadingZeros:], b)
 	return out, nil
+}
+
+// IsValidAddress returns true if the string is a valid NOUS address
+// (either Base58Check or Bech32m with "nous1" prefix).
+func IsValidAddress(addr string) bool {
+	if strings.HasPrefix(strings.ToLower(addr), AddressHRP+"1") {
+		_, _, err := Bech32mAddressToPubKeyHash(addr)
+		return err == nil
+	}
+	_, err := AddressToPubKeyHash(Address(addr))
+	return err == nil
+}
+
+// AddressToScript converts a NOUS address (Base58Check or Bech32m) to a P2PKH locking script:
+// OP_DUP OP_HASH160 <20> <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
+func AddressToScript(addr string) ([]byte, error) {
+	var pubKeyHash []byte
+
+	if strings.HasPrefix(strings.ToLower(addr), AddressHRP+"1") {
+		_, hash, err := Bech32mAddressToPubKeyHash(addr)
+		if err != nil {
+			return nil, err
+		}
+		pubKeyHash = hash
+	} else {
+		hash, err := AddressToPubKeyHash(Address(addr))
+		if err != nil {
+			return nil, err
+		}
+		pubKeyHash = hash
+	}
+
+	// Build P2PKH script: OP_DUP OP_HASH160 <20> <hash> OP_EQUALVERIFY OP_CHECKSIG
+	script := make([]byte, 25)
+	script[0] = 0x76 // OP_DUP
+	script[1] = 0xa9 // OP_HASH160
+	script[2] = 0x14 // push 20 bytes
+	copy(script[3:23], pubKeyHash)
+	script[23] = 0x88 // OP_EQUALVERIFY
+	script[24] = 0xac // OP_CHECKSIG
+	return script, nil
 }
