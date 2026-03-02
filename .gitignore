@@ -1,3 +1,6 @@
 *.exe 
 build/ 
 release/ 
+node_a.log
+node_b.log
+*.exe~
