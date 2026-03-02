@@ -65,11 +65,12 @@ type BlockSyncer struct {
 	server *Server
 	chain  ChainAccess
 
-	mu        sync.Mutex
-	state     SyncState
-	syncPeer  *Peer
-	pending   map[crypto.Hash]bool // blocks we've requested but not yet received
-	blockChan chan *block.Block    // received blocks waiting to be processed
+	mu              sync.Mutex
+	state           SyncState
+	syncPeer        *Peer
+	pending         map[crypto.Hash]bool // blocks we've requested but not yet received
+	blockChan       chan *block.Block    // received blocks waiting to be processed
+	syncCompletedAt time.Time            // when last sync completed (cooldown)
 
 	// Orphan pool: blocks whose parents are not yet known.
 	orphans        map[crypto.Hash]*orphanBlock             // block hash → orphan
@@ -130,7 +131,8 @@ func (bs *BlockSyncer) SyncFromPeer(peer *Peer) error {
 }
 
 // TriggerSync finds a peer and starts syncing if we're not already syncing.
-// We always attempt getblocks since peer.BlockHeight may be stale.
+// After sync completes, a 30-second cooldown prevents redundant polling;
+// new blocks arrive via relay during this period.
 func (bs *BlockSyncer) TriggerSync() {
 	bs.mu.Lock()
 	if bs.state == SyncInProgress {
@@ -143,6 +145,11 @@ func (bs *BlockSyncer) TriggerSync() {
 			bs.mu.Unlock()
 			return
 		}
+	}
+	// After sync completes, wait before re-polling. Blocks arrive via relay.
+	if bs.state == SyncComplete && time.Since(bs.syncCompletedAt) < 30*time.Second {
+		bs.mu.Unlock()
+		return
 	}
 	bs.mu.Unlock()
 
@@ -201,14 +208,14 @@ func (bs *BlockSyncer) handleInv(peer *Peer, msg Message) {
 	inv := msg.(*MsgInv)
 
 	var needed []InvItem
+	bs.mu.Lock()
 	for _, item := range inv.Items {
 		if item.Type == InvTypeBlock && !bs.chain.HasBlock(item.Hash) {
-			bs.mu.Lock()
 			bs.pending[item.Hash] = true
-			bs.mu.Unlock()
 			needed = append(needed, item)
 		}
 	}
+	bs.mu.Unlock()
 
 	if len(needed) > 0 {
 		peer.SendMessage(bs.server.config.Magic, &MsgGetData{Items: needed})
@@ -217,6 +224,7 @@ func (bs *BlockSyncer) handleInv(peer *Peer, msg Message) {
 		bs.mu.Lock()
 		if bs.state == SyncInProgress {
 			bs.state = SyncComplete
+			bs.syncCompletedAt = time.Now()
 			log.Printf("sync: complete at height %d", bs.chain.Height())
 		}
 		bs.mu.Unlock()
@@ -268,6 +276,14 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 	}
 
 	blockHash := blk.Header.Hash()
+
+	// Skip blocks we already have (can arrive via relay + sync simultaneously).
+	if bs.chain.HasBlock(blockHash) {
+		bs.mu.Lock()
+		delete(bs.pending, blockHash)
+		bs.mu.Unlock()
+		return
+	}
 
 	// Remove from pending.
 	bs.mu.Lock()
@@ -323,13 +339,13 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 // addOrphan stores a block whose parent is not yet known and requests the parent.
 func (bs *BlockSyncer) addOrphan(blk *block.Block, peer *Peer) {
 	bs.mu.Lock()
-	defer bs.mu.Unlock()
 
 	hash := blk.Header.Hash()
 	parentHash := blk.Header.PrevBlockHash
 
 	// Already in orphan pool?
 	if _, exists := bs.orphans[hash]; exists {
+		bs.mu.Unlock()
 		return
 	}
 
@@ -352,11 +368,16 @@ func (bs *BlockSyncer) addOrphan(blk *block.Block, peer *Peer) {
 	}
 	bs.orphanByParent[parentHash][hash] = struct{}{}
 
+	needParent := !bs.pending[parentHash]
+
 	log.Printf("sync: orphan block %x (parent %x) stored (%d orphans)",
 		hash[:8], parentHash[:8], len(bs.orphans))
 
-	// Request the missing parent from the peer, unless it's already pending.
-	if !bs.pending[parentHash] {
+	bs.mu.Unlock()
+
+	// Request the missing parent outside of the lock to avoid stalling
+	// the sync protocol if SendMessage blocks.
+	if needParent {
 		peer.SendMessage(bs.server.config.Magic, &MsgGetData{
 			Items: []InvItem{{Type: InvTypeBlock, Hash: parentHash}},
 		})
