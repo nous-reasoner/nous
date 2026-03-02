@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math/big"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -137,7 +138,7 @@ func TestMiningProducesBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reasoner := NewReasoner(chain, server, store, pubKey)
+	reasoner := NewReasoner(chain, server, store, pubKey, new(sync.Mutex))
 	reasoner.Start()
 
 	deadline := time.After(120 * time.Second)
@@ -191,7 +192,7 @@ func TestTwoNodeSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reasonerA := NewReasoner(chainA, serverA, storeA, pubKey)
+	reasonerA := NewReasoner(chainA, serverA, storeA, pubKey, new(sync.Mutex))
 	reasonerA.Start()
 
 	deadline := time.After(120 * time.Second)
@@ -217,7 +218,7 @@ func TestTwoNodeSync(t *testing.T) {
 	}
 	defer serverB.Stop()
 
-	reasonerB := NewReasoner(chainB, serverB, storeB, pubKey)
+	reasonerB := NewReasoner(chainB, serverB, storeB, pubKey, new(sync.Mutex))
 
 	blk, err := storeA.LoadBlockByHeight(1)
 	if err != nil {

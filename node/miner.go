@@ -23,25 +23,29 @@ type Reasoner struct {
 	server  *network.Server
 	store   *storage.BlockStore
 	pubKey  *crypto.PublicKey
+	chainMu *sync.Mutex // shared with ChainAdapter to prevent data races on ChainState
 
-	mu      sync.Mutex
+	mu      sync.Mutex // protects running/quit/done
 	running bool
 	quit    chan struct{}
 	done    chan struct{}
 }
 
 // NewReasoner creates a new reasoner.
+// chainMu must be the same mutex used by ChainAdapter.
 func NewReasoner(
 	chain *consensus.ChainState,
 	server *network.Server,
 	store *storage.BlockStore,
 	pubKey *crypto.PublicKey,
+	chainMu *sync.Mutex,
 ) *Reasoner {
 	return &Reasoner{
-		chain:  chain,
-		server: server,
-		store:  store,
-		pubKey: pubKey,
+		chain:   chain,
+		server:  server,
+		store:   store,
+		pubKey:  pubKey,
+		chainMu: chainMu,
 	}
 }
 
@@ -85,20 +89,25 @@ func (r *Reasoner) IsRunning() bool {
 
 // ApplyBlock adds an externally received block to the chain state and store.
 func (r *Reasoner) ApplyBlock(blk *block.Block) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.chainMu.Lock()
+	defer r.chainMu.Unlock()
 
-	newHeight := r.chain.Height + 1
+	oldHeight := r.chain.Height
 	if err := r.chain.AddBlock(blk); err != nil {
 		return err
 	}
-	if err := r.store.SaveBlock(blk, newHeight); err != nil {
-		log.Printf("reasoner: save block %d: %v", newHeight, err)
+
+	newHeight := r.chain.Height
+	// Only persist if the tip actually changed (skip lighter side-chain blocks).
+	if newHeight != oldHeight {
+		tipHash := r.chain.Tip.Hash()
+		if err := r.store.SaveBlock(blk, newHeight); err != nil {
+			log.Printf("reasoner: save block %d: %v", newHeight, err)
+		}
+		r.store.SaveChainTip(storage.ChainTip{Hash: tipHash, Height: newHeight})
+		r.server.SetBlockHeight(newHeight)
+		r.server.Mempool().RemoveConfirmed(blk.Transactions)
 	}
-	tipHash := blk.Header.Hash()
-	r.store.SaveChainTip(storage.ChainTip{Hash: tipHash, Height: newHeight})
-	r.server.SetBlockHeight(newHeight)
-	r.server.Mempool().RemoveConfirmed(blk.Transactions)
 	return nil
 }
 
@@ -131,11 +140,13 @@ func (r *Reasoner) loop() {
 }
 
 func (r *Reasoner) reasonOne() {
-	r.mu.Lock()
+	// Snapshot chain state under the shared lock.
+	r.chainMu.Lock()
 	tip := r.chain.Tip
 	height := r.chain.Height + 1
 	diff := r.chain.GetDifficulty()
-	r.mu.Unlock()
+	utxoSet := r.chain.UTXOSet
+	r.chainMu.Unlock()
 
 	pubKeyHash := crypto.Hash160(r.pubKey.SerializeCompressed())
 
@@ -145,7 +156,7 @@ func (r *Reasoner) reasonOne() {
 	// Filter valid transactions against current UTXO set.
 	var validTxs []*tx.Transaction
 	for _, t := range mempoolTxs {
-		if err := tx.ValidateTransaction(t, r.chain.UTXOSet, height); err == nil {
+		if err := tx.ValidateTransaction(t, utxoSet, height); err == nil {
 			validTxs = append(validTxs, t)
 		}
 	}
@@ -153,23 +164,23 @@ func (r *Reasoner) reasonOne() {
 	log.Printf("reasoner: reasoning block %d (%d txs)...", height, len(validTxs))
 	log.Printf("reasoner: block %d target=0x%08x", height, consensus.TargetToCompact(diff.PoWTarget))
 
-	blk, err := consensus.MineBlock(tip, validTxs, pubKeyHash, diff, height, r.chain.UTXOSet)
+	blk, err := consensus.MineBlock(tip, validTxs, pubKeyHash, diff, height, utxoSet)
 	if err != nil {
 		log.Printf("reasoner: block %d failed: %v", height, err)
 		return
 	}
 
-	// Apply to our own chain.
-	r.mu.Lock()
+	// Apply to our own chain under the shared lock.
+	r.chainMu.Lock()
 	// Check tip hasn't changed while we were reasoning.
 	if r.chain.Tip.Hash() != tip.Hash() {
-		r.mu.Unlock()
+		r.chainMu.Unlock()
 		log.Printf("reasoner: block %d stale, tip changed", height)
 		return
 	}
 
 	if err := r.chain.AddBlockUnchecked(blk); err != nil {
-		r.mu.Unlock()
+		r.chainMu.Unlock()
 		log.Printf("reasoner: apply block %d: %v", height, err)
 		return
 	}
@@ -181,7 +192,7 @@ func (r *Reasoner) reasonOne() {
 	r.store.SaveChainTip(storage.ChainTip{Hash: tipHash, Height: height})
 	r.server.SetBlockHeight(height)
 	r.server.Mempool().RemoveConfirmed(blk.Transactions)
-	r.mu.Unlock()
+	r.chainMu.Unlock()
 
 	log.Printf("reasoner: mined block %d hash=%x", height, tipHash[:8])
 

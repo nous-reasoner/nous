@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -119,8 +120,11 @@ func main() {
 	server.SetBlockHeight(chain.Height)
 	log.Printf("p2p: listening on %s", server.ListenAddr())
 
+	// Shared mutex for ChainState access (used by both ChainAdapter and Reasoner).
+	var chainMu sync.Mutex
+
 	// Start block syncer (handles incoming blocks and sync protocol).
-	chainAdapter := node.NewChainAdapter(chain, store, server)
+	chainAdapter := node.NewChainAdapter(chain, store, &chainMu)
 	syncer := network.NewBlockSyncer(server, chainAdapter)
 	syncer.Start()
 
@@ -146,7 +150,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("key: %v", err)
 		}
-		reasoner = node.NewReasoner(chain, server, store, pubKey)
+		reasoner = node.NewReasoner(chain, server, store, pubKey, &chainMu)
 		reasoner.Start()
 		log.Println("reasoning enabled")
 	}

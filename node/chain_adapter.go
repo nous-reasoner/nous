@@ -8,7 +8,6 @@ import (
 	"nous/block"
 	"nous/consensus"
 	"nous/crypto"
-	"nous/network"
 	"nous/storage"
 )
 
@@ -18,26 +17,29 @@ import (
 // On mining nodes, the miner writes blocks directly to the chain and store,
 // bypassing this adapter. The adapter handles this by refreshing its index
 // from the store when it detects a cache miss.
+//
+// The chainMu mutex is shared with the Reasoner to prevent concurrent access
+// to ChainState, which is not internally synchronized.
 type ChainAdapter struct {
-	mu         sync.Mutex
+	chainMu    *sync.Mutex
 	chain      *consensus.ChainState
 	store      *storage.BlockStore
-	server     *network.Server
 	hashIndex  map[crypto.Hash]uint64 // block hash → height
 	heightHash map[uint64]crypto.Hash // height → block hash
 	indexed    uint64                 // highest height indexed so far
 }
 
 // NewChainAdapter creates a new chain adapter.
+// chainMu must be shared with the Reasoner to prevent data races on ChainState.
 func NewChainAdapter(
 	chain *consensus.ChainState,
 	store *storage.BlockStore,
-	server *network.Server,
+	chainMu *sync.Mutex,
 ) *ChainAdapter {
 	ca := &ChainAdapter{
+		chainMu:    chainMu,
 		chain:      chain,
 		store:      store,
-		server:     server,
 		hashIndex:  make(map[crypto.Hash]uint64),
 		heightHash: make(map[uint64]crypto.Hash),
 	}
@@ -47,7 +49,7 @@ func NewChainAdapter(
 }
 
 // refreshIndex indexes any new blocks in the store that we haven't indexed yet.
-// Must be called with ca.mu held.
+// Must be called with chainMu held.
 func (ca *ChainAdapter) refreshIndex() {
 	// Index blocks from indexed+1 up to what's available in store.
 	start := ca.indexed + 1
@@ -67,20 +69,20 @@ func (ca *ChainAdapter) refreshIndex() {
 }
 
 func (ca *ChainAdapter) Height() uint64 {
-	ca.mu.Lock()
-	defer ca.mu.Unlock()
+	ca.chainMu.Lock()
+	defer ca.chainMu.Unlock()
 	return ca.chain.Height
 }
 
 func (ca *ChainAdapter) TipHash() crypto.Hash {
-	ca.mu.Lock()
-	defer ca.mu.Unlock()
+	ca.chainMu.Lock()
+	defer ca.chainMu.Unlock()
 	return ca.chain.Tip.Hash()
 }
 
 func (ca *ChainAdapter) HasBlock(hash crypto.Hash) bool {
-	ca.mu.Lock()
-	defer ca.mu.Unlock()
+	ca.chainMu.Lock()
+	defer ca.chainMu.Unlock()
 	if _, ok := ca.hashIndex[hash]; ok {
 		return true
 	}
@@ -91,13 +93,13 @@ func (ca *ChainAdapter) HasBlock(hash crypto.Hash) bool {
 }
 
 func (ca *ChainAdapter) GetBlockByHeight(height uint64) (*block.Block, error) {
-	// Store has its own lock; no need for ca.mu.
+	// Store has its own lock; no need for chainMu.
 	return ca.store.LoadBlockByHeight(height)
 }
 
 func (ca *ChainAdapter) GetBlockHashByHeight(height uint64) (crypto.Hash, error) {
-	ca.mu.Lock()
-	defer ca.mu.Unlock()
+	ca.chainMu.Lock()
+	defer ca.chainMu.Unlock()
 	if hash, ok := ca.heightHash[height]; ok {
 		return hash, nil
 	}
@@ -110,8 +112,8 @@ func (ca *ChainAdapter) GetBlockHashByHeight(height uint64) (crypto.Hash, error)
 }
 
 func (ca *ChainAdapter) GetBlockByHash(hash crypto.Hash) (*block.Block, error) {
-	ca.mu.Lock()
-	defer ca.mu.Unlock()
+	ca.chainMu.Lock()
+	defer ca.chainMu.Unlock()
 	height, ok := ca.hashIndex[hash]
 	if !ok {
 		ca.refreshIndex()
@@ -123,27 +125,102 @@ func (ca *ChainAdapter) GetBlockByHash(hash crypto.Hash) (*block.Block, error) {
 	return ca.store.LoadBlockByHeight(height)
 }
 
+// AddBlock validates and adds a block to the chain. Returns the new chain height.
+//
+// Handles three outcomes from chain.AddBlock:
+//   - Tip extension: block extends the current tip (height += 1)
+//   - Side-chain block: block is stored in the index but the tip is unchanged
+//   - Reorg: a heavier side chain becomes the new main chain
+//
+// Only main-chain blocks are persisted to the store. Network-side effects
+// (SetBlockHeight, RemoveConfirmed) are NOT called here — callers handle those.
 func (ca *ChainAdapter) AddBlock(blk *block.Block) (uint64, error) {
-	ca.mu.Lock()
-	defer ca.mu.Unlock()
+	ca.chainMu.Lock()
+	defer ca.chainMu.Unlock()
 
-	newHeight := ca.chain.Height + 1
+	oldHeight := ca.chain.Height
+	oldTipHash := ca.chain.Tip.Hash()
+
 	if err := ca.chain.AddBlock(blk); err != nil {
 		return 0, err
 	}
 
-	if err := ca.store.SaveBlock(blk, newHeight); err != nil {
-		log.Printf("chain_adapter: save block %d: %v", newHeight, err)
+	newHeight := ca.chain.Height
+	newTipHash := ca.chain.Tip.Hash()
+
+	// If the tip didn't change, this is a lighter side-chain block.
+	// chain.AddBlock stored it in the block index but didn't switch tips.
+	// Don't save to disk or update our caches.
+	if newTipHash == oldTipHash {
+		return oldHeight, nil
 	}
 
-	tipHash := blk.Header.Hash()
-	ca.hashIndex[tipHash] = newHeight
-	ca.heightHash[newHeight] = tipHash
+	blkHash := blk.Header.Hash()
+
+	// Simple tip extension: the submitted block became the new tip.
+	if newHeight == oldHeight+1 && blkHash == newTipHash {
+		if err := ca.store.SaveBlock(blk, newHeight); err != nil {
+			log.Printf("chain_adapter: save block %d: %v", newHeight, err)
+		}
+		ca.hashIndex[blkHash] = newHeight
+		ca.heightHash[newHeight] = blkHash
+		ca.indexed = newHeight
+		ca.store.SaveChainTip(storage.ChainTip{Hash: newTipHash, Height: newHeight})
+		return newHeight, nil
+	}
+
+	// Reorg: the tip changed but not via simple extension.
+	// Rebuild the store and caches for affected heights.
+	log.Printf("chain_adapter: reorg detected (height %d→%d)", oldHeight, newHeight)
+
+	// Clean stale entries for heights above the new tip.
+	for h := newHeight + 1; h <= oldHeight; h++ {
+		if hash, ok := ca.heightHash[h]; ok {
+			delete(ca.hashIndex, hash)
+			delete(ca.heightHash, h)
+		}
+	}
+
+	// Find the fork point by walking backwards from the lower of the two heights.
+	forkHeight := newHeight
+	if oldHeight < forkHeight {
+		forkHeight = oldHeight
+	}
+	for forkHeight > 0 {
+		chainBlock := ca.chain.GetMainChainBlock(forkHeight)
+		if chainBlock == nil {
+			forkHeight--
+			continue
+		}
+		chainHash := chainBlock.Header.Hash()
+		if cachedHash, ok := ca.heightHash[forkHeight]; ok && cachedHash == chainHash {
+			break
+		}
+		forkHeight--
+	}
+
+	// Save all blocks from fork point+1 to new tip.
+	for h := forkHeight + 1; h <= newHeight; h++ {
+		// Remove stale hash entry for this height.
+		if oldHash, ok := ca.heightHash[h]; ok {
+			delete(ca.hashIndex, oldHash)
+		}
+		chainBlock := ca.chain.GetMainChainBlock(h)
+		if chainBlock == nil {
+			log.Printf("chain_adapter: reorg: missing block at height %d", h)
+			continue
+		}
+		if err := ca.store.SaveBlock(chainBlock, h); err != nil {
+			log.Printf("chain_adapter: reorg: save block %d: %v", h, err)
+		}
+		hash := chainBlock.Header.Hash()
+		ca.hashIndex[hash] = h
+		ca.heightHash[h] = hash
+	}
 	ca.indexed = newHeight
 
-	ca.store.SaveChainTip(storage.ChainTip{Hash: tipHash, Height: newHeight})
-	ca.server.SetBlockHeight(newHeight)
-	ca.server.Mempool().RemoveConfirmed(blk.Transactions)
+	ca.store.SaveChainTip(storage.ChainTip{Hash: newTipHash, Height: newHeight})
+	log.Printf("chain_adapter: reorg complete (fork at %d, new height %d)", forkHeight, newHeight)
 
 	return newHeight, nil
 }

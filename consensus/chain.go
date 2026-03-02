@@ -287,6 +287,16 @@ func (cs *ChainState) GetDifficulty() *DifficultyParams {
 	return cs.Difficulty
 }
 
+// GetMainChainBlock returns the block at the given height on the current main chain.
+// Returns nil if no block exists at that height on the main chain.
+func (cs *ChainState) GetMainChainBlock(height uint64) *block.Block {
+	node := cs.tipNode.ancestor(height)
+	if node == nil {
+		return nil
+	}
+	return node.Block
+}
+
 // HasBlock returns true if the block hash is in the block index.
 func (cs *ChainState) HasBlock(hash crypto.Hash) bool {
 	_, ok := cs.blockIndex[hash]

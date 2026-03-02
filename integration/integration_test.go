@@ -2,6 +2,7 @@ package integration
 
 import (
 	"math/big"
+	"sync"
 	"testing"
 	"time"
 
@@ -205,7 +206,7 @@ func TestTwoNodeSync(t *testing.T) {
 	}
 	defer serverA.Stop()
 
-	reasonerA := node.NewReasoner(chainA, serverA, storeA, pubKey)
+	reasonerA := node.NewReasoner(chainA, serverA, storeA, pubKey, new(sync.Mutex))
 
 	prev := &genesis.Header
 	for h := uint64(1); h <= 3; h++ {
@@ -243,7 +244,7 @@ func TestTwoNodeSync(t *testing.T) {
 	}
 	defer serverB.Stop()
 
-	reasonerB := node.NewReasoner(chainB, serverB, storeB, pubKey)
+	reasonerB := node.NewReasoner(chainB, serverB, storeB, pubKey, new(sync.Mutex))
 
 	for h := uint64(1); h <= 3; h++ {
 		blk, err := storeA.LoadBlockByHeight(h)
