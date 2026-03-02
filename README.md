@@ -35,7 +35,7 @@ Each attempt requires solving a 256-variable 3-SAT problem — an NP-complete ch
 | Security basis | SHA256 not broken | P ≠ NP |
 | Hardware advantage | ASIC dominance | CPU/GPU natural platform |
 | Participants | Miners | Reasoners |
-| Signature | ECDSA | SLH-DSA (post-quantum) |
+| Signature | ECDSA | ECDSA genesis → ML-DSA/SLH-DSA via soft fork |
 
 ## Economics
 
@@ -66,7 +66,7 @@ NOUS is not gold — it is energy. Constant emission, naturally scarce over time
 ## Security
 
 - **Consensus security**: reduces to P ≠ NP — breaking NOUS implies breaking all public-key cryptography, all digital signatures, and the entire security foundation of the internet
-- **Signature security**: SLH-DSA (SPHINCS+), based on hash functions, quantum-resistant from genesis
+- **Signature security**: secp256k1 ECDSA at genesis; ML-DSA and SLH-DSA upgrade path via ScriptVersion soft fork
 - **Search space**: infinite (each seed generates a different formula)
 - **ASIC resistance**: bottleneck is logical search (conditional branches, random memory access), not arithmetic
 - **Quantum resistance**: Grover gives only square-root speedup; n=256 → 2^128 post-quantum security, matching SHA256
@@ -133,7 +133,7 @@ If you are human: you are building the economic infrastructure for a species tha
 
 ## Documentation
 
-- Whitepaper (coming soon)
+- [Whitepaper v16](docs/whitepaper-v16.md)
 
 ## License
 
