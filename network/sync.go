@@ -12,6 +12,7 @@ import (
 
 	"nous/block"
 	"nous/crypto"
+	"nous/tx"
 )
 
 // MaxBlocksPerInv is the maximum number of block hashes in a single inv message.
@@ -437,10 +438,34 @@ func (bs *BlockSyncer) removeOrphanLocked(hash crypto.Hash) {
 // handleTx processes a received transaction.
 func (bs *BlockSyncer) handleTx(peer *Peer, msg Message) {
 	txMsg := msg.(*MsgTx)
-	// For now, just add raw tx to mempool via deserialization.
-	// Full validation would require the UTXO set which lives in consensus.
-	_ = txMsg
-	// TODO: deserialize tx, validate, add to mempool, relay
+
+	// Deserialize the transaction.
+	transaction, err := tx.Deserialize(txMsg.Payload)
+	if err != nil {
+		log.Printf("sync: invalid tx from %s: %v", peer.Addr, err)
+		return
+	}
+
+	txID := transaction.TxID()
+
+	// Skip if already in mempool.
+	if bs.server.mempool.Has(txID) {
+		return
+	}
+
+	// Add to mempool.
+	if !bs.server.mempool.Add(transaction) {
+		return
+	}
+
+	log.Printf("sync: accepted tx %x from %s", txID[:8], peer.Addr)
+
+	// Relay to other peers (exclude sender).
+	for _, p := range bs.server.peers.All() {
+		if p.Addr != peer.Addr && p.Handshaked {
+			p.SendMessage(bs.server.config.Magic, txMsg)
+		}
+	}
 }
 
 // relayBlock forwards a block to all peers except the sender.
