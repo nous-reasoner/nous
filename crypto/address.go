@@ -130,6 +130,16 @@ func base58Decode(s string) ([]byte, error) {
 	return out, nil
 }
 
+// DecodePubKeyHash decodes a NOUS address (Base58Check or Bech32m) and returns
+// the 20-byte public key hash.
+func DecodePubKeyHash(addr string) ([]byte, error) {
+	if strings.HasPrefix(strings.ToLower(addr), AddressHRP+"1") {
+		_, hash, err := Bech32mAddressToPubKeyHash(addr)
+		return hash, err
+	}
+	return AddressToPubKeyHash(Address(addr))
+}
+
 // IsValidAddress returns true if the string is a valid NOUS address
 // (either Base58Check or Bech32m with "nous1" prefix).
 func IsValidAddress(addr string) bool {

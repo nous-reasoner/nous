@@ -247,7 +247,7 @@ func (r *RPCServer) handleGetBalance(params json.RawMessage) (interface{}, *rpcE
 	if err := json.Unmarshal(params, &args); err != nil || len(args) < 1 {
 		return nil, &rpcError{Code: -32602, Message: "params: [address]"}
 	}
-	pkh, err := crypto.AddressToPubKeyHash(crypto.Address(args[0]))
+	pkh, err := crypto.DecodePubKeyHash(args[0])
 	if err != nil {
 		return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("invalid address: %v", err)}
 	}
@@ -285,7 +285,7 @@ func (r *RPCServer) handleListUnspent(params json.RawMessage) (interface{}, *rpc
 	if err := json.Unmarshal(params, &args); err != nil || len(args) < 1 {
 		return nil, &rpcError{Code: -32602, Message: "params: [address]"}
 	}
-	pkh, err := crypto.AddressToPubKeyHash(crypto.Address(args[0]))
+	pkh, err := crypto.DecodePubKeyHash(args[0])
 	if err != nil {
 		return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("invalid address: %v", err)}
 	}

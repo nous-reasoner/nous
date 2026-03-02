@@ -24,8 +24,8 @@ func TestNewWalletAddressFormat(t *testing.T) {
 		t.Fatal("address should not be empty")
 	}
 
-	// Address should be valid Base58Check — round-trip decode must succeed.
-	pkh, err := crypto.AddressToPubKeyHash(addr)
+	// Address should be valid Bech32m — round-trip decode must succeed.
+	pkh, err := crypto.DecodePubKeyHash(string(addr))
 	if err != nil {
 		t.Fatalf("address decode failed: %v", err)
 	}

@@ -77,7 +77,7 @@ func (w *Wallet) ImportPrivateKey(privBytes []byte) (int, error) {
 		return 0, fmt.Errorf("wallet: import: %w", err)
 	}
 	pubKey := privKey.PubKey()
-	addr := crypto.PubKeyToAddress(pubKey)
+	addr := crypto.Address(crypto.PubKeyToBech32mAddress(pubKey))
 	w.Keys = append(w.Keys, KeyPair{
 		PrivateKey: privKey,
 		PublicKey:  pubKey,
@@ -207,7 +207,7 @@ func LoadFromFile(path, password string) (*Wallet, error) {
 		w.Keys[i] = KeyPair{
 			PrivateKey: privKey,
 			PublicKey:  pubKey,
-			Address:    crypto.PubKeyToAddress(pubKey),
+			Address:    crypto.Address(crypto.PubKeyToBech32mAddress(pubKey)),
 		}
 	}
 	return w, nil
@@ -264,7 +264,7 @@ func (w *Wallet) CreateTransaction(to crypto.Address, amount, fee int64, utxoSet
 	needed := amount + fee
 
 	// Decode destination pubkey hash.
-	toPKH, err := crypto.AddressToPubKeyHash(to)
+	toPKH, err := crypto.DecodePubKeyHash(string(to))
 	if err != nil {
 		return nil, fmt.Errorf("wallet: invalid destination address: %w", err)
 	}
@@ -365,6 +365,6 @@ func generateKeyPair() (KeyPair, error) {
 	return KeyPair{
 		PrivateKey: privKey,
 		PublicKey:  pubKey,
-		Address:    crypto.PubKeyToAddress(pubKey),
+		Address:    crypto.Address(crypto.PubKeyToBech32mAddress(pubKey)),
 	}, nil
 }

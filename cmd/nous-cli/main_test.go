@@ -53,7 +53,7 @@ func TestCreateWallet(t *testing.T) {
 		t.Fatal("address is empty")
 	}
 
-	pkh, err := crypto.AddressToPubKeyHash(addr)
+	pkh, err := crypto.DecodePubKeyHash(string(addr))
 	if err != nil {
 		t.Fatalf("invalid address %s: %v", addr, err)
 	}
@@ -226,7 +226,7 @@ func TestSendTransactionFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destAddr := crypto.PubKeyToAddress(destPub)
+	destAddr := crypto.Address(crypto.PubKeyToBech32mAddress(destPub))
 	sendAmount := int64(2 * NOU) // 2 NOUS
 
 	// Build a local UTXOSet from the mock data and create the transaction.
