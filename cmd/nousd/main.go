@@ -61,7 +61,11 @@ func main() {
 	if *testnet {
 		genesisBits = uint32(0x2000ffff) // testnet
 	}
-	genesis := block.GenesisBlock(genesisPKH, 0, genesisBits)
+	genesisTimestamp := uint32(0) // mainnet: will be set to a fixed value before launch
+	if *testnet {
+		genesisTimestamp = 1735689600 // 2025-01-01 00:00:00 UTC
+	}
+	genesis := block.GenesisBlock(genesisPKH, genesisTimestamp, genesisBits)
 
 	// Initialize chain state.
 	chain := consensus.NewChainState(genesis)

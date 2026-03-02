@@ -596,6 +596,17 @@ func (mc *mockChain) GetBlockHashByHeight(height uint64) (crypto.Hash, error) {
 	return mc.hashes[height], nil
 }
 
+func (mc *mockChain) GetBlockByHash(hash crypto.Hash) (*block.Block, error) {
+	mc.mu.RLock()
+	defer mc.mu.RUnlock()
+	for i, h := range mc.hashes {
+		if h == hash {
+			return mc.blocks[i], nil
+		}
+	}
+	return nil, fmt.Errorf("block %x not found", hash[:8])
+}
+
 func (mc *mockChain) AddBlock(blk *block.Block) (uint64, error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()

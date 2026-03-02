@@ -84,6 +84,19 @@ func MineBlock(
 	if now <= prevHeader.Timestamp {
 		now = prevHeader.Timestamp + 1
 	}
+	// If we've drifted too far into the future (fast mining), wait until the
+	// timestamp is within the MaxFutureSeconds validation window.
+	maxAllowed := uint32(time.Now().Unix()) + MaxFutureSeconds - 30
+	if now > maxAllowed {
+		wait := time.Duration(now-maxAllowed) * time.Second
+		log.Printf("mine: timestamp %d exceeds safe window, sleeping %v", now, wait)
+		time.Sleep(wait)
+		// Recompute now in case wall-clock caught up.
+		now = uint32(time.Now().Unix())
+		if now <= prevHeader.Timestamp {
+			now = prevHeader.Timestamp + 1
+		}
+	}
 
 	// UTXO set hash (not yet implemented; zero for now).
 	var utxoSetHash crypto.Hash

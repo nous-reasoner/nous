@@ -109,6 +109,20 @@ func (ca *ChainAdapter) GetBlockHashByHeight(height uint64) (crypto.Hash, error)
 	return crypto.Hash{}, fmt.Errorf("block at height %d not found", height)
 }
 
+func (ca *ChainAdapter) GetBlockByHash(hash crypto.Hash) (*block.Block, error) {
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+	height, ok := ca.hashIndex[hash]
+	if !ok {
+		ca.refreshIndex()
+		height, ok = ca.hashIndex[hash]
+		if !ok {
+			return nil, fmt.Errorf("block %x not found", hash[:8])
+		}
+	}
+	return ca.store.LoadBlockByHeight(height)
+}
+
 func (ca *ChainAdapter) AddBlock(blk *block.Block) (uint64, error) {
 	ca.mu.Lock()
 	defer ca.mu.Unlock()

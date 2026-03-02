@@ -19,7 +19,7 @@ const MaxBlocksPerInv = 500
 
 // Orphan pool limits.
 const (
-	MaxOrphanBlocks = 100
+	MaxOrphanBlocks = 500
 	OrphanExpiry    = time.Hour
 )
 
@@ -45,6 +45,8 @@ type ChainAccess interface {
 	GetBlockByHeight(height uint64) (*block.Block, error)
 	// GetBlockHashByHeight returns the block hash at the given height.
 	GetBlockHashByHeight(height uint64) (crypto.Hash, error)
+	// GetBlockByHash returns a block by its hash.
+	GetBlockByHash(hash crypto.Hash) (*block.Block, error)
 	// AddBlock validates and adds a block to the chain. Returns the new height.
 	AddBlock(blk *block.Block) (uint64, error)
 }
@@ -131,8 +133,15 @@ func (bs *BlockSyncer) SyncFromPeer(peer *Peer) error {
 func (bs *BlockSyncer) TriggerSync() {
 	bs.mu.Lock()
 	if bs.state == SyncInProgress {
-		bs.mu.Unlock()
-		return
+		// Check if the sync peer is still connected.
+		if bs.syncPeer != nil && bs.server.peers.Get(bs.syncPeer.Addr) == nil {
+			log.Printf("sync: peer %s disconnected, resetting sync state", bs.syncPeer.Addr)
+			bs.state = SyncIdle
+			bs.syncPeer = nil
+		} else {
+			bs.mu.Unlock()
+			return
+		}
 	}
 	bs.mu.Unlock()
 
@@ -181,9 +190,9 @@ func (bs *BlockSyncer) handleGetBlocks(peer *Peer, msg Message) {
 		items = append(items, InvItem{Type: InvTypeBlock, Hash: hash})
 	}
 
-	if len(items) > 0 {
-		peer.SendMessage(bs.server.config.Magic, &MsgInv{Items: items})
-	}
+	// Always send inv, even if empty. An empty inv lets the requester
+	// transition to SyncComplete in handleInv.
+	peer.SendMessage(bs.server.config.Magic, &MsgInv{Items: items})
 }
 
 // handleInv processes inventory announcements. Requests any blocks we don't have.
@@ -228,26 +237,15 @@ func (bs *BlockSyncer) handleGetData(peer *Peer, msg Message) {
 }
 
 func (bs *BlockSyncer) sendBlockByHash(peer *Peer, hash crypto.Hash) {
-	// Search for the block by hash (walk the chain).
-	ourHeight := bs.chain.Height()
-	for h := uint64(0); h <= ourHeight; h++ {
-		blkHash, err := bs.chain.GetBlockHashByHeight(h)
-		if err != nil {
-			continue
-		}
-		if blkHash == hash {
-			blk, err := bs.chain.GetBlockByHeight(h)
-			if err != nil {
-				return
-			}
-			payload, err := EncodeBlock(blk)
-			if err != nil {
-				return
-			}
-			peer.SendMessage(bs.server.config.Magic, &MsgBlock{Payload: payload})
-			return
-		}
+	blk, err := bs.chain.GetBlockByHash(hash)
+	if err != nil {
+		return
 	}
+	payload, err := EncodeBlock(blk)
+	if err != nil {
+		return
+	}
+	peer.SendMessage(bs.server.config.Magic, &MsgBlock{Payload: payload})
 }
 
 func (bs *BlockSyncer) sendTx(peer *Peer, hash crypto.Hash) {
@@ -277,6 +275,7 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 	bs.mu.Unlock()
 
 	// Add to chain.
+	accepted := false
 	newHeight, err := bs.chain.AddBlock(blk)
 	if err != nil {
 		// If the block's parent is unknown, store it as an orphan.
@@ -285,19 +284,19 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 		} else {
 			log.Printf("sync: reject block %x from %s: %v", blockHash[:8], peer.Addr, err)
 		}
-		return
+	} else {
+		accepted = true
+		log.Printf("sync: accepted block %x at height %d from %s", blockHash[:8], newHeight, peer.Addr)
+
+		// Update server's advertised height.
+		bs.server.SetBlockHeight(newHeight)
+
+		// Remove confirmed transactions from mempool.
+		bs.server.mempool.RemoveConfirmed(blk.Transactions)
+
+		// Process any orphan blocks waiting for this parent.
+		bs.processOrphans(blockHash, peer)
 	}
-
-	log.Printf("sync: accepted block %x at height %d from %s", blockHash[:8], newHeight, peer.Addr)
-
-	// Update server's advertised height.
-	bs.server.SetBlockHeight(newHeight)
-
-	// Remove confirmed transactions from mempool.
-	bs.server.mempool.RemoveConfirmed(blk.Transactions)
-
-	// Process any orphan blocks waiting for this parent.
-	bs.processOrphans(blockHash, peer)
 
 	// If we were syncing and have no more pending blocks, request more or finish.
 	bs.mu.Lock()
@@ -314,8 +313,10 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 		})
 	}
 
-	// Relay to other peers (not the sender).
-	bs.relayBlock(peer, blkMsg)
+	// Relay accepted blocks to other peers (not the sender).
+	if accepted {
+		bs.relayBlock(peer, blkMsg)
+	}
 }
 
 // addOrphan stores a block whose parent is not yet known and requests the parent.
@@ -353,10 +354,12 @@ func (bs *BlockSyncer) addOrphan(blk *block.Block, peer *Peer) {
 	log.Printf("sync: orphan block %x (parent %x) stored (%d orphans)",
 		hash[:8], parentHash[:8], len(bs.orphans))
 
-	// Request the missing parent from the peer.
-	peer.SendMessage(bs.server.config.Magic, &MsgGetData{
-		Items: []InvItem{{Type: InvTypeBlock, Hash: parentHash}},
-	})
+	// Request the missing parent from the peer, unless it's already pending.
+	if !bs.pending[parentHash] {
+		peer.SendMessage(bs.server.config.Magic, &MsgGetData{
+			Items: []InvItem{{Type: InvTypeBlock, Hash: parentHash}},
+		})
+	}
 }
 
 // processOrphans tries to accept orphan blocks that depend on the accepted block.
