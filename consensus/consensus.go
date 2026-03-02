@@ -18,8 +18,7 @@
 //  5. Verify all transactions and UTXO consistency
 //
 // Difficulty adjustment (adjust.go):
-//   PoW target adjustment every 1008 blocks,
-//   with ±25% cap (normal) and 2x emergency cap (ratio >= 4).
+//   ASERT per-block adjustment with 12-hour halflife (43200 seconds).
 //
 // Chain state (chain.go):
 //   Tracks tip, UTXO set, and current difficulty parameters.

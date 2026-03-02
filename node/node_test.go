@@ -8,18 +8,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/consensus"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/network"
-	"github.com/nous-chain/nous/storage"
+	"nous/block"
+	"nous/consensus"
+	"nous/crypto"
+	"nous/network"
+	"nous/storage"
 )
 
 // helper: create a test node with the given genesis block.
 func setupTestNode(t *testing.T, genesis *block.Block) (*consensus.ChainState, *storage.BlockStore, *network.Server) {
 	t.Helper()
 	if genesis == nil {
-		genesis = block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
+		genesis = block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
 	}
 	dir := t.TempDir()
 	store, err := storage.NewBlockStore(dir)
@@ -176,7 +176,7 @@ func TestMiningProducesBlock(t *testing.T) {
 // ============================================================
 
 func TestTwoNodeSync(t *testing.T) {
-	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
+	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
 
 	chainA, storeA, serverA := setupTestNode(t, genesis)
 	chainA.Difficulty = easyDifficulty()

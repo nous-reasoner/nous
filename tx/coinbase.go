@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/nous-chain/nous/crypto"
+	"nous/crypto"
 )
 
 // NewCoinbaseTx creates a coinbase transaction paying the block reward.

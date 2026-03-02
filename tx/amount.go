@@ -11,10 +11,13 @@ import (
 type Amount = int64
 
 // Amount constants.
+// NOUS uses perpetual linear emission (1 NOUS/block forever) with no supply cap.
+// MaxAmount is not a supply limit — it exists solely to prevent integer overflow
+// in summation and validation logic.
 const (
-	Coin     Amount = 1_0000_0000                // 1 NOUS in nou
-	MaxAmount Amount = 21_000_000_0000_0000       // maximum total supply in nou
-	DustLimit Amount = 546                        // minimum non-coinbase output value
+	Coin      Amount = 1_0000_0000          // 1 NOUS in nou
+	MaxAmount Amount = math.MaxInt64 / 2    // overflow guard, not a supply cap
+	DustLimit Amount = 546                  // minimum non-coinbase output value
 )
 
 // CheckAmount validates that a is in the range [0, MaxAmount].

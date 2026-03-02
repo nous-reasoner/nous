@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/consensus"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/network"
-	"github.com/nous-chain/nous/storage"
-	"github.com/nous-chain/nous/tx"
+	"nous/block"
+	"nous/consensus"
+	"nous/crypto"
+	"nous/network"
+	"nous/storage"
+	"nous/tx"
 )
 
 // MaxBlockTxs is the maximum number of mempool transactions per block.
@@ -151,6 +151,7 @@ func (r *Reasoner) reasonOne() {
 	}
 
 	log.Printf("reasoner: reasoning block %d (%d txs)...", height, len(validTxs))
+	log.Printf("reasoner: block %d target=0x%08x", height, consensus.TargetToCompact(diff.PoWTarget))
 
 	blk, err := consensus.MineBlock(tip, validTxs, pubKeyHash, diff, height, r.chain.UTXOSet)
 	if err != nil {

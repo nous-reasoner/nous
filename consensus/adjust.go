@@ -3,7 +3,7 @@ package consensus
 import (
 	"math/big"
 
-	"github.com/nous-chain/nous/crypto"
+	"nous/crypto"
 )
 
 // ASERTHalflife is the time in seconds for the target to halve or double

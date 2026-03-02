@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"errors"
 
-	"github.com/nous-chain/nous/crypto"
+	"nous/crypto"
 )
 
 // UTXO represents an unspent transaction output.

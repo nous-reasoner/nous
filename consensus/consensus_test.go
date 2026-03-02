@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/sat"
-	"github.com/nous-chain/nous/tx"
+	"nous/block"
+	"nous/crypto"
+	"nous/sat"
+	"nous/tx"
 )
 
 // testParams returns difficulty params with trivially easy PoW.
@@ -26,7 +26,7 @@ func testParams() *DifficultyParams {
 // Uses a timestamp 60 seconds in the past so that MineBlock (which uses
 // time.Now()) always produces a strictly later timestamp.
 func makeGenesis(pubKeyHash []byte) *block.Block {
-	return block.GenesisBlock(pubKeyHash, uint32(time.Now().Unix())-60)
+	return block.GenesisBlock(pubKeyHash, uint32(time.Now().Unix())-60, 0x1d00ffff)
 }
 
 // mineTestBlock is a helper that mines a block with easy PoW.

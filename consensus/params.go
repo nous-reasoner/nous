@@ -3,7 +3,7 @@ package consensus
 import (
 	"math/big"
 
-	"github.com/nous-chain/nous/crypto"
+	"nous/crypto"
 )
 
 // NousPerCoin is the number of base units (nou) per 1 NOUS coin.

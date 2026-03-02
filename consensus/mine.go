@@ -3,16 +3,17 @@ package consensus
 import (
 	"encoding/binary"
 	"errors"
+	"log"
 	"time"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/sat"
-	"github.com/nous-chain/nous/tx"
+	"nous/block"
+	"nous/crypto"
+	"nous/sat"
+	"nous/tx"
 )
 
 // SATSolveTimeout is the timeout for each SAT solve attempt during mining.
-const SATSolveTimeout = 10 * time.Second
+const SATSolveTimeout = 100 * time.Millisecond
 
 // MineBlock performs the complete Cogito Consensus mining flow and returns a valid block.
 //
@@ -88,6 +89,7 @@ func MineBlock(
 	var utxoSetHash crypto.Hash
 
 	// Mining loop: iterate seed values.
+	startTime := time.Now()
 	for seed := uint64(0); ; seed++ {
 		satSeed := makeSATSeed(prevHash, seed)
 		formula := sat.GenerateFormula(satSeed, SATVariables, SATClausesRatio)
@@ -117,6 +119,7 @@ func MineBlock(
 		// Check PoW: hash < target.
 		blockHash := hdr.Hash()
 		if blockHash.Compare(params.PoWTarget) <= 0 {
+			log.Printf("mine: block found at seed=%d, attempts=%d, elapsed=%v", seed, seed+1, time.Since(startTime))
 			blk := &block.Block{
 				Header:       hdr,
 				Transactions: allTxs,

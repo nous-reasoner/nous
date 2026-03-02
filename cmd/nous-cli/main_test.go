@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/tx"
-	"github.com/nous-chain/nous/wallet"
+	"nous/crypto"
+	"nous/tx"
+	"nous/wallet"
 )
 
 // ============================================================

@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/crypto"
+	"nous/block"
+	"nous/crypto"
 )
 
 // MaxBlocksPerInv is the maximum number of block hashes in a single inv message.

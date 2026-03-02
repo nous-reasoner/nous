@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/tx"
+	"nous/block"
+	"nous/crypto"
+	"nous/tx"
 )
 
 // ============================================================

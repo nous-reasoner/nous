@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/nous-chain/nous/crypto"
+	"nous/crypto"
 )
 
 // ============================================================

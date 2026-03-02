@@ -5,14 +5,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/consensus"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/network"
-	"github.com/nous-chain/nous/node"
-	"github.com/nous-chain/nous/storage"
-	"github.com/nous-chain/nous/tx"
-	"github.com/nous-chain/nous/wallet"
+	"nous/block"
+	"nous/consensus"
+	"nous/crypto"
+	"nous/network"
+	"nous/node"
+	"nous/storage"
+	"nous/tx"
+	"nous/wallet"
 )
 
 const NOU = int64(1_0000_0000)
@@ -41,7 +41,7 @@ func TestFullMiningCycle(t *testing.T) {
 	}
 	minerPKH := crypto.Hash160(pubKey.SerializeCompressed())
 
-	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
+	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
 	chain := consensus.NewChainState(genesis)
 	chain.Difficulty = easyDifficulty()
 	chain.Anchor.Target = easyDifficulty().PoWTarget
@@ -103,7 +103,7 @@ func TestTransferBetweenWallets(t *testing.T) {
 	pkhA := walletA.PubKeyHash()
 	pkhB := walletB.PubKeyHash()
 
-	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
+	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
 	chain := consensus.NewChainState(genesis)
 	chain.Difficulty = easyDifficulty()
 	chain.Anchor.Target = easyDifficulty().PoWTarget
@@ -183,7 +183,7 @@ func TestTwoNodeSync(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pubKey.SerializeCompressed())
 
-	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
+	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
 
 	// --- Node A: mine 3 blocks ---
 	chainA := consensus.NewChainState(genesis)
@@ -277,7 +277,7 @@ func TestMiningWithSAT(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pubKey.SerializeCompressed())
 
-	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
+	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
 	chain := consensus.NewChainState(genesis)
 	chain.Difficulty = easyDifficulty()
 	chain.Anchor.Target = easyDifficulty().PoWTarget

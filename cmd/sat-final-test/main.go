@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nous-chain/nous/sat"
+	"nous/sat"
 )
 
 func main() {

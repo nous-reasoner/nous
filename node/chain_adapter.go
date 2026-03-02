@@ -5,11 +5,11 @@ import (
 	"log"
 	"sync"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/consensus"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/network"
-	"github.com/nous-chain/nous/storage"
+	"nous/block"
+	"nous/consensus"
+	"nous/crypto"
+	"nous/network"
+	"nous/storage"
 )
 
 // ChainAdapter bridges consensus.ChainState + storage.BlockStore to the

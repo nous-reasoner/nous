@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/crypto"
+	"nous/block"
+	"nous/crypto"
 )
 
 // TestConvergence simulates a mining loop to verify that block intervals
@@ -26,7 +26,7 @@ func TestConvergence(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pubKey.SerializeCompressed())
 
-	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60)
+	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
 	chain := NewChainState(genesis)
 	chain.Difficulty = TestnetDifficultyParams()
 	chain.Anchor.Target = TestnetDifficultyParams().PoWTarget

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nous-chain/nous/crypto"
+	"nous/crypto"
 )
 
 // ChainIDNous is the chain identifier for the NOUS mainnet.

@@ -1,7 +1,7 @@
 package network
 
 import (
-	"github.com/nous-chain/nous/crypto"
+	"nous/crypto"
 )
 
 // Wire protocol constants.

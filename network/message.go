@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nous-chain/nous/crypto"
+	"nous/crypto"
 )
 
 // EncodeMessage serializes a Message to the wire format:

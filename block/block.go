@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/tx"
+	"nous/crypto"
+	"nous/tx"
 )
 
 // HeaderSize is the fixed size of a serialized Cogito Consensus header.
@@ -37,11 +37,17 @@ type Block struct {
 	SATSolution  []bool // SAT assignment (256 booleans)
 }
 
-// MaxBlockSize is the maximum allowed serialized block size (1 MB).
-const MaxBlockSize = 1_000_000
+// Block size limits use a two-tier design:
+//   - SoftBlockSize (4 MB): default relay/mining policy limit.
+//   - MaxBlockSize (16 MB): hard consensus limit; blocks above this are invalid.
+// Miners may produce blocks up to MaxBlockSize, but default policy targets SoftBlockSize
+// to leave headroom for burst traffic without hitting the hard cap.
+const (
+	SoftBlockSize = 4_000_000
+	MaxBlockSize  = 16_000_000
+)
 
 // MaxBlockTransactions is the maximum number of transactions in a single block.
-// A minimal transaction is ~100 bytes, so 10,000 txs ≈ 1 MB.
 const MaxBlockTransactions = 10_000
 
 // WireSize returns the approximate serialized size of the block in bytes.
@@ -129,12 +135,12 @@ func DeserializeHeader(data []byte) (*Header, error) {
 // The genesis block has a zero PrevBlockHash and contains a single
 // coinbase transaction paying the initial reward to the given public key hash.
 //
-// If timestamp is 0, the current wall-clock time is used.
-func GenesisBlock(pubKeyHash []byte, timestamp uint32) *Block {
+// If timestamp is 0, the current wall-clock time minus one block interval is used.
+func GenesisBlock(pubKeyHash []byte, timestamp uint32, difficultyBits uint32) *Block {
 	const genesisReward int64 = 1_00000000 // 1 NOUS in nou
 
 	if timestamp == 0 {
-		timestamp = uint32(time.Now().Unix())
+		timestamp = uint32(time.Now().Unix()) - 150
 	}
 
 	coinbase := tx.NewCoinbaseTx(0, genesisReward, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDNous)
@@ -147,7 +153,7 @@ func GenesisBlock(pubKeyHash []byte, timestamp uint32) *Block {
 			PrevBlockHash:  crypto.Hash{},
 			MerkleRoot:     merkleRoot,
 			Timestamp:      timestamp,
-			DifficultyBits: 0x1d00ffff, // initial difficulty (Bitcoin-style compact)
+			DifficultyBits: difficultyBits,
 		},
 		Transactions: []*tx.Transaction{coinbase},
 	}

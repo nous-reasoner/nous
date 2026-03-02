@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/crypto"
+	"nous/block"
+	"nous/crypto"
 )
 
 // ChainTip holds the persisted chain tip metadata.

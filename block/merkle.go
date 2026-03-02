@@ -1,6 +1,6 @@
 package block
 
-import "github.com/nous-chain/nous/crypto"
+import "nous/crypto"
 
 // ComputeMerkleRoot builds a Merkle tree from a list of transaction hashes
 // and returns the root hash.

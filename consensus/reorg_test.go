@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/tx"
+	"nous/block"
+	"nous/crypto"
+	"nous/tx"
 )
 
 // easyReorgParams returns difficulty params with trivially easy PoW.
@@ -76,7 +76,7 @@ func TestReorg(t *testing.T) {
 
 	params := easyReorgParams()
 
-	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-120)
+	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-120, 0x1d00ffff)
 	cs := NewChainState(genesis)
 	cs.Difficulty = params
 	cs.Anchor.Target = params.PoWTarget
@@ -170,7 +170,7 @@ func TestNoReorgWhenShorter(t *testing.T) {
 
 	params := easyReorgParams()
 
-	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-120)
+	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-120, 0x1d00ffff)
 	cs := NewChainState(genesis)
 	cs.Difficulty = params
 	cs.Anchor.Target = params.PoWTarget

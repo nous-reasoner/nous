@@ -5,8 +5,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/tx"
+	"nous/crypto"
+	"nous/tx"
 )
 
 // MempoolEntry wraps a transaction with its fee rate for priority ordering.

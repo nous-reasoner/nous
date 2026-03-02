@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/tx"
+	"nous/block"
+	"nous/crypto"
+	"nous/tx"
 )
 
 // blockNode represents a block in the block index tree.
@@ -74,11 +74,11 @@ func NewChainState(genesis *block.Block) *ChainState {
 		Tip:        &genesis.Header,
 		Height:     0,
 		UTXOSet:    utxos,
-		Difficulty: DefaultDifficultyParams(),
+		Difficulty: &DifficultyParams{PoWTarget: CompactToTarget(genesis.Header.DifficultyBits)},
 		Anchor: &ASERTAnchor{
 			Height:    0,
 			Timestamp: genesis.Header.Timestamp,
-			Target:    DefaultDifficultyParams().PoWTarget,
+			Target:    CompactToTarget(genesis.Header.DifficultyBits),
 		},
 		blockIndex: make(map[crypto.Hash]*blockNode),
 		undoMap:    make(map[crypto.Hash]*tx.UndoData),

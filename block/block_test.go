@@ -3,8 +3,8 @@ package block
 import (
 	"testing"
 
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/tx"
+	"nous/crypto"
+	"nous/tx"
 )
 
 // ============================================================
@@ -299,7 +299,7 @@ func TestGenesisBlock(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
-	genesis := GenesisBlock(pubKeyHash, 0)
+	genesis := GenesisBlock(pubKeyHash, 0, 0x1d00ffff)
 	if genesis == nil {
 		t.Fatal("GenesisBlock returned nil")
 	}
@@ -341,8 +341,8 @@ func TestGenesisBlockDeterministic(t *testing.T) {
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
 	ts := uint32(1735689600)
-	g1 := GenesisBlock(pubKeyHash, ts)
-	g2 := GenesisBlock(pubKeyHash, ts)
+	g1 := GenesisBlock(pubKeyHash, ts, 0x1d00ffff)
+	g2 := GenesisBlock(pubKeyHash, ts, 0x1d00ffff)
 
 	if g1.Header.Hash() != g2.Header.Hash() {
 		t.Fatal("genesis block hash should be deterministic for the same pubKeyHash")

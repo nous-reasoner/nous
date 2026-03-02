@@ -9,11 +9,11 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/nous-chain/nous/consensus"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/network"
-	"github.com/nous-chain/nous/storage"
-	"github.com/nous-chain/nous/tx"
+	"nous/consensus"
+	"nous/crypto"
+	"nous/network"
+	"nous/storage"
+	"nous/tx"
 )
 
 // JSON-RPC 2.0 types.

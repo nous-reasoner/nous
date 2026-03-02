@@ -14,13 +14,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/consensus"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/network"
-	"github.com/nous-chain/nous/node"
-	"github.com/nous-chain/nous/storage"
-	"github.com/nous-chain/nous/wallet"
+	"nous/block"
+	"nous/consensus"
+	"nous/crypto"
+	"nous/network"
+	"nous/node"
+	"nous/storage"
+	"nous/wallet"
 )
 
 const version = "0.2.0-dev"
@@ -57,13 +57,14 @@ func main() {
 
 	// Determine genesis pubkey hash (placeholder for mainnet).
 	genesisPKH := make([]byte, 20) // zero hash for genesis
-	genesis := block.GenesisBlock(genesisPKH, 0)
+	genesisBits := uint32(0x1d00ffff) // mainnet
+	if *testnet {
+		genesisBits = uint32(0x2000ffff) // testnet
+	}
+	genesis := block.GenesisBlock(genesisPKH, 0, genesisBits)
 
 	// Initialize chain state.
 	chain := consensus.NewChainState(genesis)
-	if *testnet {
-		chain.Difficulty = consensus.TestnetDifficultyParams()
-	}
 
 	// Save genesis block if not already stored.
 	if !store.HasBlock(0) {

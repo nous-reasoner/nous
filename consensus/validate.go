@@ -6,15 +6,15 @@ import (
 	"math"
 	"time"
 
-	"github.com/nous-chain/nous/block"
-	"github.com/nous-chain/nous/crypto"
-	"github.com/nous-chain/nous/sat"
-	"github.com/nous-chain/nous/tx"
+	"nous/block"
+	"nous/crypto"
+	"nous/sat"
+	"nous/tx"
 )
 
-// MaxFutureSeconds is the maximum number of seconds a block timestamp
-// may be ahead of the node's wall-clock time.
-const MaxFutureSeconds = 120
+// MaxFutureSeconds is the maximum number of seconds (5 minutes) a block
+// timestamp may be ahead of the node's wall-clock time.
+const MaxFutureSeconds = 300
 
 // safeAddInt64 returns a + b or an error on overflow.
 func safeAddInt64(a, b int64) (int64, error) {

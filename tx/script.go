@@ -3,7 +3,7 @@ package tx
 import (
 	"bytes"
 
-	"github.com/nous-chain/nous/crypto"
+	"nous/crypto"
 )
 
 // Script opcodes for P2PKH.
@@ -59,12 +59,12 @@ func ExecuteScript(scriptSig, scriptPubKey []byte, txn *Transaction, inputIndex 
 	var stack [][]byte
 
 	// Execute scriptSig (unlock).
-	if !execute(scriptSig, &stack, txn, inputIndex) {
+	if !execute(scriptSig, &stack, txn, inputIndex, scriptPubKey) {
 		return false
 	}
 
 	// Execute scriptPubKey (lock) on the same stack.
-	if !execute(scriptPubKey, &stack, txn, inputIndex) {
+	if !execute(scriptPubKey, &stack, txn, inputIndex, scriptPubKey) {
 		return false
 	}
 
@@ -75,7 +75,7 @@ func ExecuteScript(scriptSig, scriptPubKey []byte, txn *Transaction, inputIndex 
 	return isTrue(stack[len(stack)-1])
 }
 
-func execute(script []byte, stack *[][]byte, txn *Transaction, inputIndex int) bool {
+func execute(script []byte, stack *[][]byte, txn *Transaction, inputIndex int, subscript []byte) bool {
 	r := bytes.NewReader(script)
 	for r.Len() > 0 {
 		op, err := r.ReadByte()
@@ -136,11 +136,8 @@ func execute(script []byte, stack *[][]byte, txn *Transaction, inputIndex int) b
 				return true
 			}
 
-			// Compute the sighash using the scriptPubKey of the output being spent.
-			// The subscript for CHECKSIG is the scriptPubKey of the referenced output,
-			// which is reconstructed from the pubkey hash in the lock script.
-			pubKeyHash := crypto.Hash160(pubKeyBytes)
-			subscript := CreateP2PKHLockScript(pubKeyHash)
+			// Compute the sighash using the scriptPubKey of the output being spent,
+			// passed in as subscript.
 			sigHash := txn.SigHash(inputIndex, subscript)
 
 			if crypto.Verify(pubKey, sigHash, sig) {
