@@ -88,8 +88,9 @@ Standing on Bitcoin's shoulders, NOUS fixes known issues from genesis:
 ```
 Article I:    Every block rewards 1 NOUS. Forever.
 
-Article II:   A valid block must contain an assignment S that satisfies
-              a 3-SAT formula F, and SHA256(header || seed || S) < target.
+Article II:   A valid block must contain a solution S that satisfies a
+              deterministically generated NP-complete problem instance P,
+              with SHA256(block_header) < target. Genesis problem: 3-SAT.
 
 Article III:  Any entity capable of completing a reasoning proof, whether
               human or AI, has equal right to participate.

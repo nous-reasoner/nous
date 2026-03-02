@@ -580,7 +580,7 @@ The following rules are encoded in the genesis block. No governance mechanism ma
 
 **Article I — Reward.** Every block awards 1 NOUS to its producer. Forever.
 
-**Article II — Validity.** A valid block must contain a 3-SAT assignment satisfying a deterministically generated formula, with a block hash meeting the current difficulty target.
+**Article II — Validity.** A valid block must contain a solution that satisfies a deterministically generated NP-complete problem instance, with a block hash meeting the current difficulty target. At genesis, the NP-complete problem is 3-SAT (n=256, r=3.85, m=986). The problem type may be changed through network consensus per Article IV.
 
 **Article III — Equality.** Any entity capable of producing a valid block — human, AI, or hybrid — has equal right to participate. No node holds special privilege. Rules apply equally to all.
 
