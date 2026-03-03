@@ -186,8 +186,10 @@ func main() {
 
 	// Start reasoner if enabled.
 	var reasoner *node.Reasoner
+	var w *wallet.Wallet
 	if *reason {
-		_, pubKey, err := loadKey(*keyFile, *password)
+		var pubKey *crypto.PublicKey
+		w, pubKey, err = loadWallet(*keyFile, *password, *testnet)
 		if err != nil {
 			log.Fatalf("key: %v", err)
 		}
@@ -199,6 +201,9 @@ func main() {
 	// Start RPC server.
 	rpcAddr := fmt.Sprintf(":%d", *rpcPort)
 	rpc := node.NewRPCServer(rpcAddr, chain, server, store, reasoner)
+	if w != nil {
+		rpc.SetWallet(w)
+	}
 	rpc.Start()
 
 	// Wait for shutdown signal.
@@ -270,14 +275,15 @@ func trimSpace(s string) string {
 	return s[i:j]
 }
 
-func loadKey(keyFile, password string) (*crypto.PrivateKey, *crypto.PublicKey, error) {
+func loadWallet(keyFile, password string, testnet bool) (*wallet.Wallet, *crypto.PublicKey, error) {
 	if keyFile != "" {
 		w, err := wallet.LoadFromFile(keyFile, password)
 		if err != nil {
 			return nil, nil, fmt.Errorf("load wallet: %w", err)
 		}
+		w.IsTestnet = testnet
 		kp := w.Keys[w.Primary]
-		return kp.PrivateKey, kp.PublicKey, nil
+		return w, kp.PublicKey, nil
 	}
 	// No wallet file — generate an ephemeral key.
 	log.Println("warning: no wallet specified, using ephemeral key")
@@ -285,5 +291,10 @@ func loadKey(keyFile, password string) (*crypto.PrivateKey, *crypto.PublicKey, e
 	if err != nil {
 		return nil, nil, err
 	}
-	return priv, pub, nil
+	w := &wallet.Wallet{
+		Keys:      []wallet.KeyPair{{PrivateKey: priv, PublicKey: pub, Address: crypto.Address(crypto.PubKeyToBech32mAddress(pub))}},
+		Primary:   0,
+		IsTestnet: testnet,
+	}
+	return w, pub, nil
 }

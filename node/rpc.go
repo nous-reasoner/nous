@@ -14,6 +14,7 @@ import (
 	"nous/network"
 	"nous/storage"
 	"nous/tx"
+	"nous/wallet"
 )
 
 // JSON-RPC 2.0 types.
@@ -39,12 +40,13 @@ type rpcError struct {
 
 // RPCServer serves JSON-RPC over HTTP.
 type RPCServer struct {
-	chain  *consensus.ChainState
-	server *network.Server
-	store  *storage.BlockStore
+	chain    *consensus.ChainState
+	server   *network.Server
+	store    *storage.BlockStore
 	reasoner *Reasoner
-	http   *http.Server
-	addr   string // actual bound address after Start
+	wallet   *wallet.Wallet
+	http     *http.Server
+	addr     string // actual bound address after Start
 }
 
 // NewRPCServer creates a new RPC server.
@@ -93,6 +95,11 @@ func (r *RPCServer) Stop() error {
 	return r.http.Shutdown(context.Background())
 }
 
+// SetWallet sets the wallet for transaction signing (sendtoaddress).
+func (r *RPCServer) SetWallet(w *wallet.Wallet) {
+	r.wallet = w
+}
+
 func (r *RPCServer) handleRPC(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -127,6 +134,10 @@ func (r *RPCServer) handleRPC(w http.ResponseWriter, req *http.Request) {
 		result = r.handleGetPeerInfo()
 	case "listunspent":
 		result, rpcErr = r.handleListUnspent(rpcReq.Params)
+	case "sendtoaddress":
+		result, rpcErr = r.handleSendToAddress(rpcReq.Params)
+	case "getaddress":
+		result, rpcErr = r.handleGetAddress()
 	default:
 		rpcErr = &rpcError{Code: -32601, Message: "method not found"}
 	}
@@ -306,6 +317,62 @@ func (r *RPCServer) handleListUnspent(params json.RawMessage) (interface{}, *rpc
 		})
 	}
 	return result, nil
+}
+
+func (r *RPCServer) handleGetAddress() (interface{}, *rpcError) {
+	if r.wallet == nil {
+		return nil, &rpcError{Code: -32000, Message: "no wallet loaded"}
+	}
+	return string(r.wallet.GetAddress()), nil
+}
+
+func (r *RPCServer) handleSendToAddress(params json.RawMessage) (interface{}, *rpcError) {
+	if r.wallet == nil {
+		return nil, &rpcError{Code: -32000, Message: "no wallet loaded"}
+	}
+
+	// params: [address, amount_nou] or [address, amount_nou, fee_nou]
+	var args []json.RawMessage
+	if err := json.Unmarshal(params, &args); err != nil || len(args) < 2 {
+		return nil, &rpcError{Code: -32602, Message: "params: [address, amount] or [address, amount, fee]"}
+	}
+
+	var addr string
+	if err := json.Unmarshal(args[0], &addr); err != nil {
+		return nil, &rpcError{Code: -32602, Message: "invalid address param"}
+	}
+	var amount int64
+	if err := json.Unmarshal(args[1], &amount); err != nil {
+		return nil, &rpcError{Code: -32602, Message: "invalid amount param"}
+	}
+
+	fee := int64(10000) // default 0.0001 NOUS
+	if len(args) >= 3 {
+		if err := json.Unmarshal(args[2], &fee); err != nil {
+			return nil, &rpcError{Code: -32602, Message: "invalid fee param"}
+		}
+	}
+
+	transaction, err := r.wallet.CreateTransaction(
+		crypto.Address(addr), amount, fee,
+		r.chain.UTXOSet, r.chain.Height+1,
+	)
+	if err != nil {
+		return nil, &rpcError{Code: -32000, Message: err.Error()}
+	}
+
+	// Validate before broadcasting.
+	if err := tx.ValidateTransaction(transaction, r.chain.UTXOSet, r.chain.Height+1, r.chain.IsTestnet); err != nil {
+		return nil, &rpcError{Code: -32000, Message: fmt.Sprintf("validate: %v", err)}
+	}
+
+	r.server.Mempool().Add(transaction)
+	txID := transaction.TxID()
+	raw := transaction.Serialize()
+	r.server.BroadcastMessage(&network.MsgTx{Payload: raw})
+	log.Printf("rpc: sendtoaddress %x (%d nou to %s) broadcast", txID[:8], amount, addr)
+
+	return hex.EncodeToString(txID[:]), nil
 }
 
 // txToJSON converts a transaction to a JSON-friendly map.

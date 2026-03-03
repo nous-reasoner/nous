@@ -235,11 +235,19 @@ func (s *BoltUTXOSet) RollbackBlock(undo *UndoData) error {
 	return s.db.Update(func(btx *bolt.Tx) error {
 		b := btx.Bucket(utxoBucket)
 		// Step 1: Remove outputs created by this block.
-		// For each created TxID, scan with prefix seek and delete all matching keys.
+		// Collect keys first, then delete. Modifying a bucket during cursor
+		// iteration is unsafe in BoltDB — the cursor may skip keys, leaving
+		// phantom UTXOs that inflate the supply.
 		for _, txid := range undo.CreatedTxs {
 			prefix := txid[:]
+			var toDelete [][]byte
 			c := b.Cursor()
 			for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+				keyCopy := make([]byte, len(k))
+				copy(keyCopy, k)
+				toDelete = append(toDelete, keyCopy)
+			}
+			for _, k := range toDelete {
 				if err := b.Delete(k); err != nil {
 					return err
 				}
