@@ -819,6 +819,180 @@ func TestMempoolSizeLimit(t *testing.T) {
 }
 
 // ============================================================
+// 11b. Mempool double-spend protection
+// ============================================================
+
+func TestMempoolDoubleSpendRejected(t *testing.T) {
+	mp := NewMempool()
+
+	// Shared UTXO that both transactions try to spend.
+	sharedOutPoint := tx.OutPoint{TxID: crypto.Sha256([]byte("shared-utxo")), Index: 0}
+
+	txA := &tx.Transaction{
+		Version: 1,
+		Inputs:  []tx.TxIn{{PrevOut: sharedOutPoint, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 100, PkScript: []byte{0xaa}}},
+	}
+	txB := &tx.Transaction{
+		Version: 1,
+		Inputs:  []tx.TxIn{{PrevOut: sharedOutPoint, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 50, PkScript: []byte{0xbb}}}, // different outputs → different TxID
+	}
+
+	// First tx should succeed.
+	if !mp.Add(txA) {
+		t.Fatal("txA should be accepted")
+	}
+
+	// Second tx spending the same UTXO should be rejected.
+	if mp.Add(txB) {
+		t.Fatal("txB should be rejected (double-spend)")
+	}
+	if mp.Count() != 1 {
+		t.Fatalf("count: want 1, got %d", mp.Count())
+	}
+}
+
+func TestMempoolDoubleSpendAddWithFee(t *testing.T) {
+	mp := NewMempool()
+
+	sharedOutPoint := tx.OutPoint{TxID: crypto.Sha256([]byte("shared-fee")), Index: 0}
+
+	txA := &tx.Transaction{
+		Version: 1,
+		Inputs:  []tx.TxIn{{PrevOut: sharedOutPoint, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 100, PkScript: []byte{0xaa}}},
+	}
+	txB := &tx.Transaction{
+		Version: 1,
+		Inputs:  []tx.TxIn{{PrevOut: sharedOutPoint, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 50, PkScript: []byte{0xbb}}},
+	}
+
+	if !mp.AddWithFee(txA, 100) {
+		t.Fatal("txA should be accepted")
+	}
+	if mp.AddWithFee(txB, 200) {
+		t.Fatal("txB should be rejected (double-spend via AddWithFee)")
+	}
+}
+
+func TestMempoolSpentSetClearedOnRemove(t *testing.T) {
+	mp := NewMempool()
+
+	sharedOutPoint := tx.OutPoint{TxID: crypto.Sha256([]byte("removable")), Index: 0}
+
+	txA := &tx.Transaction{
+		Version: 1,
+		Inputs:  []tx.TxIn{{PrevOut: sharedOutPoint, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 100, PkScript: []byte{0xaa}}},
+	}
+	txB := &tx.Transaction{
+		Version: 1,
+		Inputs:  []tx.TxIn{{PrevOut: sharedOutPoint, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 50, PkScript: []byte{0xbb}}},
+	}
+
+	mp.Add(txA)
+
+	// txB rejected while txA is in pool.
+	if mp.Add(txB) {
+		t.Fatal("txB should be rejected while txA is in pool")
+	}
+
+	// Remove txA → spent set should be cleaned.
+	mp.Remove(txA.TxID())
+
+	// Now txB should succeed.
+	if !mp.Add(txB) {
+		t.Fatal("txB should be accepted after txA is removed")
+	}
+}
+
+func TestMempoolSpentSetClearedOnConfirm(t *testing.T) {
+	mp := NewMempool()
+
+	utxoX := tx.OutPoint{TxID: crypto.Sha256([]byte("utxo-x")), Index: 0}
+	utxoY := tx.OutPoint{TxID: crypto.Sha256([]byte("utxo-y")), Index: 0}
+
+	// txPool spends utxoX (in mempool).
+	txPool := &tx.Transaction{
+		Version: 1,
+		Inputs:  []tx.TxIn{{PrevOut: utxoX, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 100, PkScript: []byte{0xaa}}},
+	}
+	mp.Add(txPool)
+
+	// Block confirms a DIFFERENT tx spending utxoX.
+	txBlock := &tx.Transaction{
+		Version: 1,
+		Inputs:  []tx.TxIn{{PrevOut: utxoX, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 90, PkScript: []byte{0xcc}}},
+	}
+	mp.RemoveConfirmed([]*tx.Transaction{txBlock})
+
+	// txPool should be evicted (it conflicts with the confirmed block).
+	if mp.Has(txPool.TxID()) {
+		t.Fatal("txPool should be evicted — its input was confirmed in a block")
+	}
+	if mp.Count() != 0 {
+		t.Fatalf("pool should be empty, got %d", mp.Count())
+	}
+
+	// Now a new tx spending utxoY should work fine (spent set is clean).
+	txNew := &tx.Transaction{
+		Version: 1,
+		Inputs:  []tx.TxIn{{PrevOut: utxoY, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 50, PkScript: []byte{0xdd}}},
+	}
+	if !mp.Add(txNew) {
+		t.Fatal("txNew should succeed")
+	}
+}
+
+func TestMempoolMultiInputDoubleSpend(t *testing.T) {
+	mp := NewMempool()
+
+	utxo1 := tx.OutPoint{TxID: crypto.Sha256([]byte("multi-1")), Index: 0}
+	utxo2 := tx.OutPoint{TxID: crypto.Sha256([]byte("multi-2")), Index: 0}
+	utxo3 := tx.OutPoint{TxID: crypto.Sha256([]byte("multi-3")), Index: 0}
+
+	// txA spends utxo1 and utxo2.
+	txA := &tx.Transaction{
+		Version: 1,
+		Inputs: []tx.TxIn{
+			{PrevOut: utxo1, Sequence: 0xFFFFFFFF},
+			{PrevOut: utxo2, Sequence: 0xFFFFFFFF},
+		},
+		Outputs: []tx.TxOut{{Amount: 200, PkScript: []byte{0xaa}}},
+	}
+	mp.Add(txA)
+
+	// txB spends utxo2 (overlap) and utxo3 → rejected.
+	txB := &tx.Transaction{
+		Version: 1,
+		Inputs: []tx.TxIn{
+			{PrevOut: utxo2, Sequence: 0xFFFFFFFF},
+			{PrevOut: utxo3, Sequence: 0xFFFFFFFF},
+		},
+		Outputs: []tx.TxOut{{Amount: 150, PkScript: []byte{0xbb}}},
+	}
+	if mp.Add(txB) {
+		t.Fatal("txB should be rejected — shares utxo2 with txA")
+	}
+
+	// txC spends only utxo3 (no overlap) → accepted.
+	txC := &tx.Transaction{
+		Version: 1,
+		Inputs:  []tx.TxIn{{PrevOut: utxo3, Sequence: 0xFFFFFFFF}},
+		Outputs: []tx.TxOut{{Amount: 100, PkScript: []byte{0xcc}}},
+	}
+	if !mp.Add(txC) {
+		t.Fatal("txC should succeed — no conflict")
+	}
+}
+
+// ============================================================
 // 12. Inv/Addr message count limits
 // ============================================================
 

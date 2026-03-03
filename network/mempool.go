@@ -27,16 +27,59 @@ const MaxMempoolTxCount = 5_000
 type Mempool struct {
 	mu      sync.RWMutex
 	entries map[crypto.Hash]*MempoolEntry
+	// spent tracks every OutPoint consumed by a mempool transaction,
+	// mapping each OutPoint to the TxID that spends it.
+	// This prevents two transactions from spending the same UTXO.
+	spent map[tx.OutPoint]crypto.Hash
 }
 
 // NewMempool creates an empty mempool.
 func NewMempool() *Mempool {
 	return &Mempool{
 		entries: make(map[crypto.Hash]*MempoolEntry),
+		spent:   make(map[tx.OutPoint]crypto.Hash),
 	}
 }
 
-// Add inserts a transaction into the mempool. Returns false if already present.
+// hasDoubleSpend checks if any input of the transaction conflicts with an
+// existing mempool transaction. Must be called with mp.mu held.
+func (mp *Mempool) hasDoubleSpend(transaction *tx.Transaction) bool {
+	if transaction.IsCoinbase() {
+		return false
+	}
+	for _, in := range transaction.Inputs {
+		if _, exists := mp.spent[in.PrevOut]; exists {
+			return true
+		}
+	}
+	return false
+}
+
+// trackSpent records all inputs of a transaction in the spent set.
+// Must be called with mp.mu held.
+func (mp *Mempool) trackSpent(transaction *tx.Transaction, txID crypto.Hash) {
+	if transaction.IsCoinbase() {
+		return
+	}
+	for _, in := range transaction.Inputs {
+		mp.spent[in.PrevOut] = txID
+	}
+}
+
+// untrackSpent removes all inputs of a transaction from the spent set.
+// Must be called with mp.mu held.
+func (mp *Mempool) untrackSpent(transaction *tx.Transaction) {
+	if transaction.IsCoinbase() {
+		return
+	}
+	for _, in := range transaction.Inputs {
+		delete(mp.spent, in.PrevOut)
+	}
+}
+
+// Add inserts a transaction into the mempool.
+// Returns false if already present, the pool is full, or the transaction
+// would double-spend an OutPoint already consumed by another mempool tx.
 func (mp *Mempool) Add(transaction *tx.Transaction) bool {
 	txID := transaction.TxID()
 	serialized := transaction.Serialize()
@@ -61,16 +104,22 @@ func (mp *Mempool) Add(transaction *tx.Transaction) bool {
 	if len(mp.entries) >= MaxMempoolTxCount {
 		return false
 	}
+	if mp.hasDoubleSpend(transaction) {
+		return false
+	}
 
 	mp.entries[txID] = &MempoolEntry{
 		Tx:   transaction,
 		TxID: txID,
 		Size: size,
 	}
+	mp.trackSpent(transaction, txID)
 	return true
 }
 
 // AddWithFee inserts a transaction with a precomputed fee.
+// Returns false if already present, the pool is full, or the transaction
+// would double-spend an OutPoint already consumed by another mempool tx.
 func (mp *Mempool) AddWithFee(transaction *tx.Transaction, fee int64) bool {
 	txID := transaction.TxID()
 	serialized := transaction.Serialize()
@@ -90,6 +139,9 @@ func (mp *Mempool) AddWithFee(transaction *tx.Transaction, fee int64) bool {
 	if len(mp.entries) >= MaxMempoolTxCount {
 		return false
 	}
+	if mp.hasDoubleSpend(transaction) {
+		return false
+	}
 
 	mp.entries[txID] = &MempoolEntry{
 		Tx:      transaction,
@@ -97,6 +149,7 @@ func (mp *Mempool) AddWithFee(transaction *tx.Transaction, fee int64) bool {
 		FeeRate: feeRate,
 		Size:    size,
 	}
+	mp.trackSpent(transaction, txID)
 	return true
 }
 
@@ -119,19 +172,57 @@ func (mp *Mempool) Has(txID crypto.Hash) bool {
 	return ok
 }
 
-// Remove deletes a transaction from the mempool.
+// Remove deletes a transaction from the mempool and cleans its spent entries.
 func (mp *Mempool) Remove(txID crypto.Hash) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
-	delete(mp.entries, txID)
+	if e, ok := mp.entries[txID]; ok {
+		mp.untrackSpent(e.Tx)
+		delete(mp.entries, txID)
+	}
 }
 
-// RemoveConfirmed removes all transactions that appear in the given block.
+// RemoveConfirmed removes all transactions that appear in the given block
+// and also removes any remaining mempool transactions that conflict with the
+// block's inputs (i.e. mempool double-spends that lost to the confirmed tx).
 func (mp *Mempool) RemoveConfirmed(txs []*tx.Transaction) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
+
+	// Collect all OutPoints spent by the confirmed block.
+	blockSpent := make(map[tx.OutPoint]bool)
 	for _, t := range txs {
-		delete(mp.entries, t.TxID())
+		if t.IsCoinbase() {
+			continue
+		}
+		for _, in := range t.Inputs {
+			blockSpent[in.PrevOut] = true
+		}
+	}
+
+	// Remove confirmed transactions.
+	for _, t := range txs {
+		id := t.TxID()
+		if e, ok := mp.entries[id]; ok {
+			mp.untrackSpent(e.Tx)
+			delete(mp.entries, id)
+		}
+	}
+
+	// Evict any remaining mempool tx that spends an OutPoint now confirmed.
+	// This handles the case where tx A and tx B both spend UTXO X:
+	// the block included tx A, so tx B (which lost) must be evicted.
+	var evict []crypto.Hash
+	for op := range blockSpent {
+		if spender, exists := mp.spent[op]; exists {
+			evict = append(evict, spender)
+		}
+	}
+	for _, id := range evict {
+		if e, ok := mp.entries[id]; ok {
+			mp.untrackSpent(e.Tx)
+			delete(mp.entries, id)
+		}
 	}
 }
 
