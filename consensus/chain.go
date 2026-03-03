@@ -14,6 +14,9 @@ import (
 
 // ErrOrphanBlock is returned when a block's parent is not in the block index.
 var ErrOrphanBlock = errors.New("orphan block: parent not found")
+
+// ErrDuplicateBlock is returned when the block is already in the block index.
+var ErrDuplicateBlock = errors.New("duplicate block")
 type blockNode struct {
 	Hash      crypto.Hash
 	Height    uint64
@@ -156,7 +159,7 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 
 	// Already known?
 	if _, exists := cs.blockIndex[blkHash]; exists {
-		return fmt.Errorf("block %s already known", blkHash)
+		return fmt.Errorf("%w: %s", ErrDuplicateBlock, blkHash)
 	}
 
 	// Find parent in block index.

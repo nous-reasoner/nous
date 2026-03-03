@@ -301,6 +301,8 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 		// If the block's parent is unknown, store it as an orphan.
 		if errors.Is(err, consensus.ErrOrphanBlock) {
 			bs.addOrphan(blk, peer)
+		} else if errors.Is(err, consensus.ErrDuplicateBlock) {
+			// Race between HasBlock check and AddBlock; silently ignore.
 		} else {
 			log.Printf("sync: reject block %x from %s: %v", blockHash[:8], peer.Addr, err)
 			bs.server.protection.AddScore(peer.Addr, BanScoreInvalidBlock)
