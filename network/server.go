@@ -31,12 +31,13 @@ type MessageHandler func(peer *Peer, msg Message)
 
 // Server is the main P2P network node.
 type Server struct {
-	config   ServerConfig
-	listener net.Listener
-	peers    *PeerManager
-	addrBook *AddressBook
-	mempool  *Mempool
-	handlers map[string]MessageHandler
+	config     ServerConfig
+	listener   net.Listener
+	peers      *PeerManager
+	addrBook   *AddressBook
+	mempool    *Mempool
+	protection *PeerProtection
+	handlers   map[string]MessageHandler
 
 	blockHeight uint64 // our current block height
 
@@ -48,12 +49,13 @@ type Server struct {
 // NewServer creates a new P2P server.
 func NewServer(config ServerConfig) *Server {
 	return &Server{
-		config:   config,
-		peers:    NewPeerManager(),
-		addrBook: NewAddressBook(config.Seeds),
-		mempool:  NewMempool(),
-		handlers: make(map[string]MessageHandler),
-		quit:     make(chan struct{}),
+		config:     config,
+		peers:      NewPeerManager(),
+		addrBook:   NewAddressBook(config.Seeds),
+		mempool:    NewMempool(),
+		protection: NewPeerProtection(),
+		handlers:   make(map[string]MessageHandler),
+		quit:       make(chan struct{}),
 	}
 }
 
@@ -73,6 +75,9 @@ func (s *Server) BlockHeight() uint64 {
 
 // Peers returns the peer manager.
 func (s *Server) Peers() *PeerManager { return s.peers }
+
+// Protection returns the peer protection manager.
+func (s *Server) Protection() *PeerProtection { return s.protection }
 
 // Mempool returns the transaction mempool.
 func (s *Server) Mempool() *Mempool { return s.mempool }
@@ -135,6 +140,11 @@ func (s *Server) ListenAddr() string {
 
 // Connect establishes an outbound connection to a peer.
 func (s *Server) Connect(addr string) error {
+	// Don't connect to banned peers.
+	if s.protection.IsBanned(addr) {
+		return fmt.Errorf("network: peer %s is banned", addr)
+	}
+
 	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		return err
@@ -181,6 +191,13 @@ func (s *Server) acceptLoop() {
 		}
 
 		addr := conn.RemoteAddr().String()
+
+		// Reject banned peers.
+		if s.protection.IsBanned(addr) {
+			conn.Close()
+			continue
+		}
+
 		peer := NewPeer(addr, conn, true)
 		if !s.peers.Add(peer) {
 			conn.Close()
@@ -230,18 +247,21 @@ func (s *Server) maintenanceLoop() {
 
 func (s *Server) handlePeer(peer *Peer) {
 	defer s.wg.Done()
-	defer s.peers.Remove(peer.Addr)
+	defer func() {
+		s.peers.Remove(peer.Addr)
+		s.protection.RemovePeer(peer.Addr)
+	}()
+
+	// Handshake timeout: the first message must arrive within HandshakeTimeout.
+	if peer.Conn != nil {
+		peer.Conn.SetReadDeadline(time.Now().Add(HandshakeTimeout))
+	}
 
 	for {
 		select {
 		case <-s.quit:
 			return
 		default:
-		}
-
-		// Set read deadline to detect dead connections.
-		if peer.Conn != nil {
-			peer.Conn.SetReadDeadline(time.Now().Add(InactiveTimeout))
 		}
 
 		msg, err := DecodeMessage(peer.Conn, s.config.Magic)
@@ -251,10 +271,30 @@ func (s *Server) handlePeer(peer *Peer) {
 
 		peer.UpdateActivity()
 
+		// After handshake completes, use the normal inactive timeout.
+		if peer.Handshaked && peer.Conn != nil {
+			peer.Conn.SetReadDeadline(time.Now().Add(InactiveTimeout))
+		}
+
+		// Rate limit check.
+		if !s.protection.CheckRate(peer.Addr) {
+			if s.protection.AddScore(peer.Addr, BanScoreRateExceeded) {
+				log.Printf("network: disconnecting banned peer %s (rate exceeded)", peer.Addr)
+				return
+			}
+			continue // drop the message but keep the connection
+		}
+
 		// Dispatch to handler.
 		cmd := msg.Command()
 		if handler, ok := s.handlers[cmd]; ok {
 			handler(peer, msg)
+		} else {
+			// Unknown command → penalize.
+			if s.protection.AddScore(peer.Addr, BanScoreUnknownCmd) {
+				log.Printf("network: disconnecting banned peer %s (unknown cmd %q)", peer.Addr, cmd)
+				return
+			}
 		}
 	}
 }

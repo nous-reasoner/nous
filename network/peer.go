@@ -10,7 +10,7 @@ import (
 // Peer connection limits.
 const (
 	MaxOutbound    = 8
-	MaxInbound     = 117
+	MaxInbound     = 64
 	MaxConnections = MaxOutbound + MaxInbound // 125
 
 	// InactiveTimeout is the duration after which a peer is considered dead.

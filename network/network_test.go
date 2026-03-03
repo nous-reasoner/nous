@@ -1036,3 +1036,147 @@ func TestDecodeRejectsHugeInvCount(t *testing.T) {
 		t.Fatal("huge inv count should be rejected")
 	}
 }
+
+// ============================================================
+// 13. PeerProtection: ban scoring, expiry, rate limiting
+// ============================================================
+
+func TestBanScoreAccumulation(t *testing.T) {
+	pp := NewPeerProtection()
+	addr := "10.0.0.1:9333"
+
+	// Below threshold — not banned.
+	if pp.AddScore(addr, 50) {
+		t.Fatal("score 50 should not trigger ban")
+	}
+	if pp.GetScore(addr) != 50 {
+		t.Fatalf("score: want 50, got %d", pp.GetScore(addr))
+	}
+	if pp.IsBanned(addr) {
+		t.Fatal("should not be banned at score 50")
+	}
+
+	// Reach threshold — banned.
+	if !pp.AddScore(addr, 50) {
+		t.Fatal("score 100 should trigger ban")
+	}
+	if !pp.IsBanned(addr) {
+		t.Fatal("should be banned at score 100")
+	}
+	if pp.BanCount() != 1 {
+		t.Fatalf("ban count: want 1, got %d", pp.BanCount())
+	}
+}
+
+func TestBanScoreByIP(t *testing.T) {
+	pp := NewPeerProtection()
+
+	// Same IP, different ports — should share ban score.
+	pp.AddScore("10.0.0.1:9333", 60)
+	pp.AddScore("10.0.0.1:12345", 40)
+
+	if !pp.IsBanned("10.0.0.1:9999") {
+		t.Fatal("same IP on different port should be banned")
+	}
+}
+
+func TestBannedPeerRejected(t *testing.T) {
+	pp := NewPeerProtection()
+	addr := "10.0.0.1:9333"
+
+	// Ban the peer.
+	pp.AddScore(addr, 100)
+
+	// Should be banned regardless of port.
+	if !pp.IsBanned("10.0.0.1:5555") {
+		t.Fatal("banned IP should be rejected on any port")
+	}
+}
+
+func TestRateLimiting(t *testing.T) {
+	pp := NewPeerProtection()
+	addr := "10.0.0.1:9333"
+
+	// First RateLimitPerSecond messages should be allowed.
+	for i := 0; i < RateLimitPerSecond; i++ {
+		if !pp.CheckRate(addr) {
+			t.Fatalf("message %d should be allowed", i)
+		}
+	}
+
+	// Next message should be denied.
+	if pp.CheckRate(addr) {
+		t.Fatal("message beyond rate limit should be denied")
+	}
+}
+
+func TestRateLimitWindowReset(t *testing.T) {
+	pp := NewPeerProtection()
+	addr := "10.0.0.1:9333"
+
+	// Exhaust rate limit.
+	for i := 0; i <= RateLimitPerSecond; i++ {
+		pp.CheckRate(addr)
+	}
+
+	// Manually reset the window to simulate time passing.
+	pp.mu.Lock()
+	host := hostOnly(addr)
+	if rt, ok := pp.rates[host]; ok {
+		rt.windowEnd = time.Now().Add(-time.Second) // expired
+	}
+	pp.mu.Unlock()
+
+	// Should be allowed again.
+	if !pp.CheckRate(addr) {
+		t.Fatal("rate limit should reset after window expires")
+	}
+}
+
+func TestHostOnlyStripsPort(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"10.0.0.1:9333", "10.0.0.1"},
+		{"192.168.1.1:12345", "192.168.1.1"},
+		{"localhost:80", "localhost"},
+		{"noport", "noport"},
+	}
+	for _, tt := range tests {
+		got := hostOnly(tt.input)
+		if got != tt.want {
+			t.Fatalf("hostOnly(%q): want %q, got %q", tt.input, tt.want, got)
+		}
+	}
+}
+
+func TestRemovePeerCleansRateTracker(t *testing.T) {
+	pp := NewPeerProtection()
+	addr := "10.0.0.1:9333"
+
+	pp.CheckRate(addr)
+	pp.RemovePeer(addr)
+
+	// After removal, rate tracker should be gone — first message in new window allowed.
+	if !pp.CheckRate(addr) {
+		t.Fatal("rate should be reset after RemovePeer")
+	}
+}
+
+func TestBanScoreConstants(t *testing.T) {
+	// Verify that a single consensus-invalid block triggers an immediate ban.
+	if BanScoreInvalidBlock < BanScoreThreshold {
+		t.Fatal("invalid block score should trigger immediate ban")
+	}
+
+	// Verify that a single consensus-invalid tx does NOT trigger immediate ban.
+	if BanScoreConsensusTx >= BanScoreThreshold {
+		t.Fatal("single invalid tx should not trigger immediate ban")
+	}
+
+	// Verify HandshakeTimeout is reasonable.
+	if HandshakeTimeout < time.Second || HandshakeTimeout > time.Minute {
+		t.Fatalf("HandshakeTimeout %v out of reasonable range", HandshakeTimeout)
+	}
+}

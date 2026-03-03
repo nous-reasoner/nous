@@ -18,8 +18,9 @@ const (
 	// HeaderSize is the total wire header size: magic(4) + command(12) + length(4) + checksum(4).
 	HeaderSize = 24
 
-	// MaxPayloadSize limits the maximum message payload (4 MB).
-	MaxPayloadSize = 4 * 1024 * 1024
+	// MaxPayloadSize limits the maximum message payload (17 MB).
+	// Accommodates the 16 MB hard block size limit plus overhead.
+	MaxPayloadSize = 17 * 1024 * 1024
 
 	// MaxInvItems is the maximum number of inventory items in a single inv/getdata message.
 	MaxInvItems = 50_000

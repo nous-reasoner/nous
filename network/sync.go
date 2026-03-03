@@ -272,6 +272,7 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 	blk, err := DecodeBlock(blkMsg.Payload)
 	if err != nil {
 		log.Printf("sync: decode block from %s: %v", peer.Addr, err)
+		bs.server.protection.AddScore(peer.Addr, BanScoreBadMessage)
 		return
 	}
 
@@ -300,6 +301,7 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 			bs.addOrphan(blk, peer)
 		} else {
 			log.Printf("sync: reject block %x from %s: %v", blockHash[:8], peer.Addr, err)
+			bs.server.protection.AddScore(peer.Addr, BanScoreInvalidBlock)
 		}
 	} else {
 		accepted = true
@@ -464,6 +466,7 @@ func (bs *BlockSyncer) handleTx(peer *Peer, msg Message) {
 	transaction, err := tx.Deserialize(txMsg.Payload)
 	if err != nil {
 		log.Printf("sync: invalid tx from %s: %v", peer.Addr, err)
+		bs.server.protection.AddScore(peer.Addr, BanScoreBadMessage)
 		return
 	}
 
