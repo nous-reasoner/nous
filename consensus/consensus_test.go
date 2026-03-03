@@ -26,7 +26,7 @@ func testParams() *DifficultyParams {
 // Uses a timestamp 60 seconds in the past so that MineBlock (which uses
 // time.Now()) always produces a strictly later timestamp.
 func makeGenesis(pubKeyHash []byte) *block.Block {
-	return block.GenesisBlock(pubKeyHash, uint32(time.Now().Unix())-60, 0x1d00ffff)
+	return block.GenesisBlock(pubKeyHash, uint32(time.Now().Unix())-60, 0x1d00ffff, false)
 }
 
 // mineTestBlock is a helper that mines a block with easy PoW.
@@ -38,7 +38,7 @@ func mineTestBlock(
 	height uint64,
 ) *block.Block {
 	t.Helper()
-	blk, err := MineBlock(prevHeader, nil, pubKeyHash, params, height, nil)
+	blk, err := MineBlock(prevHeader, nil, pubKeyHash, params, height, nil, false)
 	if err != nil {
 		t.Fatalf("MineBlock failed at height %d: %v", height, err)
 	}
@@ -182,7 +182,7 @@ func TestMineBlockAndValidate(t *testing.T) {
 	utxos := tx.NewUTXOSet()
 	utxos.ApplyBlock(genesis.Transactions, 0)
 
-	if err := ValidateBlock(blk, &genesis.Header, params, utxos, 1); err != nil {
+	if err := ValidateBlock(blk, &genesis.Header, params, utxos, 1, false); err != nil {
 		t.Fatalf("ValidateBlock failed: %v", err)
 	}
 }
@@ -210,7 +210,7 @@ func TestValidateRejectsTamperedSAT(t *testing.T) {
 	utxos := tx.NewUTXOSet()
 	utxos.ApplyBlock(genesis.Transactions, 0)
 
-	err = ValidateBlock(blk, &genesis.Header, params, utxos, 1)
+	err = ValidateBlock(blk, &genesis.Header, params, utxos, 1, false)
 	if err == nil {
 		t.Fatal("should reject tampered SAT solution")
 	}
@@ -243,7 +243,7 @@ func TestValidateRejectsBadPoW(t *testing.T) {
 	utxos := tx.NewUTXOSet()
 	utxos.ApplyBlock(genesis.Transactions, 0)
 
-	err = ValidateBlock(blk, &genesis.Header, params, utxos, 1)
+	err = ValidateBlock(blk, &genesis.Header, params, utxos, 1, false)
 	if err == nil {
 		t.Fatal("should reject block that doesn't meet hard PoW target")
 	}
@@ -270,7 +270,7 @@ func TestValidateRejectsExcessCoinbase(t *testing.T) {
 	utxos := tx.NewUTXOSet()
 	utxos.ApplyBlock(genesis.Transactions, 0)
 
-	err = ValidateBlock(blk, &genesis.Header, params, utxos, 1)
+	err = ValidateBlock(blk, &genesis.Header, params, utxos, 1, false)
 	if err == nil {
 		t.Fatal("should reject inflated coinbase reward")
 	}
@@ -392,7 +392,7 @@ func TestValidateRejectsCrossTxDoubleSpend(t *testing.T) {
 	}
 	blk2.Header.MerkleRoot = block.ComputeMerkleRoot(txIDs)
 
-	err = ValidateBlock(blk2, &blk1.Header, params, utxos, 2)
+	err = ValidateBlock(blk2, &blk1.Header, params, utxos, 2, false)
 	if err == nil {
 		t.Fatal("block with cross-tx double-spend should be rejected")
 	}
@@ -423,7 +423,7 @@ func TestValidateRejectsOversizedBlock(t *testing.T) {
 		Transactions: []*tx.Transaction{coinbase},
 	}
 
-	err := ValidateBlock(blk, &genesis.Header, params, chain.UTXOSet, 1)
+	err := ValidateBlock(blk, &genesis.Header, params, chain.UTXOSet, 1, false)
 	if err == nil {
 		t.Fatal("oversized block should be rejected")
 	}
@@ -454,7 +454,7 @@ func TestValidateRejectsTooManyTransactions(t *testing.T) {
 		Transactions: txs,
 	}
 
-	err := ValidateBlock(blk, &genesis.Header, params, chain.UTXOSet, 1)
+	err := ValidateBlock(blk, &genesis.Header, params, chain.UTXOSet, 1, false)
 	if err == nil {
 		t.Fatal("block with too many transactions should be rejected")
 	}

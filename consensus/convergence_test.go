@@ -26,7 +26,7 @@ func TestConvergence(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pubKey.SerializeCompressed())
 
-	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
+	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff, false)
 	chain := NewChainState(genesis)
 	chain.Difficulty = TestnetDifficultyParams()
 	chain.Anchor.Target = TestnetDifficultyParams().PoWTarget
@@ -45,7 +45,7 @@ func TestConvergence(t *testing.T) {
 		}
 
 		blockStart := time.Now()
-		blk, err := MineBlock(prev, nil, pubKeyHash, chain.Difficulty, h, nil)
+		blk, err := MineBlock(prev, nil, pubKeyHash, chain.Difficulty, h, nil, false)
 		if err != nil {
 			t.Fatalf("mine block %d: %v", h, err)
 		}

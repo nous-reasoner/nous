@@ -136,14 +136,15 @@ func DeserializeHeader(data []byte) (*Header, error) {
 // coinbase transaction paying the initial reward to the given public key hash.
 //
 // If timestamp is 0, the current wall-clock time minus one block interval is used.
-func GenesisBlock(pubKeyHash []byte, timestamp uint32, difficultyBits uint32) *Block {
+// isTestnet selects the chain ID embedded in the coinbase transaction.
+func GenesisBlock(pubKeyHash []byte, timestamp uint32, difficultyBits uint32, isTestnet bool) *Block {
 	const genesisReward int64 = 1_00000000 // 1 NOUS in nou
 
 	if timestamp == 0 {
 		timestamp = uint32(time.Now().Unix()) - 150
 	}
 
-	coinbase := tx.NewCoinbaseTx(0, genesisReward, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDNous)
+	coinbase := tx.NewCoinbaseTx(0, genesisReward, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDFor(isTestnet))
 	txIDs := []crypto.Hash{coinbase.TxID()}
 	merkleRoot := ComputeMerkleRoot(txIDs)
 

@@ -37,6 +37,7 @@ func MineBlock(
 	params *DifficultyParams,
 	height uint64,
 	utxoSet tx.UTXOStore,
+	isTestnet bool,
 ) (*block.Block, error) {
 	// Step 0: Create coinbase (reward + fees).
 	reward := BlockReward(height)
@@ -74,7 +75,7 @@ func MineBlock(
 	if err != nil {
 		return nil, errors.New("consensus: reward + fees overflow")
 	}
-	coinbase := tx.NewCoinbaseTx(height, coinbaseAmount, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDNous)
+	coinbase := tx.NewCoinbaseTx(height, coinbaseAmount, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDFor(isTestnet))
 	allTxs := make([]*tx.Transaction, 0, 1+len(txs))
 	allTxs = append(allTxs, coinbase)
 	allTxs = append(allTxs, txs...)

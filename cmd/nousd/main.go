@@ -79,7 +79,7 @@ func main() {
 		if *testnet {
 			genesisTimestamp = 1772465400 // testnet genesis: 2026-03-01 (~fixed)
 		}
-		genesis = block.GenesisBlock(genesisPKH, genesisTimestamp, genesisBits)
+		genesis = block.GenesisBlock(genesisPKH, genesisTimestamp, genesisBits, *testnet)
 		if err := store.SaveBlock(genesis, 0); err != nil {
 			log.Fatalf("save genesis: %v", err)
 		}

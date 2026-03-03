@@ -30,7 +30,7 @@ func mineReorgBlock(
 	height uint64,
 ) *block.Block {
 	t.Helper()
-	blk, err := MineBlock(prevHeader, nil, pubKeyHash, params, height, nil)
+	blk, err := MineBlock(prevHeader, nil, pubKeyHash, params, height, nil, false)
 	if err != nil {
 		t.Fatalf("mine block at height %d: %v", height, err)
 	}
@@ -80,7 +80,7 @@ func TestReorg(t *testing.T) {
 	// sees positive timeDiff (blocks appear "late") and clamps the target to
 	// max. This prevents ASERT from lowering difficulty below the all-0xFF
 	// target, which caused flaky PoW failures.
-	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-3600, 0x1d00ffff)
+	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-3600, 0x1d00ffff, false)
 	cs := NewChainState(genesis)
 	cs.Difficulty = params
 	cs.Anchor.Target = params.PoWTarget
@@ -174,7 +174,7 @@ func TestNoReorgWhenShorter(t *testing.T) {
 
 	params := easyReorgParams()
 
-	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-3600, 0x1d00ffff)
+	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-3600, 0x1d00ffff, false)
 	cs := NewChainState(genesis)
 	cs.Difficulty = params
 	cs.Anchor.Target = params.PoWTarget

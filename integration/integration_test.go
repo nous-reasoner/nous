@@ -42,13 +42,13 @@ func TestFullMiningCycle(t *testing.T) {
 	}
 	minerPKH := crypto.Hash160(pubKey.SerializeCompressed())
 
-	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
+	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff, false)
 	chain := consensus.NewChainState(genesis)
 	chain.Difficulty = easyDifficulty()
 	chain.Anchor.Target = easyDifficulty().PoWTarget
 
 	// Mine block 1.
-	blk1, err := consensus.MineBlock(&genesis.Header, nil, minerPKH, chain.Difficulty, 1, nil)
+	blk1, err := consensus.MineBlock(&genesis.Header, nil, minerPKH, chain.Difficulty, 1, nil, false)
 	if err != nil {
 		t.Fatalf("mine block 1: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestFullMiningCycle(t *testing.T) {
 	// Mine 5 more blocks (total height = 6).
 	prev := &blk1.Header
 	for h := uint64(2); h <= 6; h++ {
-		blk, err := consensus.MineBlock(prev, nil, minerPKH, chain.Difficulty, h, nil)
+		blk, err := consensus.MineBlock(prev, nil, minerPKH, chain.Difficulty, h, nil, false)
 		if err != nil {
 			t.Fatalf("mine block %d: %v", h, err)
 		}
@@ -104,13 +104,13 @@ func TestTransferBetweenWallets(t *testing.T) {
 	pkhA := walletA.PubKeyHash()
 	pkhB := walletB.PubKeyHash()
 
-	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
+	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff, false)
 	chain := consensus.NewChainState(genesis)
 	chain.Difficulty = easyDifficulty()
 	chain.Anchor.Target = easyDifficulty().PoWTarget
 
 	// Mine block 1 with wallet A's key → A gets 1 NOUS.
-	blk1, err := consensus.MineBlock(&genesis.Header, nil, pkhA, chain.Difficulty, 1, nil)
+	blk1, err := consensus.MineBlock(&genesis.Header, nil, pkhA, chain.Difficulty, 1, nil, false)
 	if err != nil {
 		t.Fatalf("mine block 1: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestTransferBetweenWallets(t *testing.T) {
 	// Mine 100 more blocks so block 1's coinbase matures (CoinbaseMaturity=100).
 	prev := &blk1.Header
 	for h := uint64(2); h <= 101; h++ {
-		blk, err := consensus.MineBlock(prev, nil, pkhA, chain.Difficulty, h, nil)
+		blk, err := consensus.MineBlock(prev, nil, pkhA, chain.Difficulty, h, nil, false)
 		if err != nil {
 			t.Fatalf("mine block %d: %v", h, err)
 		}
@@ -147,7 +147,7 @@ func TestTransferBetweenWallets(t *testing.T) {
 	}
 
 	// Mine block 102 including the transfer tx.
-	blk102, err := consensus.MineBlock(prev, []*tx.Transaction{transfer}, pkhA, chain.Difficulty, nextHeight, chain.UTXOSet)
+	blk102, err := consensus.MineBlock(prev, []*tx.Transaction{transfer}, pkhA, chain.Difficulty, nextHeight, chain.UTXOSet, false)
 	if err != nil {
 		t.Fatalf("mine block 102: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestTwoNodeSync(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pubKey.SerializeCompressed())
 
-	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
+	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff, false)
 
 	// --- Node A: mine 3 blocks ---
 	chainA := consensus.NewChainState(genesis)
@@ -210,7 +210,7 @@ func TestTwoNodeSync(t *testing.T) {
 
 	prev := &genesis.Header
 	for h := uint64(1); h <= 3; h++ {
-		blk, err := consensus.MineBlock(prev, nil, pubKeyHash, chainA.Difficulty, h, nil)
+		blk, err := consensus.MineBlock(prev, nil, pubKeyHash, chainA.Difficulty, h, nil, false)
 		if err != nil {
 			t.Fatalf("mine block %d: %v", h, err)
 		}
@@ -278,13 +278,13 @@ func TestMiningWithSAT(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pubKey.SerializeCompressed())
 
-	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff)
+	genesis := block.GenesisBlock(make([]byte, 20), uint32(time.Now().Unix())-60, 0x1d00ffff, false)
 	chain := consensus.NewChainState(genesis)
 	chain.Difficulty = easyDifficulty()
 	chain.Anchor.Target = easyDifficulty().PoWTarget
 
 	// Mine a single block.
-	blk, err := consensus.MineBlock(&genesis.Header, nil, pubKeyHash, chain.Difficulty, 1, nil)
+	blk, err := consensus.MineBlock(&genesis.Header, nil, pubKeyHash, chain.Difficulty, 1, nil, false)
 	if err != nil {
 		t.Fatalf("mine block: %v", err)
 	}

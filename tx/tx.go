@@ -10,8 +10,22 @@ import (
 	"nous/crypto"
 )
 
-// ChainIDNous is the chain identifier for the NOUS mainnet.
-var ChainIDNous = [4]byte{0x4E, 0x4F, 0x55, 0x53} // "NOUS"
+// ChainIDMainnet is the chain identifier for the NOUS mainnet ("NOUS").
+var ChainIDMainnet = [4]byte{0x4E, 0x4F, 0x55, 0x53}
+
+// ChainIDTestnet is the chain identifier for the NOUS testnet ("NOUT").
+var ChainIDTestnet = [4]byte{0x4E, 0x4F, 0x55, 0x54}
+
+// ChainIDNous is a backward-compatible alias for ChainIDMainnet.
+var ChainIDNous = ChainIDMainnet
+
+// ChainIDFor returns the appropriate chain ID for the given network.
+func ChainIDFor(isTestnet bool) [4]byte {
+	if isTestnet {
+		return ChainIDTestnet
+	}
+	return ChainIDMainnet
+}
 
 // OutPoint references a specific output of a previous transaction.
 type OutPoint struct {

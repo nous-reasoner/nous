@@ -156,7 +156,7 @@ func (r *Reasoner) reasonOne() {
 	// Filter valid transactions against current UTXO set.
 	var validTxs []*tx.Transaction
 	for _, t := range mempoolTxs {
-		if err := tx.ValidateTransaction(t, utxoSet, height); err == nil {
+		if err := tx.ValidateTransaction(t, utxoSet, height, r.chain.IsTestnet); err == nil {
 			validTxs = append(validTxs, t)
 		}
 	}
@@ -164,7 +164,7 @@ func (r *Reasoner) reasonOne() {
 	log.Printf("reasoner: reasoning block %d (%d txs)...", height, len(validTxs))
 	log.Printf("reasoner: block %d target=0x%08x", height, consensus.TargetToCompact(diff.PoWTarget))
 
-	blk, err := consensus.MineBlock(tip, validTxs, pubKeyHash, diff, height, utxoSet)
+	blk, err := consensus.MineBlock(tip, validTxs, pubKeyHash, diff, height, utxoSet, r.chain.IsTestnet)
 	if err != nil {
 		log.Printf("reasoner: block %d failed: %v", height, err)
 		return

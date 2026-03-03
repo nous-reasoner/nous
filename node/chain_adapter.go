@@ -230,5 +230,5 @@ func (ca *ChainAdapter) AddBlock(blk *block.Block) (uint64, error) {
 func (ca *ChainAdapter) ValidateTx(txn *tx.Transaction) error {
 	ca.chainMu.Lock()
 	defer ca.chainMu.Unlock()
-	return tx.ValidateTx(txn, ca.chain.UTXOSet, ca.chain.Height)
+	return tx.ValidateTx(txn, ca.chain.UTXOSet, ca.chain.Height, ca.chain.IsTestnet)
 }

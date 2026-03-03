@@ -33,6 +33,7 @@ var (
 	flagWalletFile = ""
 	flagWalletPass = ""
 	flagJSON       = false
+	flagTestnet    = false
 )
 
 func main() {
@@ -111,6 +112,8 @@ func parseGlobalFlags(args []string) []string {
 			}
 		case "--json":
 			flagJSON = true
+		case "--testnet":
+			flagTestnet = true
 		default:
 			rest = append(rest, args[i])
 		}
@@ -128,6 +131,7 @@ Global flags:
   --rpcport <port>       RPC server port (default: 9332)
   --walletfile <path>    wallet file path (default: ~/.nous/wallet.dat)
   --walletpass <pass>    wallet password
+  --testnet              use testnet chain ID
   --json                 output in JSON format
 
 Commands:
@@ -453,6 +457,7 @@ func loadWallet() (*wallet.Wallet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load wallet: %w", err)
 	}
+	w.IsTestnet = flagTestnet
 	return w, nil
 }
 

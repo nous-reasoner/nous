@@ -234,7 +234,7 @@ func (r *RPCServer) handleSendRawTx(params json.RawMessage) (interface{}, *rpcEr
 	if err != nil {
 		return nil, &rpcError{Code: -32000, Message: fmt.Sprintf("decode: %v", err)}
 	}
-	if err := tx.ValidateTransaction(transaction, r.chain.UTXOSet, r.chain.Height+1); err != nil {
+	if err := tx.ValidateTransaction(transaction, r.chain.UTXOSet, r.chain.Height+1, r.chain.IsTestnet); err != nil {
 		return nil, &rpcError{Code: -32000, Message: fmt.Sprintf("validate: %v", err)}
 	}
 	r.server.Mempool().Add(transaction)

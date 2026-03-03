@@ -189,7 +189,7 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 
 	if extendsMainChain {
 		// Main chain: also validate transactions against UTXO set.
-		if err := ValidateBlockTxs(blk, cs.UTXOSet, newHeight); err != nil {
+		if err := ValidateBlockTxs(blk, cs.UTXOSet, newHeight, cs.IsTestnet); err != nil {
 			return err
 		}
 	}
@@ -278,7 +278,7 @@ func (cs *ChainState) reorganize(newTip *blockNode) error {
 			return fmt.Errorf("reorg: missing block data for %s at height %d", n.Hash, n.Height)
 		}
 		// Re-validate transactions against the current UTXO state.
-		if err := ValidateBlockTxs(n.Block, cs.UTXOSet, n.Height); err != nil {
+		if err := ValidateBlockTxs(n.Block, cs.UTXOSet, n.Height, cs.IsTestnet); err != nil {
 			return fmt.Errorf("reorg: block %d tx validation failed: %w", n.Height, err)
 		}
 		undo := cs.UTXOSet.ApplyBlockWithUndo(n.Block.Transactions, n.Height)

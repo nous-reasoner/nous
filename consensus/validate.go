@@ -106,6 +106,7 @@ func ValidateBlockTxs(
 	blk *block.Block,
 	utxoSet tx.UTXOStore,
 	height uint64,
+	isTestnet bool,
 ) error {
 	// Step 5: Validate all transactions.
 	blockSpent := make(map[tx.OutPoint]bool)
@@ -139,7 +140,7 @@ func ValidateBlockTxs(
 					i, in.PrevOut.TxID, in.PrevOut.Index)
 			}
 		}
-		if err := tx.ValidateTransaction(blk.Transactions[i], utxoSet, height); err != nil {
+		if err := tx.ValidateTransaction(blk.Transactions[i], utxoSet, height, isTestnet); err != nil {
 			return fmt.Errorf("step 5: transaction %d invalid: %w", i, err)
 		}
 		for _, in := range blk.Transactions[i].Inputs {
@@ -208,9 +209,10 @@ func ValidateBlock(
 	params *DifficultyParams,
 	utxoSet tx.UTXOStore,
 	height uint64,
+	isTestnet bool,
 ) error {
 	if err := ValidateBlockHeader(blk, prevHeader, params); err != nil {
 		return err
 	}
-	return ValidateBlockTxs(blk, utxoSet, height)
+	return ValidateBlockTxs(blk, utxoSet, height, isTestnet)
 }

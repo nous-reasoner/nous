@@ -107,7 +107,7 @@ func TestDustLimit(t *testing.T) {
 		Outputs: []TxOut{{Amount: DustLimit - 1, PkScript: CreateP2PKHLockScript(pubKeyHash)}},
 	}
 
-	err = ValidateTx(dustTx, utxos, 100)
+	err = ValidateTx(dustTx, utxos, 100, false)
 	if err == nil {
 		t.Fatal("output below dust limit should be rejected")
 	}
@@ -205,7 +205,7 @@ func TestChainID_Mismatch(t *testing.T) {
 		Outputs: []TxOut{{Amount: 9_0000_0000, PkScript: CreateP2PKHLockScript(pubKeyHash)}},
 	}
 
-	err = ValidateTx(txn, utxos, 100)
+	err = ValidateTx(txn, utxos, 100, false)
 	if err == nil {
 		t.Fatal("wrong ChainID should be rejected")
 	}
@@ -702,7 +702,7 @@ func TestValidateTransactionValid(t *testing.T) {
 	}
 	spendTx.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 
-	if err := ValidateTransaction(spendTx, utxos, 100); err != nil {
+	if err := ValidateTransaction(spendTx, utxos, 100, false); err != nil {
 		t.Fatalf("valid transaction should pass: %v", err)
 	}
 }
@@ -742,7 +742,7 @@ func TestValidateTransactionDoubleSpend(t *testing.T) {
 	spend1.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 
 	// Validate and apply first spend.
-	if err := ValidateTransaction(spend1, utxos, 100); err != nil {
+	if err := ValidateTransaction(spend1, utxos, 100, false); err != nil {
 		t.Fatalf("first spend should be valid: %v", err)
 	}
 	utxos.Spend(spend1.Inputs[0].PrevOut)
@@ -765,7 +765,7 @@ func TestValidateTransactionDoubleSpend(t *testing.T) {
 	sig2, _ := crypto.Sign(priv, sigHash2)
 	spend2.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig2.Bytes(), pub.SerializeCompressed())
 
-	err = ValidateTransaction(spend2, utxos, 100)
+	err = ValidateTransaction(spend2, utxos, 100, false)
 	if err == nil {
 		t.Fatal("double-spend should be rejected")
 	}
@@ -806,7 +806,7 @@ func TestValidateTransactionInsufficientFunds(t *testing.T) {
 	sig, _ := crypto.Sign(priv, sigHash)
 	spendTx.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 
-	err = ValidateTransaction(spendTx, utxos, 100)
+	err = ValidateTransaction(spendTx, utxos, 100, false)
 	if err == nil {
 		t.Fatal("insufficient funds should be rejected")
 	}
@@ -820,7 +820,7 @@ func TestValidateCoinbase(t *testing.T) {
 	pubKeyHash := make([]byte, 20)
 	cb := NewCoinbaseTx(0, 50_0000_0000, CreateP2PKHLockScript(pubKeyHash), ChainIDNous)
 
-	err := ValidateTransaction(cb, NewUTXOSet(), 0)
+	err := ValidateTransaction(cb, NewUTXOSet(), 0, false)
 	if err != nil {
 		t.Fatalf("valid coinbase should pass: %v", err)
 	}
@@ -861,7 +861,7 @@ func TestValidateTransactionDuplicateInput(t *testing.T) {
 		dupTx.Inputs[i].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 	}
 
-	err = ValidateTransaction(dupTx, utxos, 100)
+	err = ValidateTransaction(dupTx, utxos, 100, false)
 	if err == nil {
 		t.Fatal("transaction with duplicate inputs should be rejected")
 	}
@@ -895,19 +895,19 @@ func TestValidateTransactionImmatureCoinbase(t *testing.T) {
 	spendTx.Inputs[0].SignatureScript = CreateP2PKHUnlockScript(sig.Bytes(), pub.SerializeCompressed())
 
 	// At height 51, should fail.
-	err = ValidateTransaction(spendTx, utxos, 51)
+	err = ValidateTransaction(spendTx, utxos, 51, false)
 	if err == nil {
 		t.Fatal("spending immature coinbase should be rejected")
 	}
 
 	// At height 149, should still fail.
-	err = ValidateTransaction(spendTx, utxos, 149)
+	err = ValidateTransaction(spendTx, utxos, 149, false)
 	if err == nil {
 		t.Fatal("spending coinbase at 99 confirmations should be rejected")
 	}
 
 	// At height 150, should pass.
-	err = ValidateTransaction(spendTx, utxos, 150)
+	err = ValidateTransaction(spendTx, utxos, 150, false)
 	if err != nil {
 		t.Fatalf("spending mature coinbase should pass: %v", err)
 	}
@@ -932,7 +932,7 @@ func TestValidateTransactionOverflowOutputValue(t *testing.T) {
 		Outputs: []TxOut{{Amount: MaxAmount + 1, PkScript: CreateP2PKHLockScript(pubKeyHash)}},
 	}
 
-	err := ValidateTransaction(spendTx, utxos, 100)
+	err := ValidateTransaction(spendTx, utxos, 100, false)
 	if err == nil {
 		t.Fatal("output value exceeding MaxAmount should be rejected")
 	}
@@ -1000,7 +1000,7 @@ func TestValidateTransactionDustOutput(t *testing.T) {
 		Outputs: []TxOut{{Amount: DustLimit - 1, PkScript: CreateP2PKHLockScript(pubKeyHash)}},
 	}
 
-	err = ValidateTransaction(dustTx, utxos, 100)
+	err = ValidateTransaction(dustTx, utxos, 100, false)
 	if err == nil {
 		t.Fatal("output below dust limit should be rejected")
 	}
@@ -1013,7 +1013,7 @@ func TestValidateTransactionDustOutput(t *testing.T) {
 		Outputs: []TxOut{{Amount: DustLimit, PkScript: CreateP2PKHLockScript(pubKeyHash)}},
 	}
 
-	err = ValidateTransaction(okTx, utxos, 100)
+	err = ValidateTransaction(okTx, utxos, 100, false)
 	// May fail on script verification (unsigned), but should NOT fail on dust.
 	if err != nil && err.Error() != "" {
 		if bytes.Contains([]byte(err.Error()), []byte("dust")) {

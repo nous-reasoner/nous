@@ -46,8 +46,9 @@ type KeyPair struct {
 
 // Wallet manages a pool of key pairs and constructs transactions.
 type Wallet struct {
-	Keys    []KeyPair
-	Primary int // index of the active key pair
+	Keys      []KeyPair
+	Primary   int  // index of the active key pair
+	IsTestnet bool // true for testnet, false for mainnet
 }
 
 // NewWallet generates a new wallet with a single fresh key pair.
@@ -311,7 +312,7 @@ func (w *Wallet) CreateTransaction(to crypto.Address, amount, fee int64, utxoSet
 	}
 
 	// Build unsigned transaction.
-	transaction := &tx.Transaction{Version: 2, ChainID: tx.ChainIDNous}
+	transaction := &tx.Transaction{Version: 2, ChainID: tx.ChainIDFor(w.IsTestnet)}
 	for _, ou := range selected {
 		transaction.Inputs = append(transaction.Inputs, tx.TxIn{
 			PrevOut:  ou.utxo.OutPoint,

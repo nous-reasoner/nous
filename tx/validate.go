@@ -27,14 +27,16 @@ func safeAdd(a, b int64) (int64, error) {
 // ValidateTx validates a transaction against the UTXO set.
 // height is the block height at which this transaction is being validated;
 // it is used for coinbase maturity checks.
-func ValidateTx(txn *Transaction, utxos UTXOStore, height uint64) error {
+// isTestnet selects the expected ChainID (mainnet vs testnet).
+func ValidateTx(txn *Transaction, utxos UTXOStore, height uint64, isTestnet bool) error {
 	if txn.IsCoinbase() {
 		return ValidateCoinbase(txn)
 	}
 
-	// ChainID must be zero or ChainIDNous.
-	if txn.ChainID != [4]byte{} && txn.ChainID != ChainIDNous {
-		return fmt.Errorf("validate: unknown ChainID %x", txn.ChainID)
+	// ChainID must match the expected network.
+	expected := ChainIDFor(isTestnet)
+	if txn.ChainID != [4]byte{} && txn.ChainID != expected {
+		return fmt.Errorf("validate: wrong ChainID %x, want %x", txn.ChainID, expected)
 	}
 
 	// All output ScriptVersion must be 0.
@@ -125,6 +127,6 @@ func ValidateTx(txn *Transaction, utxos UTXOStore, height uint64) error {
 }
 
 // ValidateTransaction is a backward-compatible wrapper for ValidateTx.
-func ValidateTransaction(txn *Transaction, utxos UTXOStore, height uint64) error {
-	return ValidateTx(txn, utxos, height)
+func ValidateTransaction(txn *Transaction, utxos UTXOStore, height uint64, isTestnet bool) error {
+	return ValidateTx(txn, utxos, height, isTestnet)
 }
