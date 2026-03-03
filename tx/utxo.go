@@ -27,7 +27,22 @@ type UndoData struct {
 	CreatedTxs []crypto.Hash  // transaction hashes created by this block (remove outputs on rollback)
 }
 
-// UTXOSet manages the set of all unspent transaction outputs.
+// UTXOStore is the interface for UTXO set implementations.
+// Both the in-memory UTXOSet and the BoltDB-backed BoltUTXOSet implement this.
+type UTXOStore interface {
+	Add(op OutPoint, output TxOut, height uint64, isCoinbase bool)
+	Spend(op OutPoint) bool
+	Get(op OutPoint) *UTXO
+	AddTransaction(t *Transaction, height uint64)
+	ApplyBlock(txs []*Transaction, height uint64)
+	ApplyBlockWithUndo(txs []*Transaction, height uint64) *UndoData
+	RollbackBlock(undo *UndoData) error
+	Count() int
+	FindByPubKeyHash(pubKeyHash []byte) []*UTXO
+	GetBalance(pubKeyHash []byte) int64
+}
+
+// UTXOSet manages the set of all unspent transaction outputs (in-memory).
 type UTXOSet struct {
 	utxos map[OutPoint]*UTXO
 }

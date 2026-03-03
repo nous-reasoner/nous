@@ -41,7 +41,7 @@ type ReorgCallback func(disconnected *block.Block)
 type ChainState struct {
 	Tip        *block.Header
 	Height     uint64
-	UTXOSet    *tx.UTXOSet
+	UTXOSet    tx.UTXOStore
 	Difficulty *DifficultyParams
 	// ASERT anchor point for per-block difficulty adjustment.
 	Anchor *ASERTAnchor
@@ -55,9 +55,14 @@ type ChainState struct {
 	OnReorg ReorgCallback
 }
 
-// NewChainState creates a new chain state from a genesis block.
+// NewChainState creates a new chain state from a genesis block with an in-memory UTXO set.
 func NewChainState(genesis *block.Block) *ChainState {
-	utxos := tx.NewUTXOSet()
+	return NewChainStateWithUTXO(genesis, tx.NewUTXOSet())
+}
+
+// NewChainStateWithUTXO creates a chain state from genesis using the provided UTXO store.
+// The genesis block's transactions are applied to the store.
+func NewChainStateWithUTXO(genesis *block.Block, utxos tx.UTXOStore) *ChainState {
 	undo := utxos.ApplyBlockWithUndo(genesis.Transactions, 0)
 
 	genesisHash := genesis.Header.Hash()
@@ -86,6 +91,38 @@ func NewChainState(genesis *block.Block) *ChainState {
 	cs.blockIndex[genesisHash] = genesisNode
 	cs.tipNode = genesisNode
 	cs.undoMap[genesisHash] = undo
+	return cs
+}
+
+// NewChainStateRestored creates a chain state from genesis with a pre-populated
+// UTXO store. The genesis block's transactions are NOT re-applied. Used when
+// restoring from a persisted UTXO database.
+func NewChainStateRestored(genesis *block.Block, utxos tx.UTXOStore) *ChainState {
+	genesisHash := genesis.Header.Hash()
+	genesisNode := &blockNode{
+		Hash:      genesisHash,
+		Height:    0,
+		Header:    genesis.Header,
+		Block:     genesis,
+		ChainWork: big.NewInt(1),
+		Parent:    nil,
+	}
+
+	cs := &ChainState{
+		Tip:        &genesis.Header,
+		Height:     0,
+		UTXOSet:    utxos,
+		Difficulty: &DifficultyParams{PoWTarget: CompactToTarget(genesis.Header.DifficultyBits)},
+		Anchor: &ASERTAnchor{
+			Height:    0,
+			Timestamp: genesis.Header.Timestamp,
+			Target:    CompactToTarget(genesis.Header.DifficultyBits),
+		},
+		blockIndex: make(map[crypto.Hash]*blockNode),
+		undoMap:    make(map[crypto.Hash]*tx.UndoData),
+	}
+	cs.blockIndex[genesisHash] = genesisNode
+	cs.tipNode = genesisNode
 	return cs
 }
 
@@ -334,6 +371,39 @@ func (cs *ChainState) AddBlockUnchecked(blk *block.Block) error {
 
 	undo := cs.UTXOSet.ApplyBlockWithUndo(blk.Transactions, newHeight)
 	cs.undoMap[blkHash] = undo
+
+	cs.tipNode = node
+	cs.Tip = &blk.Header
+	cs.Height = newHeight
+	cs.appendASERT(blk.Header.Timestamp, newHeight)
+	return nil
+}
+
+// AddBlockIndexOnly rebuilds the block index and ASERT difficulty from a stored
+// block without modifying the UTXO set. Used during recovery when a persisted
+// UTXO store already contains the correct tip state.
+// Undo data is not generated; deep reorgs past the restart point will fail.
+func (cs *ChainState) AddBlockIndexOnly(blk *block.Block) error {
+	if blk == nil {
+		return errors.New("nil block")
+	}
+	blkHash := blk.Header.Hash()
+	newHeight := cs.Height + 1
+
+	work := blockWork(blk.Header.DifficultyBits)
+	parentWork := big.NewInt(0)
+	if cs.tipNode != nil {
+		parentWork = cs.tipNode.ChainWork
+	}
+	node := &blockNode{
+		Hash:      blkHash,
+		Height:    newHeight,
+		Header:    blk.Header,
+		Block:     blk,
+		ChainWork: new(big.Int).Add(parentWork, work),
+		Parent:    cs.tipNode,
+	}
+	cs.blockIndex[blkHash] = node
 
 	cs.tipNode = node
 	cs.Tip = &blk.Header

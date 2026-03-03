@@ -41,7 +41,7 @@ func ValidateBlock(
 	blk *block.Block,
 	prevHeader *block.Header,
 	params *DifficultyParams,
-	utxoSet *tx.UTXOSet,
+	utxoSet tx.UTXOStore,
 	height uint64,
 ) error {
 	hdr := &blk.Header

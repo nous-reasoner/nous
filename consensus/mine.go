@@ -31,7 +31,7 @@ func MineBlock(
 	pubKeyHash []byte,
 	params *DifficultyParams,
 	height uint64,
-	utxoSet *tx.UTXOSet,
+	utxoSet tx.UTXOStore,
 ) (*block.Block, error) {
 	// Step 0: Create coinbase (reward + fees).
 	reward := BlockReward(height)

@@ -216,7 +216,7 @@ func LoadFromFile(path, password string) (*Wallet, error) {
 // --- Balance & UTXO queries ---
 
 // GetBalance returns the total balance across all keys in the wallet.
-func (w *Wallet) GetBalance(utxoSet *tx.UTXOSet) int64 {
+func (w *Wallet) GetBalance(utxoSet tx.UTXOStore) int64 {
 	var total int64
 	for _, kp := range w.Keys {
 		pkh := crypto.Hash160(kp.PublicKey.SerializeCompressed())
@@ -231,7 +231,7 @@ func (w *Wallet) GetBalance(utxoSet *tx.UTXOSet) int64 {
 }
 
 // GetUTXOs returns all unspent outpoints belonging to any key in the wallet.
-func (w *Wallet) GetUTXOs(utxoSet *tx.UTXOSet) []tx.OutPoint {
+func (w *Wallet) GetUTXOs(utxoSet tx.UTXOStore) []tx.OutPoint {
 	var result []tx.OutPoint
 	for _, kp := range w.Keys {
 		pkh := crypto.Hash160(kp.PublicKey.SerializeCompressed())
@@ -248,7 +248,7 @@ func (w *Wallet) GetUTXOs(utxoSet *tx.UTXOSet) []tx.OutPoint {
 // CreateTransaction builds a signed transaction sending amount to the given
 // address, with the specified fee. UTXOs are selected largest-first.
 // Change (if any) is sent back to the wallet's primary address.
-func (w *Wallet) CreateTransaction(to crypto.Address, amount, fee int64, utxoSet *tx.UTXOSet, heights ...uint64) (*tx.Transaction, error) {
+func (w *Wallet) CreateTransaction(to crypto.Address, amount, fee int64, utxoSet tx.UTXOStore, heights ...uint64) (*tx.Transaction, error) {
 	// Optional height parameter for filtering immature coinbase UTXOs.
 	var currentHeight uint64
 	if len(heights) > 0 {

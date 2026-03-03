@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"nous/network"
 	"nous/node"
 	"nous/storage"
+	"nous/tx"
 	"nous/wallet"
 )
 
@@ -86,23 +88,50 @@ func main() {
 		log.Printf("genesis block created: %x (timestamp=%d)", genesisHash[:8], genesisTimestamp)
 	}
 
-	// Initialize chain state.
-	chain := consensus.NewChainState(genesis)
+	// Open BoltDB-backed UTXO set.
+	utxoDBPath := filepath.Join(*dataDir, "utxo.db")
+	boltUTXO, err := tx.NewBoltUTXOSet(utxoDBPath)
+	if err != nil {
+		log.Fatalf("utxo: %v", err)
+	}
+	utxoPopulated := boltUTXO.Count() > 0
 
-	// Recover chain from stored blocks.
+	// Initialize chain state.
+	var chain *consensus.ChainState
 	tip, tipErr := store.GetChainTip()
-	if tipErr == nil && tip.Height > 0 {
-		log.Printf("recovering chain state from %d stored blocks...", tip.Height)
-		for h := uint64(1); h <= tip.Height; h++ {
-			blk, err := store.LoadBlockByHeight(h)
-			if err != nil {
-				log.Fatalf("recovery: load block %d: %v", h, err)
+
+	if utxoPopulated {
+		// UTXO set persisted from previous run — skip UTXO replay.
+		chain = consensus.NewChainStateRestored(genesis, boltUTXO)
+		if tipErr == nil && tip.Height > 0 {
+			log.Printf("recovering block index from %d stored blocks (UTXO set loaded from disk)...", tip.Height)
+			for h := uint64(1); h <= tip.Height; h++ {
+				blk, err := store.LoadBlockByHeight(h)
+				if err != nil {
+					log.Fatalf("recovery: load block %d: %v", h, err)
+				}
+				if err := chain.AddBlockIndexOnly(blk); err != nil {
+					log.Fatalf("recovery: index block %d: %v", h, err)
+				}
 			}
-			if err := chain.AddBlockUnchecked(blk); err != nil {
-				log.Fatalf("recovery: apply block %d: %v", h, err)
-			}
+			log.Printf("block index recovered: height=%d", chain.Height)
 		}
-		log.Printf("chain state recovered: height=%d", chain.Height)
+	} else {
+		// Fresh UTXO set — apply genesis + all stored blocks.
+		chain = consensus.NewChainStateWithUTXO(genesis, boltUTXO)
+		if tipErr == nil && tip.Height > 0 {
+			log.Printf("recovering chain state from %d stored blocks...", tip.Height)
+			for h := uint64(1); h <= tip.Height; h++ {
+				blk, err := store.LoadBlockByHeight(h)
+				if err != nil {
+					log.Fatalf("recovery: load block %d: %v", h, err)
+				}
+				if err := chain.AddBlockUnchecked(blk); err != nil {
+					log.Fatalf("recovery: apply block %d: %v", h, err)
+				}
+			}
+			log.Printf("chain state recovered: height=%d", chain.Height)
+		}
 	}
 
 	// Configure P2P network.
@@ -189,6 +218,13 @@ func main() {
 	tipHash := chain.Tip.Hash()
 	store.SaveChainTip(storage.ChainTip{Hash: tipHash, Height: chain.Height})
 	log.Printf("chain tip saved: height=%d hash=%x", chain.Height, tipHash[:8])
+
+	// Close UTXO database.
+	if err := boltUTXO.Close(); err != nil {
+		log.Printf("utxo close: %v", err)
+	}
+	log.Println("utxo db closed")
+
 	log.Println("nousd shutdown complete")
 }
 
