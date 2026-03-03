@@ -76,7 +76,11 @@ func TestReorg(t *testing.T) {
 
 	params := easyReorgParams()
 
-	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-120, 0x1d00ffff)
+	// Use a genesis timestamp far enough in the past so that ASERT always
+	// sees positive timeDiff (blocks appear "late") and clamps the target to
+	// max. This prevents ASERT from lowering difficulty below the all-0xFF
+	// target, which caused flaky PoW failures.
+	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-3600, 0x1d00ffff)
 	cs := NewChainState(genesis)
 	cs.Difficulty = params
 	cs.Anchor.Target = params.PoWTarget
