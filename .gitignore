@@ -1,11 +1,45 @@
+# Binaries
 *.exe
 *.exe~
-build/
-release/
-node_a.log
-node_b.log
-local_node.log
-local_sync.log
-UsersAdministrator.nous*/
-nousd-linux
-nous-cli-linux
+*.dll
+*.so
+*.dylib
+nousd
+nous-cli
+
+# Temp and logs
+*.log
+*.tmp
+*.prof
+*.out
+*.test
+
+# Wallet (NEVER commit)
+*.dat
+wallet.json
+*.key
+*.pem
+
+# Data directories
+.nous/
+.nous-skill/
+.nous-testnet/
+chaindata/
+data/
+
+# Deploy secrets
+scripts/*.env
+scripts/*secret*
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
