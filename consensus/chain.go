@@ -175,8 +175,16 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 	// Is this block extending the current tip (main chain)?
 	extendsMainChain := parentNode == cs.tipNode
 
+	// Compute expected difficulty from the block's actual parent, not the
+	// validator's current tip. The miner sets DifficultyBits using
+	// ASERT(anchor, parentHeight, parentTimestamp), so the validator must
+	// use the same inputs to get the same expected target.
+	expectedDiff := &DifficultyParams{
+		PoWTarget: AdjustDifficultyASERT(cs.Anchor, parentNode.Height, parentNode.Header.Timestamp),
+	}
+
 	// Always validate header (context-free: size, format, SAT, PoW, merkle).
-	if err := ValidateBlockHeader(blk, &parentNode.Header, cs.Difficulty); err != nil {
+	if err := ValidateBlockHeader(blk, &parentNode.Header, expectedDiff); err != nil {
 		return err
 	}
 

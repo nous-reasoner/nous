@@ -161,21 +161,21 @@ func TestMessageSizeCheck(t *testing.T) {
 }
 
 // TestRateLimitCheck verifies that a peer sending more than
-// RateLimitPerSecond (100) messages per second is throttled.
+// RateLimitPerSecond messages per second is throttled.
 func TestRateLimitCheck(t *testing.T) {
 	pp := NewPeerProtection()
 	addr := "10.0.0.20:9333"
 
-	// First 100 messages should all be allowed.
+	// First RateLimitPerSecond messages should all be allowed.
 	for i := 0; i < RateLimitPerSecond; i++ {
 		if !pp.CheckRate(addr) {
 			t.Fatalf("message %d should be allowed (limit is %d)", i+1, RateLimitPerSecond)
 		}
 	}
 
-	// Message 101 should be denied.
+	// Next message should be denied.
 	if pp.CheckRate(addr) {
-		t.Fatal("message beyond rate limit (>100/sec) should be denied")
+		t.Fatalf("message beyond rate limit (>%d/sec) should be denied", RateLimitPerSecond)
 	}
 
 	// Additional messages should continue to be denied within the same window.

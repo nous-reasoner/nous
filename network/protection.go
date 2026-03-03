@@ -11,7 +11,7 @@ const (
 	BanScoreInvalidBlock = 100 // consensus-invalid block
 	BanScoreConsensusTx  = 25  // consensus-invalid transaction
 	BanScorePolicyTx     = 5   // policy-invalid transaction
-	BanScoreRateExceeded = 50  // message rate limit exceeded
+	BanScoreRateExceeded = 10  // message rate limit exceeded
 	BanScoreUnknownCmd   = 10  // unknown message command
 	BanScoreBadMessage   = 20  // malformed / decode error
 	BanScoreOversized    = 20  // oversized message
@@ -19,7 +19,7 @@ const (
 	BanScoreThreshold = 100 // cumulative score that triggers a ban
 	BanDuration       = 24 * time.Hour
 
-	RateLimitPerSecond = 100
+	RateLimitPerSecond = 500
 	RateLimitWindow    = time.Second
 
 	HandshakeTimeout = 10 * time.Second
