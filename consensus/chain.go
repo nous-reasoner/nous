@@ -43,6 +43,7 @@ type ChainState struct {
 	Height     uint64
 	UTXOSet    tx.UTXOStore
 	Difficulty *DifficultyParams
+	IsTestnet  bool // true for testnet, false for mainnet
 	// ASERT anchor point for per-block difficulty adjustment.
 	Anchor *ASERTAnchor
 
@@ -158,6 +159,11 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 	}
 
 	newHeight := parentNode.Height + 1
+
+	// Checkpoint validation: reject blocks at checkpoint heights with wrong hash.
+	if !ValidateCheckpoint(newHeight, blkHash, cs.IsTestnet) {
+		return fmt.Errorf("block %s at height %d fails checkpoint validation", blkHash, newHeight)
+	}
 
 	// Is this block extending the current tip (main chain)?
 	extendsMainChain := parentNode == cs.tipNode

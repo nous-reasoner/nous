@@ -134,6 +134,9 @@ func main() {
 		}
 	}
 
+	// Set network type for checkpoint validation.
+	chain.IsTestnet = *testnet
+
 	// Configure P2P network.
 	magic := network.MainNetMagic
 	if *testnet {
