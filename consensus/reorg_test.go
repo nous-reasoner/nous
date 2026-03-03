@@ -174,7 +174,7 @@ func TestNoReorgWhenShorter(t *testing.T) {
 
 	params := easyReorgParams()
 
-	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-120, 0x1d00ffff)
+	genesis := block.GenesisBlock(pkhA, uint32(time.Now().Unix())-3600, 0x1d00ffff)
 	cs := NewChainState(genesis)
 	cs.Difficulty = params
 	cs.Anchor.Target = params.PoWTarget

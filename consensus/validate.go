@@ -27,22 +27,12 @@ func safeAddInt64(a, b int64) (int64, error) {
 	return a + b, nil
 }
 
-// ValidateBlock performs the full Cogito Consensus block validation.
-//
-//  1. Check block size
-//  2. Check header format (version, prevHash, timestamp)
-//  3. Regenerate SAT formula from makeSATSeed(prevHash, seed) and verify solution
-//  4. Verify SATSolutionHash == SHA256(SerializeAssignment(solution))
-//  5. Verify PoW: blockHash < target
-//  6. Validate all transactions
-//  7. Verify coinbase reward
-//  8. Verify Merkle root
-func ValidateBlock(
+// ValidateBlockHeader performs context-free block validation: size, header
+// format, SAT solution, PoW, difficulty bits, and merkle root.
+func ValidateBlockHeader(
 	blk *block.Block,
 	prevHeader *block.Header,
 	params *DifficultyParams,
-	utxoSet tx.UTXOStore,
-	height uint64,
 ) error {
 	hdr := &blk.Header
 
@@ -93,7 +83,30 @@ func ValidateBlock(
 	if blockHash.Compare(params.PoWTarget) > 0 {
 		return fmt.Errorf("step 4: PoW hash %s exceeds target", blockHash)
 	}
+	expectedBits := TargetToCompact(params.PoWTarget)
+	if hdr.DifficultyBits != expectedBits {
+		return fmt.Errorf("step 4: block difficulty bits %x != expected %x", hdr.DifficultyBits, expectedBits)
+	}
 
+	// Step 7: Verify merkle root.
+	txIDs := make([]crypto.Hash, len(blk.Transactions))
+	for i, t := range blk.Transactions {
+		txIDs[i] = t.TxID()
+	}
+	expectedMerkle := block.ComputeMerkleRoot(txIDs)
+	if hdr.MerkleRoot != expectedMerkle {
+		return errors.New("step 7: merkle root mismatch")
+	}
+
+	return nil
+}
+
+// ValidateBlockTxs performs UTXO-dependent transaction and coinbase validation.
+func ValidateBlockTxs(
+	blk *block.Block,
+	utxoSet tx.UTXOStore,
+	height uint64,
+) error {
 	// Step 5: Validate all transactions.
 	blockSpent := make(map[tx.OutPoint]bool)
 
@@ -182,15 +195,20 @@ func ValidateBlock(
 			coinbaseTotal, maxCoinbase, expectedReward, totalFees)
 	}
 
-	// Step 7: Verify merkle root.
-	txIDs := make([]crypto.Hash, len(blk.Transactions))
-	for i, t := range blk.Transactions {
-		txIDs[i] = t.TxID()
-	}
-	expectedMerkle := block.ComputeMerkleRoot(txIDs)
-	if hdr.MerkleRoot != expectedMerkle {
-		return errors.New("step 7: merkle root mismatch")
-	}
-
 	return nil
+}
+
+// ValidateBlock performs the full Cogito Consensus block validation by running
+// both header validation and transaction validation.
+func ValidateBlock(
+	blk *block.Block,
+	prevHeader *block.Header,
+	params *DifficultyParams,
+	utxoSet tx.UTXOStore,
+	height uint64,
+) error {
+	if err := ValidateBlockHeader(blk, prevHeader, params); err != nil {
+		return err
+	}
+	return ValidateBlockTxs(blk, utxoSet, height)
 }

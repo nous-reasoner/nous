@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -78,12 +79,20 @@ func encodeValue(u *UTXO) []byte {
 }
 
 func decodeValue(key, val []byte) *UTXO {
+	// Minimum value size: Amount(8) + ScriptLen(2) + Height(4) + Flags(1) = 15 bytes.
+	if len(val) < 15 {
+		return nil
+	}
 	op := decodeKey(key)
 	off := 0
 	amount := int64(binary.LittleEndian.Uint64(val[off:]))
 	off += 8
 	scriptLen := int(binary.LittleEndian.Uint16(val[off:]))
 	off += 2
+	// Validate that the remaining data is large enough for script + height + flags.
+	if off+scriptLen+4+1 > len(val) {
+		return nil
+	}
 	script := make([]byte, scriptLen)
 	copy(script, val[off:off+scriptLen])
 	off += scriptLen
@@ -104,22 +113,26 @@ func (s *BoltUTXOSet) Add(op OutPoint, output TxOut, height uint64, isCoinbase b
 	u := &UTXO{OutPoint: op, Output: output, Height: height, IsCoinbase: isCoinbase}
 	key := encodeKey(op)
 	val := encodeValue(u)
-	s.db.Update(func(tx *bolt.Tx) error {
+	if err := s.db.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket(utxoBucket).Put(key, val)
-	})
+	}); err != nil {
+		log.Fatalf("utxo bolt: Add failed: %v", err)
+	}
 }
 
 func (s *BoltUTXOSet) Spend(op OutPoint) bool {
 	key := encodeKey(op)
 	var found bool
-	s.db.Update(func(tx *bolt.Tx) error {
+	if err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(utxoBucket)
 		if b.Get(key) != nil {
 			found = true
 			return b.Delete(key)
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Fatalf("utxo bolt: Spend failed: %v", err)
+	}
 	return found
 }
 
@@ -139,7 +152,7 @@ func (s *BoltUTXOSet) Get(op OutPoint) *UTXO {
 func (s *BoltUTXOSet) AddTransaction(t *Transaction, height uint64) {
 	txID := t.TxID()
 	cb := t.IsCoinbase()
-	s.db.Update(func(btx *bolt.Tx) error {
+	if err := s.db.Update(func(btx *bolt.Tx) error {
 		b := btx.Bucket(utxoBucket)
 		for i, out := range t.Outputs {
 			op := OutPoint{TxID: txID, Index: uint32(i)}
@@ -149,11 +162,13 @@ func (s *BoltUTXOSet) AddTransaction(t *Transaction, height uint64) {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Fatalf("utxo bolt: AddTransaction failed: %v", err)
+	}
 }
 
 func (s *BoltUTXOSet) ApplyBlock(txs []*Transaction, height uint64) {
-	s.db.Update(func(btx *bolt.Tx) error {
+	if err := s.db.Update(func(btx *bolt.Tx) error {
 		b := btx.Bucket(utxoBucket)
 		for _, t := range txs {
 			if !t.IsCoinbase() {
@@ -172,12 +187,14 @@ func (s *BoltUTXOSet) ApplyBlock(txs []*Transaction, height uint64) {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Fatalf("utxo bolt: ApplyBlock failed: %v", err)
+	}
 }
 
 func (s *BoltUTXOSet) ApplyBlockWithUndo(txs []*Transaction, height uint64) *UndoData {
 	undo := &UndoData{}
-	s.db.Update(func(btx *bolt.Tx) error {
+	if err := s.db.Update(func(btx *bolt.Tx) error {
 		b := btx.Bucket(utxoBucket)
 		for _, t := range txs {
 			if !t.IsCoinbase() {
@@ -186,7 +203,9 @@ func (s *BoltUTXOSet) ApplyBlockWithUndo(txs []*Transaction, height uint64) *Und
 					val := b.Get(key)
 					if val != nil {
 						u := decodeValue(key, val)
-						undo.SpentUTXOs = append(undo.SpentUTXOs, UndoEntry{SpentUTXO: *u})
+						if u != nil {
+							undo.SpentUTXOs = append(undo.SpentUTXOs, UndoEntry{SpentUTXO: *u})
+						}
 					}
 					b.Delete(key)
 				}
@@ -203,7 +222,9 @@ func (s *BoltUTXOSet) ApplyBlockWithUndo(txs []*Transaction, height uint64) *Und
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Fatalf("utxo bolt: ApplyBlockWithUndo failed: %v", err)
+	}
 	return undo
 }
 

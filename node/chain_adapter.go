@@ -9,6 +9,7 @@ import (
 	"nous/consensus"
 	"nous/crypto"
 	"nous/storage"
+	"nous/tx"
 )
 
 // ChainAdapter bridges consensus.ChainState + storage.BlockStore to the
@@ -223,4 +224,11 @@ func (ca *ChainAdapter) AddBlock(blk *block.Block) (uint64, error) {
 	log.Printf("chain_adapter: reorg complete (fork at %d, new height %d)", forkHeight, newHeight)
 
 	return newHeight, nil
+}
+
+// ValidateTx validates a transaction against the current UTXO set and chain height.
+func (ca *ChainAdapter) ValidateTx(txn *tx.Transaction) error {
+	ca.chainMu.Lock()
+	defer ca.chainMu.Unlock()
+	return tx.ValidateTx(txn, ca.chain.UTXOSet, ca.chain.Height)
 }

@@ -65,7 +65,11 @@ func MineBlock(
 			}
 		}
 	}
-	coinbase := tx.NewCoinbaseTx(height, reward+totalFees, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDNous)
+	coinbaseAmount, err := safeAddInt64(reward, totalFees)
+	if err != nil {
+		return nil, errors.New("consensus: reward + fees overflow")
+	}
+	coinbase := tx.NewCoinbaseTx(height, coinbaseAmount, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDNous)
 	allTxs := make([]*tx.Transaction, 0, 1+len(txs))
 	allTxs = append(allTxs, coinbase)
 	allTxs = append(allTxs, txs...)

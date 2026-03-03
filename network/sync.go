@@ -50,6 +50,8 @@ type ChainAccess interface {
 	GetBlockByHash(hash crypto.Hash) (*block.Block, error)
 	// AddBlock validates and adds a block to the chain. Returns the new height.
 	AddBlock(blk *block.Block) (uint64, error)
+	// ValidateTx validates a transaction against the current UTXO set.
+	ValidateTx(txn *tx.Transaction) error
 }
 
 // orphanBlock holds a block whose parent is not yet known.
@@ -474,6 +476,13 @@ func (bs *BlockSyncer) handleTx(peer *Peer, msg Message) {
 
 	// Skip if already in mempool.
 	if bs.server.mempool.Has(txID) {
+		return
+	}
+
+	// Validate transaction against UTXO set before accepting into mempool.
+	if err := bs.chain.ValidateTx(transaction); err != nil {
+		log.Printf("sync: rejected tx %x from %s: %v", txID[:8], peer.Addr, err)
+		bs.server.protection.AddScore(peer.Addr, BanScorePolicyTx)
 		return
 	}
 

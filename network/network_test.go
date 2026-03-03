@@ -620,6 +620,10 @@ func (mc *mockChain) AddBlock(blk *block.Block) (uint64, error) {
 	return uint64(len(mc.blocks) - 1), nil
 }
 
+func (mc *mockChain) ValidateTx(txn *tx.Transaction) error {
+	return nil // mock: accept all transactions
+}
+
 // makeTestBlock creates a simple block linked to the given prev hash.
 func makeTestBlock(prevHash crypto.Hash, height uint32) *block.Block {
 	coinbase := tx.NewCoinbaseTx(uint64(height), 50_0000_0000, tx.CreateP2PKHLockScript(make([]byte, 20)), tx.ChainIDNous)

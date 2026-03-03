@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 
 	"nous/block"
 	"nous/crypto"
@@ -39,6 +40,7 @@ type ReorgCallback func(disconnected *block.Block)
 
 // ChainState holds the current state of the blockchain.
 type ChainState struct {
+	mu         sync.Mutex
 	Tip        *block.Header
 	Height     uint64
 	UTXOSet    tx.UTXOStore
@@ -145,6 +147,9 @@ func blockWork(diffBits uint32) *big.Int {
 // If the new block creates a heavier chain than the current tip, a
 // reorganization is performed automatically.
 func (cs *ChainState) AddBlock(blk *block.Block) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
 	blkHash := blk.Header.Hash()
 
 	// Already known?
@@ -168,17 +173,16 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 	// Is this block extending the current tip (main chain)?
 	extendsMainChain := parentNode == cs.tipNode
 
-	// Validate header format, SAT solution, and PoW against the parent header.
-	// UTXO validation uses the main-chain UTXO set, which is only correct
-	// for blocks extending the tip. Side-chain blocks that fail UTXO
-	// validation are stored without it; full validation happens during reorg.
-	if err := ValidateBlock(blk, &parentNode.Header, cs.Difficulty, cs.UTXOSet, newHeight); err != nil {
-		if !extendsMainChain {
-			// Side-chain block: store in index without UTXO validation.
-			// Full validation will happen during reorganize().
-			return cs.addSideChainBlock(blk, blkHash, parentNode, newHeight)
-		}
+	// Always validate header (context-free: size, format, SAT, PoW, merkle).
+	if err := ValidateBlockHeader(blk, &parentNode.Header, cs.Difficulty); err != nil {
 		return err
+	}
+
+	if extendsMainChain {
+		// Main chain: also validate transactions against UTXO set.
+		if err := ValidateBlockTxs(blk, cs.UTXOSet, newHeight); err != nil {
+			return err
+		}
 	}
 
 	// Create block node.
@@ -213,30 +217,13 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 	return nil
 }
 
-// addSideChainBlock stores a side-chain block in the index and checks for reorg.
-func (cs *ChainState) addSideChainBlock(blk *block.Block, blkHash crypto.Hash, parentNode *blockNode, newHeight uint64) error {
-	work := blockWork(blk.Header.DifficultyBits)
-	node := &blockNode{
-		Hash:      blkHash,
-		Height:    newHeight,
-		Header:    blk.Header,
-		Block:     blk,
-		ChainWork: new(big.Int).Add(parentNode.ChainWork, work),
-		Parent:    parentNode,
-	}
-	cs.blockIndex[blkHash] = node
-
-	if node.ChainWork.Cmp(cs.tipNode.ChainWork) > 0 {
-		return cs.reorganize(node)
-	}
-	return nil
-}
-
 // reorganize switches the active chain from the current tip to newTip.
 // Steps:
 //  1. Find the fork point (common ancestor).
 //  2. Roll back blocks from current tip to fork point.
-//  3. Apply blocks from fork point to new tip.
+//  3. Validate and apply blocks from fork point to new tip.
+//
+// Caller must hold cs.mu.
 func (cs *ChainState) reorganize(newTip *blockNode) error {
 	forkPoint := findForkPoint(cs.tipNode, newTip)
 	if forkPoint == nil {
@@ -276,10 +263,14 @@ func (cs *ChainState) reorganize(newTip *blockNode) error {
 		}
 	}
 
-	// Step 3: Connect blocks (forward order — oldest first).
+	// Step 3: Validate and connect blocks (forward order — oldest first).
 	for _, n := range connect {
 		if n.Block == nil {
 			return fmt.Errorf("reorg: missing block data for %s at height %d", n.Hash, n.Height)
+		}
+		// Re-validate transactions against the current UTXO state.
+		if err := ValidateBlockTxs(n.Block, cs.UTXOSet, n.Height); err != nil {
+			return fmt.Errorf("reorg: block %d tx validation failed: %w", n.Height, err)
 		}
 		undo := cs.UTXOSet.ApplyBlockWithUndo(n.Block.Transactions, n.Height)
 		cs.undoMap[n.Hash] = undo
@@ -327,12 +318,16 @@ func (cs *ChainState) appendASERT(timestamp uint32, height uint64) {
 
 // GetDifficulty returns the current difficulty parameters.
 func (cs *ChainState) GetDifficulty() *DifficultyParams {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
 	return cs.Difficulty
 }
 
 // GetMainChainBlock returns the block at the given height on the current main chain.
 // Returns nil if no block exists at that height on the main chain.
 func (cs *ChainState) GetMainChainBlock(height uint64) *block.Block {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
 	node := cs.tipNode.ancestor(height)
 	if node == nil {
 		return nil
@@ -342,17 +337,24 @@ func (cs *ChainState) GetMainChainBlock(height uint64) *block.Block {
 
 // HasBlock returns true if the block hash is in the block index.
 func (cs *ChainState) HasBlock(hash crypto.Hash) bool {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
 	_, ok := cs.blockIndex[hash]
 	return ok
 }
 
 // GetBlockNode returns the block node for a given hash.
 func (cs *ChainState) GetBlockNode(hash crypto.Hash) *blockNode {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
 	return cs.blockIndex[hash]
 }
 
 // AddBlockUnchecked applies a block without validation (for testing / genesis).
 func (cs *ChainState) AddBlockUnchecked(blk *block.Block) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
 	if blk == nil {
 		return errors.New("nil block")
 	}
@@ -390,6 +392,9 @@ func (cs *ChainState) AddBlockUnchecked(blk *block.Block) error {
 // UTXO store already contains the correct tip state.
 // Undo data is not generated; deep reorgs past the restart point will fail.
 func (cs *ChainState) AddBlockIndexOnly(blk *block.Block) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
 	if blk == nil {
 		return errors.New("nil block")
 	}
