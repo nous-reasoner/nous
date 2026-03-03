@@ -131,6 +131,9 @@ func encodePayload(msg Message) ([]byte, error) {
 			binary.Write(&buf, binary.LittleEndian, addr.Port)
 		}
 
+	case *MsgGetAddr:
+		// empty payload
+
 	default:
 		return nil, fmt.Errorf("network: unknown message type %T", msg)
 	}
@@ -203,6 +206,9 @@ func decodePayload(cmd string, payload []byte) (Message, error) {
 			binary.Read(r, binary.LittleEndian, &addrs[i].Port)
 		}
 		return &MsgAddr{Addresses: addrs}, nil
+
+	case CmdGetAddr:
+		return &MsgGetAddr{}, nil
 
 	default:
 		return nil, fmt.Errorf("network: unknown command %q", cmd)

@@ -47,6 +47,7 @@ const (
 	CmdPing      = "ping"
 	CmdPong      = "pong"
 	CmdAddr      = "addr"
+	CmdGetAddr   = "getaddr"
 )
 
 // InvType identifies the kind of inventory item.
@@ -147,3 +148,8 @@ type MsgAddr struct {
 }
 
 func (m *MsgAddr) Command() string { return CmdAddr }
+
+// MsgGetAddr requests peer addresses from a connected node.
+type MsgGetAddr struct{}
+
+func (m *MsgGetAddr) Command() string { return CmdGetAddr }

@@ -150,6 +150,7 @@ func main() {
 		ListenAddr: fmt.Sprintf(":%d", *port),
 		Magic:      magic,
 		Seeds:      seedList,
+		DataDir:    *dataDir,
 	}
 	server := network.NewServer(netCfg)
 

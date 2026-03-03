@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -14,6 +15,7 @@ type ServerConfig struct {
 	Magic      uint32   // network magic bytes
 	Seeds      []string // seed node addresses (e.g. "seed1.nous.io:9333")
 	MaxPeers   int      // override max connections (0 = default)
+	DataDir    string   // data directory for persistence (peers.json)
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -48,10 +50,22 @@ type Server struct {
 
 // NewServer creates a new P2P server.
 func NewServer(config ServerConfig) *Server {
+	var addrBook *AddressBook
+	if config.DataDir != "" {
+		path := filepath.Join(config.DataDir, "peers.json")
+		var err error
+		addrBook, err = LoadAddressBook(path, config.Seeds)
+		if err != nil {
+			log.Printf("network: load address book: %v", err)
+			addrBook = NewAddressBook(config.Seeds)
+		}
+	} else {
+		addrBook = NewAddressBook(config.Seeds)
+	}
 	return &Server{
 		config:     config,
 		peers:      NewPeerManager(),
-		addrBook:   NewAddressBook(config.Seeds),
+		addrBook:   addrBook,
 		mempool:    NewMempool(),
 		protection: NewPeerProtection(),
 		handlers:   make(map[string]MessageHandler),
@@ -113,6 +127,10 @@ func (s *Server) Start() error {
 	s.wg.Add(1)
 	go s.maintenanceLoop()
 
+	// Periodic addr broadcast, auto-connect, and address book persistence.
+	s.wg.Add(1)
+	go s.addrLoop()
+
 	return nil
 }
 
@@ -122,12 +140,25 @@ func (s *Server) Stop() error {
 	if s.listener != nil {
 		s.listener.Close()
 	}
+	// Save address book.
+	s.saveAddrBook()
 	// Close all peers.
 	for _, p := range s.peers.All() {
 		p.Close()
 	}
 	s.wg.Wait()
 	return nil
+}
+
+// saveAddrBook persists the address book to disk if DataDir is configured.
+func (s *Server) saveAddrBook() {
+	if s.config.DataDir == "" {
+		return
+	}
+	path := filepath.Join(s.config.DataDir, "peers.json")
+	if err := s.addrBook.SaveToFile(path); err != nil {
+		log.Printf("network: save address book: %v", err)
+	}
 }
 
 // ListenAddr returns the actual listen address (useful for ephemeral ports).
@@ -245,6 +276,126 @@ func (s *Server) maintenanceLoop() {
 	}
 }
 
+const (
+	// AddrBroadcastInterval is how often we broadcast addresses to peers.
+	AddrBroadcastInterval = 30 * time.Minute
+
+	// AutoConnectInterval is how often we try to connect to new peers.
+	AutoConnectInterval = 60 * time.Second
+
+	// AddrBookSaveInterval is how often we persist the address book.
+	AddrBookSaveInterval = 5 * time.Minute
+
+	// MaxAddrFailures is the number of connection failures before removing an address.
+	MaxAddrFailures = 3
+
+	// StaleAddrAge is the maximum age of an address entry before it is removed.
+	StaleAddrAge = 3 * time.Hour
+)
+
+func (s *Server) addrLoop() {
+	defer s.wg.Done()
+
+	addrTicker := time.NewTicker(AddrBroadcastInterval)
+	connectTicker := time.NewTicker(AutoConnectInterval)
+	saveTicker := time.NewTicker(AddrBookSaveInterval)
+	staleTicker := time.NewTicker(StaleAddrAge)
+	defer addrTicker.Stop()
+	defer connectTicker.Stop()
+	defer saveTicker.Stop()
+	defer staleTicker.Stop()
+
+	for {
+		select {
+		case <-s.quit:
+			return
+
+		case <-addrTicker.C:
+			s.broadcastAddresses()
+
+		case <-connectTicker.C:
+			s.autoConnect()
+
+		case <-saveTicker.C:
+			s.saveAddrBook()
+
+		case <-staleTicker.C:
+			if n := s.addrBook.RemoveStale(StaleAddrAge); n > 0 {
+				log.Printf("network: removed %d stale addresses", n)
+			}
+		}
+	}
+}
+
+// broadcastAddresses sends our own address + up to 10 random from the book.
+func (s *Server) broadcastAddresses() {
+	var addrs []NetAddress
+
+	// Add our own listen address.
+	if s.listener != nil {
+		if tcpAddr, ok := s.listener.Addr().(*net.TCPAddr); ok {
+			// Only broadcast our address if we know our external IP.
+			// For now, broadcast with the listen port so peers can learn it.
+			addrs = append(addrs, NetAddress{
+				IP:   tcpAddr.IP.String(),
+				Port: uint16(tcpAddr.Port),
+			})
+		}
+	}
+
+	// Add up to 10 random addresses from the book.
+	known := s.addrBook.GetAddresses(10)
+	addrs = append(addrs, known...)
+
+	if len(addrs) == 0 {
+		return
+	}
+
+	msg := &MsgAddr{Addresses: addrs}
+	for _, p := range s.peers.All() {
+		if p.Handshaked {
+			p.SendMessage(s.config.Magic, msg)
+		}
+	}
+}
+
+// autoConnect tries to fill outbound slots from the address book.
+func (s *Server) autoConnect() {
+	// Count current outbound peers.
+	outbound := 0
+	connected := make(map[string]bool)
+	for _, p := range s.peers.All() {
+		if !p.Inbound {
+			outbound++
+		}
+		connected[p.Addr] = true
+	}
+
+	if outbound >= MaxOutbound {
+		return
+	}
+
+	// Pick from address book, skipping connected and high-failure addresses.
+	candidates := s.addrBook.GetGoodAddresses(MaxOutbound*2, MaxAddrFailures)
+	for _, addr := range candidates {
+		if outbound >= MaxOutbound {
+			break
+		}
+		key := net.JoinHostPort(addr.IP, fmt.Sprintf("%d", addr.Port))
+		if connected[key] {
+			continue
+		}
+		if s.protection.IsBanned(key) {
+			continue
+		}
+		if err := s.Connect(key); err != nil {
+			s.addrBook.RecordFailure(key, MaxAddrFailures)
+		} else {
+			outbound++
+		}
+	}
+}
+
 func (s *Server) handlePeer(peer *Peer) {
 	defer s.wg.Done()
 	defer func() {
@@ -316,16 +467,25 @@ func (s *Server) registerDefaults() {
 	if _, ok := s.handlers[CmdAddr]; !ok {
 		s.handlers[CmdAddr] = s.handleAddr
 	}
+	if _, ok := s.handlers[CmdGetAddr]; !ok {
+		s.handlers[CmdGetAddr] = s.handleGetAddr
+	}
 }
 
 func (s *Server) sendVersion(peer *Peer) {
+	listenPort := uint16(DefaultPort)
+	if s.listener != nil {
+		if addr, ok := s.listener.Addr().(*net.TCPAddr); ok {
+			listenPort = uint16(addr.Port)
+		}
+	}
 	msg := &MsgVersion{
 		Version:     ProtocolVersion,
 		BlockHeight: s.BlockHeight(),
 		Timestamp:   uint64(time.Now().Unix()),
 		Nonce:       uint64(time.Now().UnixNano()),
 		UserAgent:   "nous/0.1.0",
-		ListenPort:  DefaultPort,
+		ListenPort:  listenPort,
 	}
 	peer.SendMessage(s.config.Magic, msg)
 }
@@ -346,6 +506,8 @@ func (s *Server) handleVersion(peer *Peer, msg Message) {
 
 func (s *Server) handleVerAck(peer *Peer, msg Message) {
 	peer.Handshaked = true
+	// Request known addresses from this peer.
+	peer.SendMessage(s.config.Magic, &MsgGetAddr{})
 }
 
 func (s *Server) handlePing(peer *Peer, msg Message) {
@@ -359,5 +521,87 @@ func (s *Server) handlePong(peer *Peer, msg Message) {
 
 func (s *Server) handleAddr(peer *Peer, msg Message) {
 	addrMsg := msg.(*MsgAddr)
-	s.addrBook.AddAddresses(addrMsg.Addresses)
+	filtered := s.filterAddresses(addrMsg.Addresses)
+	s.addrBook.AddAddresses(filtered)
+}
+
+func (s *Server) handleGetAddr(peer *Peer, msg Message) {
+	addrs := s.addrBook.GetAddresses(MaxAddrCount)
+	if len(addrs) > 0 {
+		peer.SendMessage(s.config.Magic, &MsgAddr{Addresses: addrs})
+	}
+}
+
+// filterAddresses removes addresses that are self, already connected, or private.
+func (s *Server) filterAddresses(addrs []NetAddress) []NetAddress {
+	selfPort := uint16(DefaultPort)
+	if s.listener != nil {
+		if addr, ok := s.listener.Addr().(*net.TCPAddr); ok {
+			selfPort = uint16(addr.Port)
+		}
+	}
+
+	var result []NetAddress
+	for _, addr := range addrs {
+		// Skip private/unroutable IPs.
+		if isPrivateIP(addr.IP) {
+			continue
+		}
+		// Skip self.
+		if addr.Port == selfPort && isSelfIP(addr.IP) {
+			continue
+		}
+		// Skip already connected peers.
+		key := net.JoinHostPort(addr.IP, fmt.Sprintf("%d", addr.Port))
+		if s.peers.Get(key) != nil {
+			continue
+		}
+		result = append(result, addr)
+	}
+	return result
+}
+
+// isPrivateIP returns true for loopback and RFC1918 addresses.
+func isPrivateIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return true // unparseable → reject
+	}
+	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+	// RFC1918: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 10 {
+			return true
+		}
+		if ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31 {
+			return true
+		}
+		if ip4[0] == 192 && ip4[1] == 168 {
+			return true
+		}
+	}
+	return false
+}
+
+// isSelfIP returns true if the IP is a local address on this machine.
+func isSelfIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, a := range addrs {
+		if ipNet, ok := a.(*net.IPNet); ok && ipNet.IP.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }

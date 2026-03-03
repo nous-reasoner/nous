@@ -1,8 +1,10 @@
 package network
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 )
@@ -206,17 +208,24 @@ func (pm *PeerManager) countDirections() (inbound, outbound int) {
 	return
 }
 
+// addrEntry tracks a known address with metadata for persistence.
+type addrEntry struct {
+	Addr     NetAddress `json:"addr"`
+	LastSeen time.Time  `json:"last_seen"`
+	Failures int        `json:"failures"`
+}
+
 // AddressBook maintains a list of known peer addresses for discovery.
 type AddressBook struct {
 	mu        sync.RWMutex
-	addresses map[string]NetAddress // keyed by "IP:Port"
+	addresses map[string]*addrEntry // keyed by "IP:Port"
 	seeds     []string             // seed node addresses
 }
 
 // NewAddressBook creates an address book with the given seed nodes.
 func NewAddressBook(seeds []string) *AddressBook {
 	return &AddressBook{
-		addresses: make(map[string]NetAddress),
+		addresses: make(map[string]*addrEntry),
 		seeds:     seeds,
 	}
 }
@@ -226,7 +235,12 @@ func (ab *AddressBook) AddAddress(addr NetAddress) {
 	ab.mu.Lock()
 	defer ab.mu.Unlock()
 	key := net.JoinHostPort(addr.IP, fmt.Sprintf("%d", addr.Port))
-	ab.addresses[key] = addr
+	if e, ok := ab.addresses[key]; ok {
+		e.LastSeen = time.Now()
+		e.Failures = 0 // reset on re-advertisement
+	} else {
+		ab.addresses[key] = &addrEntry{Addr: addr, LastSeen: time.Now()}
+	}
 }
 
 // AddAddresses adds multiple addresses at once.
@@ -235,7 +249,12 @@ func (ab *AddressBook) AddAddresses(addrs []NetAddress) {
 	defer ab.mu.Unlock()
 	for _, addr := range addrs {
 		key := net.JoinHostPort(addr.IP, fmt.Sprintf("%d", addr.Port))
-		ab.addresses[key] = addr
+		if e, ok := ab.addresses[key]; ok {
+			e.LastSeen = time.Now()
+			e.Failures = 0
+		} else {
+			ab.addresses[key] = &addrEntry{Addr: addr, LastSeen: time.Now()}
+		}
 	}
 }
 
@@ -244,13 +263,62 @@ func (ab *AddressBook) GetAddresses(n int) []NetAddress {
 	ab.mu.RLock()
 	defer ab.mu.RUnlock()
 	result := make([]NetAddress, 0, n)
-	for _, addr := range ab.addresses {
-		result = append(result, addr)
+	for _, e := range ab.addresses {
+		result = append(result, e.Addr)
 		if len(result) >= n {
 			break
 		}
 	}
 	return result
+}
+
+// GetGoodAddresses returns up to n addresses with fewer than maxFailures.
+func (ab *AddressBook) GetGoodAddresses(n, maxFailures int) []NetAddress {
+	ab.mu.RLock()
+	defer ab.mu.RUnlock()
+	result := make([]NetAddress, 0, n)
+	for _, e := range ab.addresses {
+		if e.Failures >= maxFailures {
+			continue
+		}
+		result = append(result, e.Addr)
+		if len(result) >= n {
+			break
+		}
+	}
+	return result
+}
+
+// RecordFailure increments the failure count for an address.
+// Returns true if the address was removed (failures >= maxFailures).
+func (ab *AddressBook) RecordFailure(addr string, maxFailures int) bool {
+	ab.mu.Lock()
+	defer ab.mu.Unlock()
+	e, ok := ab.addresses[addr]
+	if !ok {
+		return false
+	}
+	e.Failures++
+	if e.Failures >= maxFailures {
+		delete(ab.addresses, addr)
+		return true
+	}
+	return false
+}
+
+// RemoveStale removes entries not seen within the given duration.
+func (ab *AddressBook) RemoveStale(maxAge time.Duration) int {
+	ab.mu.Lock()
+	defer ab.mu.Unlock()
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+	for key, e := range ab.addresses {
+		if e.LastSeen.Before(cutoff) {
+			delete(ab.addresses, key)
+			removed++
+		}
+	}
+	return removed
 }
 
 // Seeds returns the configured seed node addresses.
@@ -263,4 +331,47 @@ func (ab *AddressBook) Count() int {
 	ab.mu.RLock()
 	defer ab.mu.RUnlock()
 	return len(ab.addresses)
+}
+
+// addrBookJSON is the JSON-serializable form of the address book.
+type addrBookJSON struct {
+	Addresses []addrEntry `json:"addresses"`
+}
+
+// SaveToFile writes the address book to a JSON file.
+func (ab *AddressBook) SaveToFile(path string) error {
+	ab.mu.RLock()
+	entries := make([]addrEntry, 0, len(ab.addresses))
+	for _, e := range ab.addresses {
+		entries = append(entries, *e)
+	}
+	ab.mu.RUnlock()
+
+	data, err := json.MarshalIndent(addrBookJSON{Addresses: entries}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
+}
+
+// LoadAddressBook reads an address book from a JSON file.
+func LoadAddressBook(path string, seeds []string) (*AddressBook, error) {
+	ab := NewAddressBook(seeds)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ab, nil // no saved state
+		}
+		return nil, err
+	}
+	var stored addrBookJSON
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return ab, nil // corrupted file, start fresh
+	}
+	for _, e := range stored.Addresses {
+		eCopy := e
+		key := net.JoinHostPort(e.Addr.IP, fmt.Sprintf("%d", e.Addr.Port))
+		ab.addresses[key] = &eCopy
+	}
+	return ab, nil
 }
