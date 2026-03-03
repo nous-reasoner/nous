@@ -3,6 +3,7 @@ package consensus
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -14,6 +15,10 @@ import (
 
 // SATSolveTimeout is the timeout for each SAT solve attempt during mining.
 const SATSolveTimeout = 100 * time.Millisecond
+
+// DefaultMineTimeout is the maximum wall-clock time MineBlock will spend
+// searching for a valid block before returning an error.
+const DefaultMineTimeout = 10 * time.Minute
 
 // MineBlock performs the complete Cogito Consensus mining flow and returns a valid block.
 //
@@ -107,7 +112,11 @@ func MineBlock(
 
 	// Mining loop: iterate seed values.
 	startTime := time.Now()
+	deadline := startTime.Add(DefaultMineTimeout)
 	for seed := uint64(0); ; seed++ {
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("mining timeout after %v", DefaultMineTimeout)
+		}
 		satSeed := makeSATSeed(prevHash, seed)
 		formula := sat.GenerateFormula(satSeed, SATVariables, SATClausesRatio)
 

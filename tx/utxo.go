@@ -4,6 +4,7 @@ package tx
 import (
 	"bytes"
 	"errors"
+	"sync"
 
 	"nous/crypto"
 )
@@ -44,6 +45,7 @@ type UTXOStore interface {
 
 // UTXOSet manages the set of all unspent transaction outputs (in-memory).
 type UTXOSet struct {
+	mu    sync.RWMutex
 	utxos map[OutPoint]*UTXO
 }
 
@@ -56,11 +58,15 @@ func NewUTXOSet() *UTXOSet {
 
 // Add inserts a new UTXO into the set.
 func (s *UTXOSet) Add(op OutPoint, output TxOut, height uint64, isCoinbase bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.utxos[op] = &UTXO{OutPoint: op, Output: output, Height: height, IsCoinbase: isCoinbase}
 }
 
 // Spend removes a UTXO from the set. Returns false if not found.
 func (s *UTXOSet) Spend(op OutPoint) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if _, ok := s.utxos[op]; !ok {
 		return false
 	}
@@ -70,48 +76,66 @@ func (s *UTXOSet) Spend(op OutPoint) bool {
 
 // Get retrieves a UTXO by its outpoint. Returns nil if not found.
 func (s *UTXOSet) Get(op OutPoint) *UTXO {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.utxos[op]
 }
 
 // AddTransaction adds all outputs of a transaction to the UTXO set.
 func (s *UTXOSet) AddTransaction(t *Transaction, height uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	txID := t.TxID()
 	cb := t.IsCoinbase()
 	for i, out := range t.Outputs {
 		op := OutPoint{TxID: txID, Index: uint32(i)}
-		s.Add(op, out, height, cb)
+		s.utxos[op] = &UTXO{OutPoint: op, Output: out, Height: height, IsCoinbase: cb}
 	}
 }
 
 // ApplyBlock processes a slice of transactions: for each transaction,
 // spend its inputs then add its outputs. Coinbase inputs are skipped.
 func (s *UTXOSet) ApplyBlock(txs []*Transaction, height uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, tx := range txs {
 		if !tx.IsCoinbase() {
 			for _, in := range tx.Inputs {
-				s.Spend(in.PrevOut)
+				delete(s.utxos, in.PrevOut)
 			}
 		}
-		s.AddTransaction(tx, height)
+		txID := tx.TxID()
+		cb := tx.IsCoinbase()
+		for i, out := range tx.Outputs {
+			op := OutPoint{TxID: txID, Index: uint32(i)}
+			s.utxos[op] = &UTXO{OutPoint: op, Output: out, Height: height, IsCoinbase: cb}
+		}
 	}
 }
 
 // ApplyBlockWithUndo applies transactions like ApplyBlock but also records
 // undo data so the block can be rolled back later (for chain reorganization).
 func (s *UTXOSet) ApplyBlockWithUndo(txs []*Transaction, height uint64) *UndoData {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	undo := &UndoData{}
 	for _, t := range txs {
 		if !t.IsCoinbase() {
 			for _, in := range t.Inputs {
 				// Save the UTXO before spending it.
-				if u := s.Get(in.PrevOut); u != nil {
+				if u := s.utxos[in.PrevOut]; u != nil {
 					undo.SpentUTXOs = append(undo.SpentUTXOs, UndoEntry{SpentUTXO: *u})
 				}
-				s.Spend(in.PrevOut)
+				delete(s.utxos, in.PrevOut)
 			}
 		}
 		undo.CreatedTxs = append(undo.CreatedTxs, t.TxID())
-		s.AddTransaction(t, height)
+		txID := t.TxID()
+		cb := t.IsCoinbase()
+		for i, out := range t.Outputs {
+			op := OutPoint{TxID: txID, Index: uint32(i)}
+			s.utxos[op] = &UTXO{OutPoint: op, Output: out, Height: height, IsCoinbase: cb}
+		}
 	}
 	return undo
 }
@@ -123,6 +147,8 @@ func (s *UTXOSet) RollbackBlock(undo *UndoData) error {
 	if undo == nil {
 		return errors.New("utxo: nil undo data")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	// Step 1: Remove outputs created by this block.
 	createdSet := make(map[crypto.Hash]bool, len(undo.CreatedTxs))
 	for _, txid := range undo.CreatedTxs {
@@ -148,12 +174,16 @@ func (s *UTXOSet) RollbackBlock(undo *UndoData) error {
 
 // Count returns the number of UTXOs in the set.
 func (s *UTXOSet) Count() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return len(s.utxos)
 }
 
 // Clone returns a deep copy of the UTXO set.
 func (s *UTXOSet) Clone() *UTXOSet {
-	clone := NewUTXOSet()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	clone := &UTXOSet{utxos: make(map[OutPoint]*UTXO, len(s.utxos))}
 	for op, u := range s.utxos {
 		clone.utxos[op] = &UTXO{
 			OutPoint:   u.OutPoint,
@@ -168,6 +198,8 @@ func (s *UTXOSet) Clone() *UTXOSet {
 // FindByPubKeyHash returns all UTXOs whose PkScript is a P2PKH script
 // paying to the given 20-byte public key hash.
 func (s *UTXOSet) FindByPubKeyHash(pubKeyHash []byte) []*UTXO {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	var result []*UTXO
 	for _, utxo := range s.utxos {
 		scriptHash := ExtractPubKeyHashFromP2PKH(utxo.Output.PkScript)
@@ -182,6 +214,8 @@ func (s *UTXOSet) FindByPubKeyHash(pubKeyHash []byte) []*UTXO {
 // by scanning all UTXOs for matching P2PKH scripts.
 // Uses overflow-safe addition; caps at MaxAmount if sum would overflow.
 func (s *UTXOSet) GetBalance(pubKeyHash []byte) int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	var total int64
 	for _, utxo := range s.utxos {
 		scriptHash := ExtractPubKeyHashFromP2PKH(utxo.Output.PkScript)

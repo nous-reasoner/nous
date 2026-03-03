@@ -14,6 +14,9 @@ const (
 	OpCheckSig    = 0xac
 )
 
+// MaxStackDepth is the maximum number of elements allowed on the script stack.
+const MaxStackDepth = 1000
+
 // CreateP2PKHLockScript builds a standard P2PKH locking script:
 // OP_DUP OP_HASH160 <20> <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
 func CreateP2PKHLockScript(pubKeyHash []byte) []byte {
@@ -91,6 +94,9 @@ func execute(script []byte, stack *[][]byte, txn *Transaction, inputIndex int, s
 				return false
 			}
 			*stack = append(*stack, data)
+			if len(*stack) > MaxStackDepth {
+				return false
+			}
 
 		case op == OpDup:
 			if len(*stack) < 1 {
@@ -100,6 +106,9 @@ func execute(script []byte, stack *[][]byte, txn *Transaction, inputIndex int, s
 			dup := make([]byte, len(top))
 			copy(dup, top)
 			*stack = append(*stack, dup)
+			if len(*stack) > MaxStackDepth {
+				return false
+			}
 
 		case op == OpHash160:
 			if len(*stack) < 1 {

@@ -31,7 +31,15 @@ type ASERTAnchor struct {
 // and a fractional remainder (applied via a 3rd-order Taylor expansion of 2^x).
 // All arithmetic is pure big.Int — no floating point.
 func AdjustDifficultyASERT(anchor *ASERTAnchor, height uint64, timestamp uint32) crypto.Hash {
-	expectedTimestamp := int64(anchor.Timestamp) + IdealBlockTime*int64(height-anchor.Height)
+	// Defensive: if height < anchor (should not happen), return anchor target.
+	if height < anchor.Height {
+		return anchor.Target
+	}
+	heightDiff := height - anchor.Height
+	if heightDiff > 1<<40 { // far beyond any reasonable chain height
+		heightDiff = 1 << 40
+	}
+	expectedTimestamp := int64(anchor.Timestamp) + IdealBlockTime*int64(heightDiff)
 	timeDiff := int64(timestamp) - expectedTimestamp
 
 	// Floor-divide timeDiff by halflife so that 0 <= remainder < halflife.

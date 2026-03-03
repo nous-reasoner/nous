@@ -165,13 +165,15 @@ func ValidateBlockTxs(
 		var inputSum, outputSum int64
 		for _, in := range blk.Transactions[i].Inputs {
 			u := utxoSet.Get(in.PrevOut)
-			if u != nil {
-				sum, err := safeAddInt64(inputSum, u.Output.Amount)
-				if err != nil {
-					return fmt.Errorf("step 6: fee input sum overflow in tx %d", i)
-				}
-				inputSum = sum
+			if u == nil {
+				return fmt.Errorf("step 6: tx %d input references missing UTXO %s:%d",
+					i, in.PrevOut.TxID, in.PrevOut.Index)
 			}
+			sum, err := safeAddInt64(inputSum, u.Output.Amount)
+			if err != nil {
+				return fmt.Errorf("step 6: fee input sum overflow in tx %d", i)
+			}
+			inputSum = sum
 		}
 		for _, out := range blk.Transactions[i].Outputs {
 			sum, err := safeAddInt64(outputSum, out.Amount)

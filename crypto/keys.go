@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"bytes"
 	"errors"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -20,6 +21,22 @@ type PublicKey struct {
 // Signature wraps a secp256k1 ECDSA signature.
 type Signature struct {
 	inner *decdsa.Signature
+}
+
+// halfOrderBytes is secp256k1 curve order N / 2 (big-endian).
+// N = FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+// N/2 = 7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0
+var halfOrderBytes = [32]byte{
+	0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0x5d, 0x57, 0x6e, 0x73, 0x57, 0xa4, 0x50, 0x1d,
+	0xdf, 0xe9, 0x2f, 0x46, 0x68, 0x1b, 0x20, 0xa0,
+}
+
+// isOverHalfOrder returns true if s > secp256k1 curve order / 2.
+func isOverHalfOrder(s *secp256k1.ModNScalar) bool {
+	sBytes := s.Bytes()
+	return bytes.Compare(sBytes[:], halfOrderBytes[:]) > 0
 }
 
 // GenerateKeyPair creates a new random secp256k1 key pair.
@@ -79,6 +96,7 @@ func (k *PublicKey) IsEqual(other *PublicKey) bool {
 }
 
 // Sign produces an ECDSA signature of the given hash using the private key.
+// The signature is normalized to low-S form (BIP 62).
 func Sign(privKey *PrivateKey, hash Hash) (*Signature, error) {
 	sig := decdsa.Sign(privKey.inner, hash[:])
 	return &Signature{inner: sig}, nil
@@ -129,6 +147,7 @@ func extractRS(der []byte) (r, s []byte) {
 }
 
 // SignatureFromBytes deserializes a 64-byte compact (R || S) signature.
+// Rejects signatures with high S values (BIP 62 low-S enforcement).
 func SignatureFromBytes(b []byte) (*Signature, error) {
 	if len(b) != 64 {
 		return nil, errors.New("crypto: signature must be 64 bytes")
@@ -143,6 +162,10 @@ func SignatureFromBytes(b []byte) (*Signature, error) {
 	}
 	if r.IsZero() || s.IsZero() {
 		return nil, errors.New("crypto: invalid signature (zero component)")
+	}
+	// BIP 62: reject high-S signatures to prevent malleability.
+	if isOverHalfOrder(s) {
+		return nil, errors.New("crypto: signature S is over half order (BIP 62)")
 	}
 	sig := decdsa.NewSignature(r, s)
 	return &Signature{inner: sig}, nil

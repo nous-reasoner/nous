@@ -56,11 +56,11 @@ func decodeKey(key []byte) OutPoint {
 	return op
 }
 
-// encodeValue: Amount(8 LE) + ScriptLen(2 LE) + Script(var) + Height(4 LE) + Flags(1).
+// encodeValue: Amount(8 LE) + ScriptLen(2 LE) + Script(var) + Height(8 LE) + Flags(1).
 // Flags bit 0 = IsCoinbase.
 func encodeValue(u *UTXO) []byte {
 	scriptLen := len(u.Output.PkScript)
-	buf := make([]byte, 8+2+scriptLen+4+1)
+	buf := make([]byte, 8+2+scriptLen+8+1)
 	off := 0
 	binary.LittleEndian.PutUint64(buf[off:], uint64(u.Output.Amount))
 	off += 8
@@ -68,8 +68,8 @@ func encodeValue(u *UTXO) []byte {
 	off += 2
 	copy(buf[off:], u.Output.PkScript)
 	off += scriptLen
-	binary.LittleEndian.PutUint32(buf[off:], uint32(u.Height))
-	off += 4
+	binary.LittleEndian.PutUint64(buf[off:], u.Height)
+	off += 8
 	var flags byte
 	if u.IsCoinbase {
 		flags = 1
@@ -79,8 +79,8 @@ func encodeValue(u *UTXO) []byte {
 }
 
 func decodeValue(key, val []byte) *UTXO {
-	// Minimum value size: Amount(8) + ScriptLen(2) + Height(4) + Flags(1) = 15 bytes.
-	if len(val) < 15 {
+	// Minimum value size: Amount(8) + ScriptLen(2) + Height(8) + Flags(1) = 19 bytes.
+	if len(val) < 19 {
 		return nil
 	}
 	op := decodeKey(key)
@@ -90,14 +90,14 @@ func decodeValue(key, val []byte) *UTXO {
 	scriptLen := int(binary.LittleEndian.Uint16(val[off:]))
 	off += 2
 	// Validate that the remaining data is large enough for script + height + flags.
-	if off+scriptLen+4+1 > len(val) {
+	if off+scriptLen+8+1 > len(val) {
 		return nil
 	}
 	script := make([]byte, scriptLen)
 	copy(script, val[off:off+scriptLen])
 	off += scriptLen
-	height := uint64(binary.LittleEndian.Uint32(val[off:]))
-	off += 4
+	height := binary.LittleEndian.Uint64(val[off:])
+	off += 8
 	isCoinbase := val[off]&1 != 0
 	return &UTXO{
 		OutPoint:   op,

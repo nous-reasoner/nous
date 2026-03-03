@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
 
 	"nous/block"
+	"nous/consensus"
 	"nous/crypto"
 	"nous/tx"
 )
@@ -299,7 +299,7 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 	newHeight, err := bs.chain.AddBlock(blk)
 	if err != nil {
 		// If the block's parent is unknown, store it as an orphan.
-		if strings.Contains(err.Error(), "orphan") {
+		if errors.Is(err, consensus.ErrOrphanBlock) {
 			bs.addOrphan(blk, peer)
 		} else {
 			log.Printf("sync: reject block %x from %s: %v", blockHash[:8], peer.Addr, err)
@@ -389,39 +389,47 @@ func (bs *BlockSyncer) addOrphan(blk *block.Block, peer *Peer) {
 }
 
 // processOrphans tries to accept orphan blocks that depend on the accepted block.
+// Uses an iterative worklist to avoid unbounded recursion depth.
 func (bs *BlockSyncer) processOrphans(acceptedHash crypto.Hash, peer *Peer) {
-	bs.mu.Lock()
-	children, exists := bs.orphanByParent[acceptedHash]
-	if !exists || len(children) == 0 {
-		bs.mu.Unlock()
-		return
-	}
-	// Collect orphans to process.
-	toProcess := make([]*orphanBlock, 0, len(children))
-	for childHash := range children {
-		if orphan, ok := bs.orphans[childHash]; ok {
-			toProcess = append(toProcess, orphan)
-		}
-	}
-	// Remove from orphan maps before processing (avoid re-entry issues).
-	delete(bs.orphanByParent, acceptedHash)
-	for _, o := range toProcess {
-		delete(bs.orphans, o.Hash)
-	}
-	bs.mu.Unlock()
+	worklist := []crypto.Hash{acceptedHash}
 
-	// Try to add each orphan.
-	for _, o := range toProcess {
-		newHeight, err := bs.chain.AddBlock(o.Block)
-		if err != nil {
-			log.Printf("sync: orphan block %x still invalid: %v", o.Hash[:8], err)
+	for len(worklist) > 0 {
+		current := worklist[0]
+		worklist = worklist[1:]
+
+		bs.mu.Lock()
+		children, exists := bs.orphanByParent[current]
+		if !exists || len(children) == 0 {
+			bs.mu.Unlock()
 			continue
 		}
-		log.Printf("sync: accepted orphan block %x at height %d", o.Hash[:8], newHeight)
-		bs.server.SetBlockHeight(newHeight)
-		bs.server.mempool.RemoveConfirmed(o.Block.Transactions)
-		// Recursively process orphans that depend on this newly accepted block.
-		bs.processOrphans(o.Hash, peer)
+		// Collect orphans to process.
+		toProcess := make([]*orphanBlock, 0, len(children))
+		for childHash := range children {
+			if orphan, ok := bs.orphans[childHash]; ok {
+				toProcess = append(toProcess, orphan)
+			}
+		}
+		// Remove from orphan maps before processing.
+		delete(bs.orphanByParent, current)
+		for _, o := range toProcess {
+			delete(bs.orphans, o.Hash)
+		}
+		bs.mu.Unlock()
+
+		// Try to add each orphan.
+		for _, o := range toProcess {
+			newHeight, err := bs.chain.AddBlock(o.Block)
+			if err != nil {
+				log.Printf("sync: orphan block %x still invalid: %v", o.Hash[:8], err)
+				continue
+			}
+			log.Printf("sync: accepted orphan block %x at height %d", o.Hash[:8], newHeight)
+			bs.server.SetBlockHeight(newHeight)
+			bs.server.mempool.RemoveConfirmed(o.Block.Transactions)
+			// Queue this block's hash so its children are processed next.
+			worklist = append(worklist, o.Hash)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"sync"
 
 	"nous/block"
@@ -11,7 +12,8 @@ import (
 	"nous/tx"
 )
 
-// blockNode represents a block in the block index tree.
+// ErrOrphanBlock is returned when a block's parent is not in the block index.
+var ErrOrphanBlock = errors.New("orphan block: parent not found")
 type blockNode struct {
 	Hash      crypto.Hash
 	Height    uint64
@@ -160,7 +162,7 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 	// Find parent in block index.
 	parentNode, parentExists := cs.blockIndex[blk.Header.PrevBlockHash]
 	if !parentExists {
-		return fmt.Errorf("unknown parent block %s (orphan)", blk.Header.PrevBlockHash)
+		return fmt.Errorf("%w: %s", ErrOrphanBlock, blk.Header.PrevBlockHash)
 	}
 
 	newHeight := parentNode.Height + 1
@@ -176,6 +178,13 @@ func (cs *ChainState) AddBlock(blk *block.Block) error {
 	// Always validate header (context-free: size, format, SAT, PoW, merkle).
 	if err := ValidateBlockHeader(blk, &parentNode.Header, cs.Difficulty); err != nil {
 		return err
+	}
+
+	// MTP rule: block timestamp must be strictly after the median time
+	// of the previous MedianTimeBlocks blocks (BIP 113).
+	mtp := medianTimePast(parentNode)
+	if blk.Header.Timestamp <= mtp {
+		return fmt.Errorf("block timestamp %d <= median time past %d", blk.Header.Timestamp, mtp)
 	}
 
 	if extendsMainChain {
@@ -307,6 +316,26 @@ func findForkPoint(a, b *blockNode) *blockNode {
 		b = b.Parent
 	}
 	return a
+}
+
+// MedianTimeBlocks is the number of blocks used to compute median time past.
+const MedianTimeBlocks = 11
+
+// medianTimePast computes the median timestamp of the last MedianTimeBlocks
+// ancestors of the given node (inclusive). Used to enforce BIP 113 MTP rule.
+// Caller must hold cs.mu.
+func medianTimePast(node *blockNode) uint32 {
+	timestamps := make([]uint32, 0, MedianTimeBlocks)
+	cur := node
+	for i := 0; i < MedianTimeBlocks && cur != nil; i++ {
+		timestamps = append(timestamps, cur.Header.Timestamp)
+		cur = cur.Parent
+	}
+	if len(timestamps) == 0 {
+		return 0
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
+	return timestamps[len(timestamps)/2]
 }
 
 // appendASERT updates difficulty using ASERT after each accepted block.
