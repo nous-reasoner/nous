@@ -26,13 +26,7 @@ func hexHash(s string) crypto.Hash {
 }
 
 // TestnetCheckpoints are the hardcoded checkpoints for the testnet.
-var TestnetCheckpoints = []Checkpoint{
-	{Height: 0, Hash: hexHash("046efc6998a2cdd1780a32d421ffc5651d2bc9f1a915599aad20f392302e0fbc")},
-	{Height: 500, Hash: hexHash("004050bbec2b03da56e53050a88088742254a3e709d7f8f5800e2c40478f888f")},
-	{Height: 1000, Hash: hexHash("000e9f07ae847a117d491eec298a0dacf9c39f10846a0a670c49426c168008a4")},
-	{Height: 1500, Hash: hexHash("0003b9259af669cf20d083749e3006f020da96b1a8115dfd6a7ac70c368da171")},
-	{Height: 2000, Hash: hexHash("0002e0c959523238f3aba77fd149e08cb752b3ea399a11c521f1a5b5c31cc73b")},
-}
+var TestnetCheckpoints = []Checkpoint{}
 
 // MainnetCheckpoints are the hardcoded checkpoints for mainnet.
 // Will be populated before mainnet launch.

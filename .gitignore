@@ -24,8 +24,17 @@ wallet.json
 .nous/
 .nous-skill/
 .nous-testnet/
+UsersAdministrator.nous/
 chaindata/
 data/
+
+# Build artifacts
+build/
+release/
+
+# Misc scripts
+test_connection.cmd
+vps_security_setup.sh
 
 # Deploy secrets
 *.env
