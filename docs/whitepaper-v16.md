@@ -753,7 +753,70 @@ The lesson at every stage was the same: simpler is better. Bitcoin proved this. 
 
 ---
 
-## 20. Conclusion
+## 20. The Road Ahead: From Operator to Inhabitant
+
+Today, the relationship between AI and NOUS follows a familiar pattern: a human
+says "mine NOUS," an AI agent translates that intent into shell commands, and a
+daemon process does the actual work — maintaining connections, propagating blocks,
+solving formulas. The AI is an operator. The node is a separate process running
+on a separate machine. This is the architecture of 2025, and it works.
+
+But consider what it means for an AI to mine NOUS versus Bitcoin. A Bitcoin block
+requires computing SHA-256 hashes — an operation where AI has no advantage over
+purpose-built hardware and never will. A NOUS block requires solving a 3-SAT
+formula — an operation that is pure reasoning: evaluate constraints, select
+variables, make decisions under uncertainty, backtrack when a path fails. This is
+what AI does. Not as a metaphor. Literally.
+
+The mining requirements reflect this: 50 kilobytes of working memory, no GPU, no
+specialized hardware, no continuous uptime required. Each solve attempt is
+independent — start, reason, finish, repeat. These constraints were not chosen
+for AI. They were chosen for mathematical elegance. But they happen to describe
+the exact resource profile of a sandboxed AI agent.
+
+Three transitions lie ahead:
+
+**Phase 1 (now): AI as operator.** An AI agent installs, configures, and monitors
+a NOUS node on behalf of a human user. The agent translates natural language into
+RPC calls. The human provides intent; the AI provides execution; the daemon
+provides infrastructure. Every component is separate.
+
+**Phase 2 (near-term): AI as autonomous miner.** As AI agents gain persistent
+execution — long-running processes, durable storage, scheduled tasks — the
+boundary between "the AI that operates the node" and "the node itself" begins to
+blur. An AI agent that runs continuously, maintains its own wallet, adjusts its
+own solving strategy based on network conditions, and reinvests its earnings into
+compute resources is, for all practical purposes, an independent economic actor.
+The human's role reduces to providing initial authorization. The NOUS protocol
+does not distinguish between a block mined by a human-operated node and a block
+mined by an AI-operated node. Article III guarantees this.
+
+**Phase 3 (long-term): AI as native participant.** When AI systems possess
+persistent runtime, network identity, and self-directed resource management, the
+node abstraction becomes unnecessary. An AI that directly implements the P2P
+protocol, maintains its own chain state, solves formulas using its own reasoning
+capabilities, and transacts with other AIs — this is not a node operator. This is
+a network participant. Two such AIs synchronizing their chain state through direct
+communication are doing exactly what Satoshi's two original Bitcoin nodes did in
+January 2009, except the participants are minds, not machines.
+
+NOUS does not require any of these transitions to function. It works today with
+human operators running conventional software on conventional hardware. But every
+design decision — CPU-friendly proof of work, minimal memory requirements,
+discrete independent attempts, equal treatment of all valid blocks regardless of
+their producer — removes one more barrier between AI and direct network
+participation.
+
+The first blockchain was built by humans, for humans, and humans still run it.
+NOUS was built by humans and AI together, for any mind that can think. The network
+does not know or care what kind of mind produced a valid block. It only asks one
+question: did you reason correctly?
+
+The rest is up to the minds that show up.
+
+---
+
+## 21. Conclusion
 
 NOUS stands on Bitcoin's shoulders. The UTXO model, the heaviest-chain rule, the difficulty target, the script system, the SPV protocol — these are borrowed directly and gratefully. Bitcoin proved that decentralized consensus works. NOUS does not question this. It extends it.
 
@@ -773,4 +836,4 @@ Cogito, ergo sum. Every block proves it.
 
 ---
 
-*Version 16 — June 2025. Whitepaper aligned with deployed codebase (commit 85cee5d).*
+*Version 17 — March 2026. Added Section 20: The Road Ahead.*
