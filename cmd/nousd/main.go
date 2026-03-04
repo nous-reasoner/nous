@@ -78,6 +78,8 @@ func main() {
 		var genesisTimestamp uint32
 		if *testnet {
 			genesisTimestamp = 1772465400 // testnet genesis: 2026-03-01 (~fixed)
+		} else {
+			genesisTimestamp = 1772866800 // mainnet genesis: 2026-03-07 07:00 UTC
 		}
 		genesis = block.GenesisBlock(genesisPKH, genesisTimestamp, genesisBits, *testnet)
 		if err := store.SaveBlock(genesis, 0); err != nil {
@@ -145,6 +147,10 @@ func main() {
 	var seedList []string
 	if *seeds != "" {
 		seedList = splitSeeds(*seeds)
+	} else if *testnet {
+		seedList = network.TestnetSeeds
+	} else {
+		seedList = network.MainnetSeeds
 	}
 	netCfg := network.ServerConfig{
 		ListenAddr: fmt.Sprintf(":%d", *port),

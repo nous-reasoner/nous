@@ -35,6 +35,20 @@ const (
 	DefaultPort = 9333
 )
 
+// MainnetSeeds are the default seed nodes for the NOUS mainnet.
+var MainnetSeeds = []string{
+	"seed1.nouschain.org:8333",
+	"seed2.nouschain.org:8333",
+	"seed3.nouschain.org:8333",
+}
+
+// TestnetSeeds are the default seed nodes for the NOUS testnet.
+var TestnetSeeds = []string{
+	"80.78.26.7:9333",
+	"80.78.25.211:9333",
+	"80.78.26.244:9333",
+}
+
 // Command strings for each message type.
 const (
 	CmdVersion   = "version"
