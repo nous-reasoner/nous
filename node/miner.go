@@ -116,6 +116,20 @@ func (r *Reasoner) Chain() *consensus.ChainState {
 	return r.chain
 }
 
+// isSyncing returns true if a connected peer has a significantly higher
+// block height than ours, indicating we are still catching up (IBD).
+func (r *Reasoner) isSyncing() bool {
+	r.chainMu.Lock()
+	ourHeight := r.chain.Height
+	r.chainMu.Unlock()
+
+	best := r.server.Peers().BestPeer()
+	if best == nil {
+		return false
+	}
+	return best.BlockHeight > ourHeight+10
+}
+
 func (r *Reasoner) loop() {
 	defer close(r.done)
 	log.Println("reasoner: started")
@@ -126,6 +140,17 @@ func (r *Reasoner) loop() {
 			log.Println("reasoner: stopped")
 			return
 		default:
+		}
+
+		// Pause mining while syncing to avoid producing orphan blocks.
+		if r.isSyncing() {
+			log.Println("reasoner: waiting for sync to complete...")
+			select {
+			case <-r.quit:
+				return
+			case <-time.After(10 * time.Second):
+			}
+			continue
 		}
 
 		r.reasonOne()

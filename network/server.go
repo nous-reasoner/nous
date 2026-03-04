@@ -497,6 +497,13 @@ func (s *Server) handleVersion(peer *Peer, msg Message) {
 	peer.Version = ver.Version
 	peer.BlockHeight = ver.BlockHeight
 
+	// Reject peers running an incompatible protocol version.
+	if ver.Version < MinSupportedVersion {
+		log.Printf("network: rejecting peer %s: version %d < minimum %d", peer.Addr, ver.Version, MinSupportedVersion)
+		peer.Close()
+		return
+	}
+
 	// Send verack.
 	peer.SendMessage(s.config.Magic, &MsgVerAck{})
 

@@ -31,6 +31,9 @@ const (
 	// ProtocolVersion is the current protocol version.
 	ProtocolVersion uint32 = 1
 
+	// MinSupportedVersion is the minimum protocol version we accept from peers.
+	MinSupportedVersion uint32 = 1
+
 	// DefaultPort is the default TCP port for the NOUS P2P network.
 	DefaultPort = 9333
 )

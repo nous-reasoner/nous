@@ -53,11 +53,14 @@ func NewChainAdapter(
 // Must be called with chainMu held.
 func (ca *ChainAdapter) refreshIndex() {
 	// Index blocks from indexed+1 up to what's available in store.
+	// Cap at the current chain height to avoid indexing stale blocks
+	// that remain in the store after a reorg to a shorter chain.
+	chainHeight := ca.chain.Height
 	start := ca.indexed + 1
 	if ca.indexed == 0 && len(ca.hashIndex) == 0 {
 		start = 0 // first call, index from genesis
 	}
-	for h := start; ; h++ {
+	for h := start; h <= chainHeight; h++ {
 		blk, err := ca.store.LoadBlockByHeight(h)
 		if err != nil {
 			break // no more blocks in store
@@ -163,6 +166,11 @@ func (ca *ChainAdapter) AddBlock(blk *block.Block) (uint64, error) {
 		if err := ca.store.SaveBlock(blk, newHeight); err != nil {
 			log.Printf("chain_adapter: save block %d: %v", newHeight, err)
 		}
+		// Remove any stale hash that was previously at this height
+		// (possible if a stale block file was left from a prior reorg).
+		if oldHash, ok := ca.heightHash[newHeight]; ok && oldHash != blkHash {
+			delete(ca.hashIndex, oldHash)
+		}
 		ca.hashIndex[blkHash] = newHeight
 		ca.heightHash[newHeight] = blkHash
 		ca.indexed = newHeight
@@ -174,11 +182,17 @@ func (ca *ChainAdapter) AddBlock(blk *block.Block) (uint64, error) {
 	// Rebuild the store and caches for affected heights.
 	log.Printf("chain_adapter: reorg detected (height %d→%d)", oldHeight, newHeight)
 
-	// Clean stale entries for heights above the new tip.
+	// Clean stale entries for heights above the new tip and delete
+	// the stale block files from the store. Without deletion,
+	// refreshIndex could re-index these stale blocks, causing
+	// handleGetBlocks to return orphan-producing hashes to peers.
 	for h := newHeight + 1; h <= oldHeight; h++ {
 		if hash, ok := ca.heightHash[h]; ok {
 			delete(ca.hashIndex, hash)
 			delete(ca.heightHash, h)
+		}
+		if err := ca.store.DeleteBlock(h); err != nil {
+			log.Printf("chain_adapter: reorg: delete stale block %d: %v", h, err)
 		}
 	}
 

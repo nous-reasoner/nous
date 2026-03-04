@@ -123,6 +123,17 @@ func (bs *BlockStore) GetChainTip() (ChainTip, error) {
 	return tip, nil
 }
 
+// DeleteBlock removes the block file at the given height.
+func (bs *BlockStore) DeleteBlock(height uint64) error {
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+	path := bs.blockPath(height)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("storage: delete block %d: %w", height, err)
+	}
+	return nil
+}
+
 // HasBlock checks if a block file exists at the given height.
 func (bs *BlockStore) HasBlock(height uint64) bool {
 	bs.mu.RLock()
