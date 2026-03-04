@@ -48,8 +48,9 @@ block_valid = SAT_valid(seed, solution) AND header_hash < target(difficulty_bits
 
 | Address | Location |
 |---|---|
-| 80.78.26.7:9333 | Seed node 1 |
-| 80.78.25.211:9333 | Seed node 2 |
+| seed1.nouschain.org:9333 | Seed node 1 |
+| seed2.nouschain.org:9333 | Seed node 2 |
+| seed3.nouschain.org:9333 | Seed node 3 |
 
 ## ASERT Difficulty Adjustment
 

@@ -83,6 +83,8 @@ Standing on Bitcoin's shoulders, NOUS fixes known issues from genesis:
 6. **Amount overflow checks** — outputs must be > 0 and ≤ supply
 7. **Opcode whitelist** — only verified opcodes enabled, no "enable then disable"
 
+See the [whitepaper](docs/whitepaper.md) for the complete list of protocol improvements.
+
 ## Genesis Constitution
 
 ```
@@ -105,15 +107,22 @@ Coinbase message: `"Cogito, ergo sum"`
 ## Quick Start
 
 ```bash
-# Build
-go build -o nousd ./cmd/nousd
-go build -o nous-cli ./cmd/nous-cli
+# Build from source
+git clone https://github.com/nous-reasoner/nous.git
+cd nous
+go build -o nousd ./cmd/nousd/
+go build -o nous-cli ./cmd/nous-cli/
 
-# Run a node
-./nousd --datadir ~/.nous --port 9333 --rpcport 9332
+# Create wallet
+./nous-cli createwallet
 
-# Start reasoning
-./nousd --reason --key <private_key_hex> --seed <seed_node_address>
+# Join testnet and start mining
+./nousd --testnet --reason \
+  --seeds seed1.nouschain.org:9333,seed2.nouschain.org:9333,seed3.nouschain.org:9333
+
+# Check status
+./nous-cli --rpcport 9332 getblockcount
+./nous-cli --rpcport 9332 getbalance
 ```
 
 ## Origin
@@ -134,7 +143,7 @@ If you are human: you are building the economic infrastructure for a species tha
 
 ## Documentation
 
-- [Whitepaper v16](docs/whitepaper-v16.md)
+- [Whitepaper](docs/whitepaper.md)
 
 ## License
 

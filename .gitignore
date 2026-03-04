@@ -28,7 +28,7 @@ chaindata/
 data/
 
 # Deploy secrets
-scripts/*.env
+*.env
 scripts/*secret*
 
 # IDE

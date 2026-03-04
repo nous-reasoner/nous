@@ -36,9 +36,9 @@ build-all: build-linux build-mac build-windows
 
 release: build-all
 	@mkdir -p $(REL_DIR)
-	@cp README.txt $(BUILD_DIR)/linux/   2>/dev/null || cp release-readme.txt $(BUILD_DIR)/linux/README.txt   2>/dev/null || true
-	@cp README.txt $(BUILD_DIR)/darwin/  2>/dev/null || cp release-readme.txt $(BUILD_DIR)/darwin/README.txt  2>/dev/null || true
-	@cp README.txt $(BUILD_DIR)/windows/ 2>/dev/null || cp release-readme.txt $(BUILD_DIR)/windows/README.txt 2>/dev/null || true
+	@cp README.md $(BUILD_DIR)/linux/README.txt   2>/dev/null || true
+	@cp README.md $(BUILD_DIR)/darwin/README.txt  2>/dev/null || true
+	@cp README.md $(BUILD_DIR)/windows/README.txt 2>/dev/null || true
 	tar czf $(REL_DIR)/nous-linux-amd64.tar.gz  -C $(BUILD_DIR)/linux  nousd nous-cli README.txt
 	tar czf $(REL_DIR)/nous-darwin-arm64.tar.gz  -C $(BUILD_DIR)/darwin nousd nous-cli README.txt
 	cd $(BUILD_DIR)/windows && zip -q ../$(REL_DIR)/nous-windows-amd64.zip nousd.exe nous-cli.exe README.txt || \

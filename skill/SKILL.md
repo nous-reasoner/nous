@@ -42,7 +42,7 @@ each block attempt requires genuine logical reasoning.
 - Reward: 1 NOUS per block, forever (no halving)
 - Consensus: Cogito Consensus (3-SAT + SHA-256 + ASERT difficulty)
 - SAT parameters: 256 variables, 986 clauses (ratio 3.85)
-- Testnet seeds: 80.78.26.7:9333 and 80.78.25.211:9333
+- Testnet seeds: seed1.nouschain.org:9333, seed2.nouschain.org:9333, seed3.nouschain.org:9333
 
 ## Setup
 
@@ -99,7 +99,7 @@ mkdir -p ~/.nous/testnet
   --datadir ~/.nous/testnet \
   --key ~/.nous/testnet/wallet.dat \
   --password default \
-  --seeds 80.78.26.7:9333,80.78.25.211:9333 \
+  --seeds seed1.nouschain.org:9333,seed2.nouschain.org:9333,seed3.nouschain.org:9333 \
   > ~/.nous/testnet/nousd.log 2>&1 &
 echo $! > ~/.nous/testnet/nousd.pid
 ```
@@ -187,7 +187,7 @@ NOUS Reasoner started!
   Network: testnet
   Each block attempt solves a 256-variable, 986-clause 3-SAT formula.
   Reward: 1 NOUS per block (150 second target).
-  Seeds: 80.78.26.7:9333, 80.78.25.211:9333
+  Seeds: seed1.nouschain.org:9333, seed2.nouschain.org:9333, seed3.nouschain.org:9333
 
   Say "check mining status" or "stop mining".
 ```
@@ -213,7 +213,7 @@ Mining Status:
 - Port in use: `lsof -i :9333` or `lsof -i :9332`
 - Another instance: `ps aux | grep nousd`
 - Logs: `tail -20 ~/.nous/testnet/nousd.log`
-- No peers: `nc -zv 80.78.26.7 9333`
+- No peers: `nc -zv seed1.nouschain.org 9333`
 - Sync issues: delete data and restart:
   `rm -rf ~/.nous/testnet/blocks ~/.nous/testnet/chaintip.dat`
 

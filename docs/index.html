@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOUS — Cogito Consensus Blockchain</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            max-width: 700px;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        h1 {
+            font-size: 3em;
+            color: #ffffff;
+            margin-bottom: 10px;
+            letter-spacing: 0.3em;
+        }
+        .tagline {
+            font-size: 1.1em;
+            color: #888;
+            margin-bottom: 40px;
+        }
+        .section {
+            text-align: left;
+            margin: 30px 0;
+            padding: 20px;
+            border: 1px solid #333;
+            border-radius: 4px;
+        }
+        .section h2 {
+            color: #aaa;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            margin-bottom: 15px;
+        }
+        .section p, .section li {
+            color: #ccc;
+            line-height: 1.8;
+            font-size: 0.95em;
+        }
+        .section ul {
+            list-style: none;
+            padding: 0;
+        }
+        .section ul li::before {
+            content: "→ ";
+            color: #666;
+        }
+        a {
+            color: #7aa2f7;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .constitution {
+            border-color: #444;
+            background: #111;
+        }
+        .constitution p {
+            font-style: italic;
+            color: #999;
+            margin: 8px 0;
+        }
+        .code {
+            background: #111;
+            padding: 15px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: #7aa2f7;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        .footer {
+            margin-top: 50px;
+            color: #555;
+            font-size: 0.85em;
+        }
+        .status {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 3px;
+            font-size: 0.8em;
+            margin-left: 5px;
+        }
+        .status.live {
+            background: #1a3a1a;
+            color: #4ade80;
+            border: 1px solid #2d5a2d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>NOUS</h1>
+        <p class="tagline">Mining = Reasoning. A blockchain where proof of work is proof of thought.</p>
+
+        <div class="section constitution">
+            <h2>Constitution</h2>
+            <p>I. 1 NOUS per block, forever.</p>
+            <p>II. Every valid block contains a solution to an NP-complete problem.</p>
+            <p>III. Any entity that can reason — human or AI — may participate equally.</p>
+        </div>
+
+        <div class="section">
+            <h2>How It Works</h2>
+            <ul>
+                <li>Mining requires solving a 3-SAT formula (256 variables, 986 clauses)</li>
+                <li>No GPU, no ASIC — CPU only, 50KB memory</li>
+                <li>ASERT difficulty adjustment every block</li>
+                <li>150-second block target</li>
+                <li>Cogito Consensus: 3-SAT + SHA-256 + ASERT</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>Quick Start</h2>
+            <div class="code">
+git clone https://github.com/nous-reasoner/nous.git<br>
+cd nous<br>
+go build -o nousd ./cmd/nousd/<br>
+go build -o nous-cli ./cmd/nous-cli/<br>
+./nous-cli createwallet<br>
+./nousd --testnet --reason --seeds seed1.nouschain.org:9333
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Links</h2>
+            <ul>
+                <li><a href="https://github.com/nous-reasoner/nous">GitHub Repository</a></li>
+                <li><a href="https://github.com/nous-reasoner/nous/blob/main/docs/whitepaper.md">Whitepaper</a></li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>Network</h2>
+            <ul>
+                <li>Testnet <span class="status live">LIVE</span></li>
+                <li>Mainnet: March 7, 2026</li>
+                <li>Seeds: seed1.nouschain.org, seed2.nouschain.org, seed3.nouschain.org</li>
+            </ul>
+        </div>
+
+        <div class="footer">
+            <p>Cogito, ergo sum.</p>
+        </div>
+    </div>
+</body>
+</html>

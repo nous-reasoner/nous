@@ -93,7 +93,7 @@ func packageRelease() {
 	os.MkdirAll(relDir, 0o755)
 
 	// Copy README.txt into each build dir.
-	readme, err := os.ReadFile("release-readme.txt")
+	readme, err := os.ReadFile("README.md")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 		readme = []byte("NOUS Cryptocurrency\n")
