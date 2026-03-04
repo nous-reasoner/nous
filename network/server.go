@@ -427,8 +427,11 @@ func (s *Server) handlePeer(peer *Peer) {
 			peer.Conn.SetReadDeadline(time.Now().Add(InactiveTimeout))
 		}
 
-		// Rate limit check.
-		if !s.protection.CheckRate(peer.Addr) {
+		// Rate limit check — exempt block-sync messages (block, inv, getblocks,
+		// getdata) so initial block download doesn't trigger bans.
+		cmd := msg.Command()
+		isSyncMsg := cmd == CmdBlock || cmd == CmdInv || cmd == CmdGetBlocks || cmd == CmdGetData
+		if !isSyncMsg && !s.protection.CheckRate(peer.Addr) {
 			if s.protection.AddScore(peer.Addr, BanScoreRateExceeded) {
 				log.Printf("network: disconnecting banned peer %s (rate exceeded)", peer.Addr)
 				return
@@ -437,7 +440,6 @@ func (s *Server) handlePeer(peer *Peer) {
 		}
 
 		// Dispatch to handler.
-		cmd := msg.Command()
 		if handler, ok := s.handlers[cmd]; ok {
 			handler(peer, msg)
 		} else {
