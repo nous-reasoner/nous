@@ -212,8 +212,9 @@ func main() {
 	sig := <-sigCh
 	log.Printf("received %s, shutting down...", sig)
 
-	// Graceful shutdown: sync → reasoner → RPC → P2P → save state.
+	// Graceful shutdown: sync → reasoner → RPC → P2P (saves AddressBook) → chain tip → UTXO.
 	close(syncQuit)
+	log.Println("sync polling stopped")
 	if reasoner != nil {
 		reasoner.Stop()
 		log.Println("reasoner stopped")
@@ -221,7 +222,7 @@ func main() {
 	rpc.Stop()
 	log.Println("rpc stopped")
 	server.Stop()
-	log.Println("p2p stopped")
+	log.Println("p2p stopped (address book saved)")
 
 	// Save final chain tip.
 	tipHash := chain.Tip.Hash()

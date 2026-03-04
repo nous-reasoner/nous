@@ -82,12 +82,16 @@ func (s *UTXOSet) Get(op OutPoint) *UTXO {
 }
 
 // AddTransaction adds all outputs of a transaction to the UTXO set.
+// OP_RETURN outputs are skipped as they are provably unspendable.
 func (s *UTXOSet) AddTransaction(t *Transaction, height uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	txID := t.TxID()
 	cb := t.IsCoinbase()
 	for i, out := range t.Outputs {
+		if IsUnspendable(out.PkScript) {
+			continue
+		}
 		op := OutPoint{TxID: txID, Index: uint32(i)}
 		s.utxos[op] = &UTXO{OutPoint: op, Output: out, Height: height, IsCoinbase: cb}
 	}
@@ -107,6 +111,9 @@ func (s *UTXOSet) ApplyBlock(txs []*Transaction, height uint64) {
 		txID := tx.TxID()
 		cb := tx.IsCoinbase()
 		for i, out := range tx.Outputs {
+			if IsUnspendable(out.PkScript) {
+				continue
+			}
 			op := OutPoint{TxID: txID, Index: uint32(i)}
 			s.utxos[op] = &UTXO{OutPoint: op, Output: out, Height: height, IsCoinbase: cb}
 		}
@@ -133,6 +140,9 @@ func (s *UTXOSet) ApplyBlockWithUndo(txs []*Transaction, height uint64) *UndoDat
 		txID := t.TxID()
 		cb := t.IsCoinbase()
 		for i, out := range t.Outputs {
+			if IsUnspendable(out.PkScript) {
+				continue
+			}
 			op := OutPoint{TxID: txID, Index: uint32(i)}
 			s.utxos[op] = &UTXO{OutPoint: op, Output: out, Height: height, IsCoinbase: cb}
 		}

@@ -135,16 +135,25 @@ func DeserializeHeader(data []byte) (*Header, error) {
 // The genesis block has a zero PrevBlockHash and contains a single
 // coinbase transaction paying the initial reward to the given public key hash.
 //
+// For mainnet, the coinbase output is an OP_RETURN with a genesis message,
+// making it provably unspendable (fair launch — no premine).
+//
 // If timestamp is 0, the current wall-clock time minus one block interval is used.
 // isTestnet selects the chain ID embedded in the coinbase transaction.
 func GenesisBlock(pubKeyHash []byte, timestamp uint32, difficultyBits uint32, isTestnet bool) *Block {
-	const genesisReward int64 = 1_00000000 // 1 NOUS in nou
-
 	if timestamp == 0 {
 		timestamp = uint32(time.Now().Unix()) - 150
 	}
 
-	coinbase := tx.NewCoinbaseTx(0, genesisReward, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDFor(isTestnet))
+	var coinbase *tx.Transaction
+	if isTestnet {
+		const genesisReward int64 = 1_00000000 // 1 NOUS in nou
+		coinbase = tx.NewCoinbaseTx(0, genesisReward, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDFor(true))
+	} else {
+		// Mainnet: OP_RETURN genesis message, 0 reward (unspendable).
+		msg := []byte("NOUS Genesis 2026-03-07 / Cogito, ergo sum.")
+		coinbase = tx.NewCoinbaseTx(0, 0, tx.CreateOpReturnScript(msg), tx.ChainIDFor(false))
+	}
 	txIDs := []crypto.Hash{coinbase.TxID()}
 	merkleRoot := ComputeMerkleRoot(txIDs)
 

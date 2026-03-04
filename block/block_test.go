@@ -299,7 +299,8 @@ func TestGenesisBlock(t *testing.T) {
 	}
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
-	genesis := GenesisBlock(pubKeyHash, 0, 0x1d00ffff, false)
+	// Testnet genesis: P2PKH with 1 NOUS reward.
+	genesis := GenesisBlock(pubKeyHash, 1700000000, 0x2000ffff, true)
 	if genesis == nil {
 		t.Fatal("GenesisBlock returned nil")
 	}
@@ -336,16 +337,63 @@ func TestGenesisBlock(t *testing.T) {
 	}
 }
 
+func TestGenesisBlockMainnetOpReturn(t *testing.T) {
+	// Mainnet genesis: OP_RETURN with 0 reward (fair launch, no premine).
+	genesis := GenesisBlock(nil, 1741305600, 0x1d00ffff, false)
+	if genesis == nil {
+		t.Fatal("GenesisBlock returned nil")
+	}
+
+	cb := genesis.Transactions[0]
+	if !cb.IsCoinbase() {
+		t.Fatal("genesis tx should be a coinbase")
+	}
+
+	// Amount should be 0 (unspendable).
+	if cb.Outputs[0].Amount != 0 {
+		t.Fatalf("mainnet genesis reward: want 0, got %d", cb.Outputs[0].Amount)
+	}
+
+	// Output script should start with OP_RETURN.
+	if !tx.IsUnspendable(cb.Outputs[0].PkScript) {
+		t.Fatal("mainnet genesis output should be unspendable (OP_RETURN)")
+	}
+
+	// Script should contain the genesis message.
+	msg := "NOUS Genesis 2026-03-07 / Cogito, ergo sum."
+	script := cb.Outputs[0].PkScript
+	// OP_RETURN (1 byte) + length (1 byte) + message
+	if len(script) != 2+len(msg) {
+		t.Fatalf("script length: want %d, got %d", 2+len(msg), len(script))
+	}
+	if string(script[2:]) != msg {
+		t.Fatalf("genesis message: want %q, got %q", msg, string(script[2:]))
+	}
+
+	// MerkleRoot should match.
+	expectedMerkle := ComputeMerkleRoot([]crypto.Hash{cb.TxID()})
+	if genesis.Header.MerkleRoot != expectedMerkle {
+		t.Fatal("genesis MerkleRoot does not match coinbase TxID")
+	}
+}
+
 func TestGenesisBlockDeterministic(t *testing.T) {
 	_, pub, _ := crypto.GenerateKeyPair()
 	pubKeyHash := crypto.Hash160(pub.SerializeCompressed())
 
+	// Testnet: deterministic for same pubKeyHash and timestamp.
 	ts := uint32(1735689600)
-	g1 := GenesisBlock(pubKeyHash, ts, 0x1d00ffff, false)
-	g2 := GenesisBlock(pubKeyHash, ts, 0x1d00ffff, false)
-
+	g1 := GenesisBlock(pubKeyHash, ts, 0x2000ffff, true)
+	g2 := GenesisBlock(pubKeyHash, ts, 0x2000ffff, true)
 	if g1.Header.Hash() != g2.Header.Hash() {
-		t.Fatal("genesis block hash should be deterministic for the same pubKeyHash")
+		t.Fatal("testnet genesis hash should be deterministic")
+	}
+
+	// Mainnet: deterministic (ignores pubKeyHash, uses fixed OP_RETURN message).
+	g3 := GenesisBlock(nil, ts, 0x1d00ffff, false)
+	g4 := GenesisBlock(nil, ts, 0x1d00ffff, false)
+	if g3.Header.Hash() != g4.Header.Hash() {
+		t.Fatal("mainnet genesis hash should be deterministic")
 	}
 }
 

@@ -300,6 +300,58 @@ func TestBoltUTXORebuildFromBlocks(t *testing.T) {
 	}
 }
 
+// Test: OP_RETURN outputs do not enter the UTXO set.
+func TestBoltUTXOOpReturnSkipped(t *testing.T) {
+	s, _ := tempBoltUTXO(t)
+	defer s.Close()
+
+	opReturnScript := CreateOpReturnScript([]byte("test message"))
+	normalScript := testTxOut(100).PkScript
+
+	// Transaction with one OP_RETURN output and one normal output.
+	txn := &Transaction{
+		Version: 2,
+		Inputs:  []TxIn{{PrevOut: OutPoint{}, SignatureScript: []byte{4, 0, 0, 0, 0}, Sequence: 0xFFFFFFFF}},
+		Outputs: []TxOut{
+			{Amount: 0, PkScript: opReturnScript},
+			{Amount: 100, PkScript: normalScript},
+		},
+	}
+
+	// AddTransaction should skip the OP_RETURN output.
+	s.AddTransaction(txn, 0)
+	if s.Count() != 1 {
+		t.Fatalf("expected 1 UTXO (OP_RETURN skipped), got %d", s.Count())
+	}
+
+	txID := txn.TxID()
+	// OP_RETURN output (index 0) should NOT exist.
+	if s.Get(OutPoint{TxID: txID, Index: 0}) != nil {
+		t.Fatal("OP_RETURN output should not be in UTXO set")
+	}
+	// Normal output (index 1) should exist.
+	if s.Get(OutPoint{TxID: txID, Index: 1}) == nil {
+		t.Fatal("normal output should be in UTXO set")
+	}
+}
+
+// Test: ApplyBlock also skips OP_RETURN outputs.
+func TestBoltUTXOApplyBlockOpReturnSkipped(t *testing.T) {
+	s, _ := tempBoltUTXO(t)
+	defer s.Close()
+
+	opReturnScript := CreateOpReturnScript([]byte("NOUS Genesis"))
+	// Coinbase with OP_RETURN (like mainnet genesis).
+	cb := NewCoinbaseTx(0, 0, opReturnScript, ChainIDNous)
+
+	s.ApplyBlock([]*Transaction{cb}, 0)
+
+	// OP_RETURN coinbase should NOT create any UTXO.
+	if s.Count() != 0 {
+		t.Fatalf("expected 0 UTXOs (OP_RETURN coinbase), got %d", s.Count())
+	}
+}
+
 // Test: file removed between runs triggers rebuild path.
 func TestBoltUTXOFreshFile(t *testing.T) {
 	dir := t.TempDir()

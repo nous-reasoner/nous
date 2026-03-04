@@ -155,6 +155,9 @@ func (s *BoltUTXOSet) AddTransaction(t *Transaction, height uint64) {
 	if err := s.db.Update(func(btx *bolt.Tx) error {
 		b := btx.Bucket(utxoBucket)
 		for i, out := range t.Outputs {
+			if IsUnspendable(out.PkScript) {
+				continue
+			}
 			op := OutPoint{TxID: txID, Index: uint32(i)}
 			u := &UTXO{OutPoint: op, Output: out, Height: height, IsCoinbase: cb}
 			if err := b.Put(encodeKey(op), encodeValue(u)); err != nil {
@@ -179,6 +182,9 @@ func (s *BoltUTXOSet) ApplyBlock(txs []*Transaction, height uint64) {
 			txID := t.TxID()
 			cb := t.IsCoinbase()
 			for i, out := range t.Outputs {
+				if IsUnspendable(out.PkScript) {
+					continue
+				}
 				op := OutPoint{TxID: txID, Index: uint32(i)}
 				u := &UTXO{OutPoint: op, Output: out, Height: height, IsCoinbase: cb}
 				if err := b.Put(encodeKey(op), encodeValue(u)); err != nil {
@@ -214,6 +220,9 @@ func (s *BoltUTXOSet) ApplyBlockWithUndo(txs []*Transaction, height uint64) *Und
 			undo.CreatedTxs = append(undo.CreatedTxs, txID)
 			cb := t.IsCoinbase()
 			for i, out := range t.Outputs {
+				if IsUnspendable(out.PkScript) {
+					continue
+				}
 				op := OutPoint{TxID: txID, Index: uint32(i)}
 				u := &UTXO{OutPoint: op, Output: out, Height: height, IsCoinbase: cb}
 				if err := b.Put(encodeKey(op), encodeValue(u)); err != nil {

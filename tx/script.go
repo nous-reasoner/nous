@@ -8,6 +8,7 @@ import (
 
 // Script opcodes for P2PKH.
 const (
+	OpReturn      = 0x6a
 	OpDup         = 0x76
 	OpHash160     = 0xa9
 	OpEqualVerify = 0x88
@@ -25,6 +26,21 @@ func CreateP2PKHLockScript(pubKeyHash []byte) []byte {
 	script = append(script, pubKeyHash...)
 	script = append(script, OpEqualVerify, OpCheckSig)
 	return script
+}
+
+// CreateOpReturnScript builds an OP_RETURN script with arbitrary data.
+// OP_RETURN outputs are provably unspendable and should not enter the UTXO set.
+func CreateOpReturnScript(data []byte) []byte {
+	script := make([]byte, 0, 2+len(data))
+	script = append(script, OpReturn)
+	script = append(script, byte(len(data)))
+	script = append(script, data...)
+	return script
+}
+
+// IsUnspendable returns true if the script starts with OP_RETURN.
+func IsUnspendable(pkScript []byte) bool {
+	return len(pkScript) > 0 && pkScript[0] == OpReturn
 }
 
 // CreateP2PKHUnlockScript builds a standard P2PKH unlocking script:
