@@ -249,7 +249,7 @@ func defaultDataDir() string {
 	if err != nil {
 		return ".nous"
 	}
-	return home + "/.nous"
+	return filepath.Join(home, ".nous")
 }
 
 func splitSeeds(s string) []string {

@@ -45,6 +45,13 @@ func (bs *BlockStore) SaveBlock(blk *block.Block, height uint64) error {
 	bs.mu.Lock()
 	defer bs.mu.Unlock()
 
+	// Ensure block directory exists. On Windows, a prior "rmdir /S /Q" may
+	// defer actual deletion until file handles are released, causing the
+	// directory to vanish mid-run. MkdirAll is a no-op if it already exists.
+	if err := os.MkdirAll(bs.blockDir, 0755); err != nil {
+		return fmt.Errorf("storage: ensure block dir: %w", err)
+	}
+
 	path := bs.blockPath(height)
 	f, err := os.Create(path)
 	if err != nil {
