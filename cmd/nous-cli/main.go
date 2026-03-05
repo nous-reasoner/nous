@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -72,6 +73,12 @@ func main() {
 		err = cmdGetMiningInfo()
 	case "getpeerinfo":
 		err = cmdGetPeerInfo()
+	case "exportprivkey":
+		err = cmdExportPrivKey()
+	case "importprivkey":
+		err = cmdImportPrivKey(cmdArgs)
+	case "backupwallet":
+		err = cmdBackupWallet(cmdArgs)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		printUsage()
@@ -140,6 +147,9 @@ Commands:
   newaddress             generate a new address
   getbalance [address]   get balance (wallet or address)
   send <address> <amount> send NOUS to address
+  exportprivkey          export primary private key (hex)
+  importprivkey <hex>    import private key and save wallet
+  backupwallet <path>    copy wallet file to destination
   getblockcount          get current block height
   getblock <height>      get block by height
   getmininginfo          get mining information
@@ -443,6 +453,110 @@ func cmdGetPeerInfo() error {
 		fmt.Printf("  block_height: %v\n", p["block_height"])
 		fmt.Printf("  handshaked:   %v\n", p["handshaked"])
 	}
+	return nil
+}
+
+// --- wallet export/import ---
+
+func cmdExportPrivKey() error {
+	w, err := loadWallet()
+	if err != nil {
+		return err
+	}
+	privHex := hex.EncodeToString(w.ExportPrivateKey())
+	addr := w.GetAddress()
+
+	if flagJSON {
+		return printJSON(map[string]interface{}{
+			"private_key": privHex,
+			"address":     string(addr),
+		})
+	}
+	fmt.Printf("Private Key (hex): %s\n", privHex)
+	fmt.Printf("Address: %s\n", addr)
+	fmt.Println("WARNING: Never share your private key. Anyone with this key can spend your NOUS.")
+	return nil
+}
+
+func cmdImportPrivKey(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: importprivkey <hex>")
+	}
+	privBytes, err := hex.DecodeString(args[0])
+	if err != nil || len(privBytes) != 32 {
+		return fmt.Errorf("invalid private key: must be 32 bytes hex (64 characters)")
+	}
+
+	path := walletPath()
+
+	// Ensure parent directory exists.
+	if dir := filepath.Dir(path); dir != "" {
+		os.MkdirAll(dir, 0700)
+	}
+
+	// Create a fresh wallet and import the key as primary.
+	w := &wallet.Wallet{IsTestnet: flagTestnet}
+	idx, err := w.ImportPrivateKey(privBytes)
+	if err != nil {
+		return fmt.Errorf("import: %w", err)
+	}
+	w.Primary = idx
+
+	pass := flagWalletPass
+	if pass == "" {
+		pass = "default"
+	}
+	if err := w.SaveToFile(path, pass); err != nil {
+		return fmt.Errorf("save wallet: %w", err)
+	}
+
+	addr := w.GetAddress()
+	if flagJSON {
+		return printJSON(map[string]interface{}{
+			"file":    path,
+			"address": string(addr),
+		})
+	}
+	fmt.Printf("imported key to: %s\n", path)
+	fmt.Printf("address: %s\n", addr)
+	return nil
+}
+
+func cmdBackupWallet(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: backupwallet <destination_path>")
+	}
+	src := walletPath()
+	dst := args[0]
+
+	// Ensure destination directory exists.
+	if dir := filepath.Dir(dst); dir != "" {
+		os.MkdirAll(dir, 0700)
+	}
+
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open wallet: %w", err)
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("create backup: %w", err)
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("copy: %w", err)
+	}
+
+	if flagJSON {
+		return printJSON(map[string]interface{}{
+			"source":      src,
+			"destination": dst,
+		})
+	}
+	fmt.Printf("wallet backed up: %s → %s\n", src, dst)
 	return nil
 }
 

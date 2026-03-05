@@ -88,6 +88,7 @@ type BlockSyncer struct {
 	syncStartedAt   time.Time                     // when current sync started
 	lastProgressAt  time.Time                     // last time chain height increased during sync
 	lastProgressH   uint64                        // chain height at lastProgressAt
+	lastOrphanRetry time.Time                     // rate-limit orphan retry getblocks
 
 	// Orphan pool: blocks whose parents are not yet known.
 	orphans        map[crypto.Hash]*orphanBlock             // block hash → orphan
@@ -191,9 +192,10 @@ func (bs *BlockSyncer) TriggerSync() {
 				bs.syncPeer = nil
 				bs.evictStalePendingLocked()
 				bs.clearOrphansLocked()
-			} else if len(bs.orphans) > 0 && time.Since(bs.lastProgressAt) > OrphanRetryPeriod {
+			} else if len(bs.orphans) > 0 && time.Since(bs.lastProgressAt) > OrphanRetryPeriod && time.Since(bs.lastOrphanRetry) > OrphanRetryPeriod {
 				// Orphans piling up with no height gain — resend getblocks.
 				peer := bs.syncPeer
+				bs.lastOrphanRetry = time.Now()
 				bs.evictStalePendingLocked()
 				bs.mu.Unlock()
 				if peer != nil {
@@ -286,8 +288,8 @@ func (bs *BlockSyncer) handleInv(peer *Peer, msg Message) {
 
 	if len(needed) > 0 {
 		peer.SendMessage(bs.server.config.Magic, &MsgGetData{Items: needed})
-	} else {
-		// No new blocks — sync is complete.
+	} else if len(inv.Items) == 0 {
+		// Peer sent an empty inv — no more blocks available. Sync is done.
 		bs.mu.Lock()
 		if bs.state == SyncInProgress {
 			bs.state = SyncComplete
@@ -296,6 +298,8 @@ func (bs *BlockSyncer) handleInv(peer *Peer, msg Message) {
 		}
 		bs.mu.Unlock()
 	}
+	// else: inv had items but we already had them all — ignore
+	// (duplicate response from a redundant getblocks).
 }
 
 // handleGetData responds with the requested blocks or transactions.
@@ -370,8 +374,10 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 		return
 	}
 
-	// Remove from pending.
+	// Remove from pending. Track whether this block was actually requested
+	// (part of a sync batch) vs. an unsolicited relay.
 	bs.mu.Lock()
+	_, wasBatchBlock := bs.pending[blockHash]
 	delete(bs.pending, blockHash)
 	pendingCount := len(bs.pending)
 	bs.mu.Unlock()
@@ -414,7 +420,7 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 	syncing := bs.state == SyncInProgress
 	bs.mu.Unlock()
 
-	if syncing && pendingCount == 0 {
+	if syncing && wasBatchBlock && pendingCount == 0 {
 		// Always request more blocks — peer.BlockHeight may be stale.
 		// If there are no new blocks, we'll get an empty inv and mark sync complete.
 		// Send to the sync peer (not the delivering peer, which may be a relay).
