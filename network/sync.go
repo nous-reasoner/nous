@@ -190,6 +190,7 @@ func (bs *BlockSyncer) TriggerSync() {
 				bs.state = SyncIdle
 				bs.syncPeer = nil
 				bs.evictStalePendingLocked()
+				bs.clearOrphansLocked()
 			} else if len(bs.orphans) > 0 && time.Since(bs.lastProgressAt) > OrphanRetryPeriod {
 				// Orphans piling up with no height gain — resend getblocks.
 				peer := bs.syncPeer
@@ -347,16 +348,17 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 	// Skip blocks we already have (can arrive via relay + sync simultaneously).
 	if bs.chain.HasBlock(blockHash) {
 		bs.mu.Lock()
+		_, wasPending := bs.pending[blockHash]
 		delete(bs.pending, blockHash)
 		pendingCount := len(bs.pending)
 		syncing := bs.state == SyncInProgress
 		bs.mu.Unlock()
 
-		// Even though this block is a duplicate, the pending map may have
-		// just been emptied. If we're syncing, we must still request the
-		// next batch — otherwise sync stalls when relay peers deliver
-		// blocks that were also requested via getdata from the sync peer.
-		if syncing && pendingCount == 0 {
+		// Only request the next batch if this duplicate was actually pending
+		// (a relay peer beat the sync peer to delivery). Without the wasPending
+		// guard, every unsolicited relay duplicate at the end of a batch would
+		// spam getblocks, flooding the sync peer and stalling sync.
+		if wasPending && syncing && pendingCount == 0 {
 			if sp := bs.syncPeerSafe(); sp != nil {
 				tipHash := bs.chain.TipHash()
 				sp.SendMessage(bs.server.config.Magic, &MsgGetBlocks{
@@ -568,6 +570,16 @@ func (bs *BlockSyncer) evictStalePendingLocked() {
 			delete(bs.pending, hash)
 		}
 	}
+}
+
+// clearOrphansLocked drops all orphan blocks. Called during stale sync reset
+// because orphans from relay peers at heights far above our tip cannot be
+// resolved until we catch up; keeping them just wastes memory and pollutes
+// future sync batches.
+// Must be called with bs.mu held.
+func (bs *BlockSyncer) clearOrphansLocked() {
+	bs.orphans = make(map[crypto.Hash]*orphanBlock)
+	bs.orphanByParent = make(map[crypto.Hash]map[crypto.Hash]struct{})
 }
 
 // handleTx processes a received transaction.
