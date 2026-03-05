@@ -117,6 +117,13 @@ func (bs *BlockSyncer) State() SyncState {
 	return bs.state
 }
 
+// syncPeerSafe returns the current sync peer (nil if none).
+func (bs *BlockSyncer) syncPeerSafe() *Peer {
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+	return bs.syncPeer
+}
+
 // Start registers message handlers and begins sync if needed.
 func (bs *BlockSyncer) Start() {
 	bs.server.OnMessage(CmdGetBlocks, bs.handleGetBlocks)
@@ -341,7 +348,23 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 	if bs.chain.HasBlock(blockHash) {
 		bs.mu.Lock()
 		delete(bs.pending, blockHash)
+		pendingCount := len(bs.pending)
+		syncing := bs.state == SyncInProgress
 		bs.mu.Unlock()
+
+		// Even though this block is a duplicate, the pending map may have
+		// just been emptied. If we're syncing, we must still request the
+		// next batch — otherwise sync stalls when relay peers deliver
+		// blocks that were also requested via getdata from the sync peer.
+		if syncing && pendingCount == 0 {
+			if sp := bs.syncPeerSafe(); sp != nil {
+				tipHash := bs.chain.TipHash()
+				sp.SendMessage(bs.server.config.Magic, &MsgGetBlocks{
+					StartHash: tipHash,
+					StopHash:  crypto.Hash{},
+				})
+			}
+		}
 		return
 	}
 
@@ -392,11 +415,14 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 	if syncing && pendingCount == 0 {
 		// Always request more blocks — peer.BlockHeight may be stale.
 		// If there are no new blocks, we'll get an empty inv and mark sync complete.
-		tipHash := bs.chain.TipHash()
-		peer.SendMessage(bs.server.config.Magic, &MsgGetBlocks{
-			StartHash: tipHash,
-			StopHash:  crypto.Hash{},
-		})
+		// Send to the sync peer (not the delivering peer, which may be a relay).
+		if sp := bs.syncPeerSafe(); sp != nil {
+			tipHash := bs.chain.TipHash()
+			sp.SendMessage(bs.server.config.Magic, &MsgGetBlocks{
+				StartHash: tipHash,
+				StopHash:  crypto.Hash{},
+			})
+		}
 	}
 
 	// Relay accepted blocks to other peers (not the sender).
