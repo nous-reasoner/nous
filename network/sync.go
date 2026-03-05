@@ -24,6 +24,13 @@ const (
 	OrphanExpiry    = time.Hour
 )
 
+// Stale sync detection.
+const (
+	SyncStaleTimeout  = 120 * time.Second // reset sync if no progress for this long
+	PendingExpiry     = 120 * time.Second // drop pending entries older than this
+	OrphanRetryPeriod = 30 * time.Second  // retry getblocks if orphans pile up with no height gain
+)
+
 // SyncState tracks the current synchronization status.
 type SyncState int
 
@@ -62,6 +69,11 @@ type orphanBlock struct {
 	AddedAt    time.Time
 }
 
+// pendingEntry tracks when a block hash was added to the pending set.
+type pendingEntry struct {
+	AddedAt time.Time
+}
+
 // BlockSyncer manages the block synchronization protocol.
 type BlockSyncer struct {
 	server *Server
@@ -70,9 +82,12 @@ type BlockSyncer struct {
 	mu              sync.Mutex
 	state           SyncState
 	syncPeer        *Peer
-	pending         map[crypto.Hash]bool // blocks we've requested but not yet received
-	blockChan       chan *block.Block    // received blocks waiting to be processed
-	syncCompletedAt time.Time            // when last sync completed (cooldown)
+	pending         map[crypto.Hash]*pendingEntry // blocks we've requested but not yet received
+	blockChan       chan *block.Block             // received blocks waiting to be processed
+	syncCompletedAt time.Time                     // when last sync completed (cooldown)
+	syncStartedAt   time.Time                     // when current sync started
+	lastProgressAt  time.Time                     // last time chain height increased during sync
+	lastProgressH   uint64                        // chain height at lastProgressAt
 
 	// Orphan pool: blocks whose parents are not yet known.
 	orphans        map[crypto.Hash]*orphanBlock             // block hash → orphan
@@ -81,14 +96,17 @@ type BlockSyncer struct {
 
 // NewBlockSyncer creates a new block syncer.
 func NewBlockSyncer(server *Server, chain ChainAccess) *BlockSyncer {
+	now := time.Now()
 	return &BlockSyncer{
 		server:         server,
 		chain:          chain,
 		state:          SyncIdle,
-		pending:        make(map[crypto.Hash]bool),
+		pending:        make(map[crypto.Hash]*pendingEntry),
 		blockChan:      make(chan *block.Block, 64),
 		orphans:        make(map[crypto.Hash]*orphanBlock),
 		orphanByParent: make(map[crypto.Hash]map[crypto.Hash]struct{}),
+		lastProgressAt: now,
+		lastProgressH:  chain.Height(),
 	}
 }
 
@@ -115,8 +133,12 @@ func (bs *BlockSyncer) SyncFromPeer(peer *Peer) error {
 		bs.mu.Unlock()
 		return errors.New("sync: already in progress")
 	}
+	now := time.Now()
 	bs.state = SyncInProgress
 	bs.syncPeer = peer
+	bs.syncStartedAt = now
+	bs.lastProgressAt = now
+	bs.lastProgressH = bs.chain.Height()
 	bs.mu.Unlock()
 
 	log.Printf("sync: starting from peer %s (height %d, our height %d)",
@@ -135,17 +157,51 @@ func (bs *BlockSyncer) SyncFromPeer(peer *Peer) error {
 // TriggerSync finds a peer and starts syncing if we're not already syncing.
 // After sync completes, a 30-second cooldown prevents redundant polling;
 // new blocks arrive via relay during this period.
+//
+// Also detects stale sync sessions: if no chain-height progress has been
+// made for SyncStaleTimeout while in SyncInProgress, the session is reset
+// so a fresh getblocks can be sent.
 func (bs *BlockSyncer) TriggerSync() {
 	bs.mu.Lock()
 	if bs.state == SyncInProgress {
-		// Check if the sync peer is still connected.
+		// Check if the sync peer disconnected.
 		if bs.syncPeer != nil && bs.server.peers.Get(bs.syncPeer.Addr) == nil {
 			log.Printf("sync: peer %s disconnected, resetting sync state", bs.syncPeer.Addr)
 			bs.state = SyncIdle
 			bs.syncPeer = nil
+			bs.evictStalePendingLocked()
 		} else {
-			bs.mu.Unlock()
-			return
+			// Peer still connected — check for stale sync (no progress).
+			currentH := bs.chain.Height()
+			if currentH > bs.lastProgressH {
+				bs.lastProgressH = currentH
+				bs.lastProgressAt = time.Now()
+			}
+			if time.Since(bs.lastProgressAt) > SyncStaleTimeout {
+				log.Printf("sync: stale — no progress for %s (height %d, %d orphans, %d pending), resetting",
+					SyncStaleTimeout, currentH, len(bs.orphans), len(bs.pending))
+				bs.state = SyncIdle
+				bs.syncPeer = nil
+				bs.evictStalePendingLocked()
+			} else if len(bs.orphans) > 0 && time.Since(bs.lastProgressAt) > OrphanRetryPeriod {
+				// Orphans piling up with no height gain — resend getblocks.
+				peer := bs.syncPeer
+				bs.evictStalePendingLocked()
+				bs.mu.Unlock()
+				if peer != nil {
+					tipHash := bs.chain.TipHash()
+					log.Printf("sync: %d orphans with no progress for %s, retrying getblocks from tip",
+						len(bs.orphans), OrphanRetryPeriod)
+					peer.SendMessage(bs.server.config.Magic, &MsgGetBlocks{
+						StartHash: tipHash,
+						StopHash:  crypto.Hash{},
+					})
+				}
+				return
+			} else {
+				bs.mu.Unlock()
+				return
+			}
 		}
 	}
 	// After sync completes, wait before re-polling. Blocks arrive via relay.
@@ -211,9 +267,10 @@ func (bs *BlockSyncer) handleInv(peer *Peer, msg Message) {
 
 	var needed []InvItem
 	bs.mu.Lock()
+	now := time.Now()
 	for _, item := range inv.Items {
 		if item.Type == InvTypeBlock && !bs.chain.HasBlock(item.Hash) {
-			bs.pending[item.Hash] = true
+			bs.pending[item.Hash] = &pendingEntry{AddedAt: now}
 			needed = append(needed, item)
 		}
 	}
@@ -311,6 +368,12 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 		accepted = true
 		log.Printf("sync: accepted block %x at height %d from %s", blockHash[:8], newHeight, peer.Addr)
 
+		// Track progress for stale-sync detection.
+		bs.mu.Lock()
+		bs.lastProgressH = newHeight
+		bs.lastProgressAt = time.Now()
+		bs.mu.Unlock()
+
 		// Update server's advertised height.
 		bs.server.SetBlockHeight(newHeight)
 
@@ -374,7 +437,7 @@ func (bs *BlockSyncer) addOrphan(blk *block.Block, peer *Peer) {
 	}
 	bs.orphanByParent[parentHash][hash] = struct{}{}
 
-	needParent := !bs.pending[parentHash]
+	needParent := bs.pending[parentHash] == nil
 
 	log.Printf("sync: orphan block %x (parent %x) stored (%d orphans)",
 		hash[:8], parentHash[:8], len(bs.orphans))
@@ -466,6 +529,17 @@ func (bs *BlockSyncer) removeOrphanLocked(hash crypto.Hash) {
 		delete(children, hash)
 		if len(children) == 0 {
 			delete(bs.orphanByParent, o.ParentHash)
+		}
+	}
+}
+
+// evictStalePendingLocked removes pending entries older than PendingExpiry.
+// Must be called with bs.mu held.
+func (bs *BlockSyncer) evictStalePendingLocked() {
+	now := time.Now()
+	for hash, entry := range bs.pending {
+		if now.Sub(entry.AddedAt) > PendingExpiry {
+			delete(bs.pending, hash)
 		}
 	}
 }
