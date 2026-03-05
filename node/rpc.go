@@ -306,14 +306,21 @@ func (r *RPCServer) handleListUnspent(params json.RawMessage) (interface{}, *rpc
 		return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("invalid address: %v", err)}
 	}
 	utxos := r.chain.UTXOSet.FindByPubKeyHash(pkh)
+	currentHeight := r.chain.Height
 	result := make([]map[string]interface{}, 0, len(utxos))
 	for _, u := range utxos {
+		// Skip immature coinbase outputs so callers never build
+		// transactions that the node would reject.
+		if u.IsCoinbase && currentHeight < u.Height+tx.CoinbaseMaturity {
+			continue
+		}
 		result = append(result, map[string]interface{}{
-			"txid":   hex.EncodeToString(u.OutPoint.TxID[:]),
-			"index":  u.OutPoint.Index,
-			"value":  u.Output.Amount,
-			"script": hex.EncodeToString(u.Output.PkScript),
-			"height": u.Height,
+			"txid":        hex.EncodeToString(u.OutPoint.TxID[:]),
+			"index":       u.OutPoint.Index,
+			"value":       u.Output.Amount,
+			"script":      hex.EncodeToString(u.Output.PkScript),
+			"height":      u.Height,
+			"is_coinbase": u.IsCoinbase,
 		})
 	}
 	return result, nil
