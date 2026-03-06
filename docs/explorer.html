@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOUS Explorer — Cogito Consensus</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { nous: '#00ff88', nousdim: '#00cc6a', bg: '#0a0a0a', card: '#111111', border: '#222222' }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #0a0a0a; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #111; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        .spinner { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="text-gray-300 min-h-screen">
+
+<!-- Header -->
+<header class="border-b border-border bg-card/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+        <a href="#home" class="text-xl font-bold text-white tracking-widest">NOUS <span class="text-nous text-sm font-normal">Explorer</span></a>
+        <div class="flex items-center gap-2">
+            <input id="searchInput" type="text" placeholder="Block height / Tx hash / Address"
+                class="bg-bg border border-border rounded px-3 py-1.5 text-sm w-48 sm:w-72 focus:outline-none focus:border-nous/50 text-gray-300 placeholder-gray-600">
+            <button onclick="handleSearch()" class="bg-nous/10 border border-nous/30 text-nous px-3 py-1.5 rounded text-sm hover:bg-nous/20 transition">Search</button>
+        </div>
+    </div>
+</header>
+
+<!-- Status Bar -->
+<div class="border-b border-border bg-card/50">
+    <div class="max-w-6xl mx-auto px-4 py-2 flex flex-wrap gap-4 sm:gap-8 text-xs">
+        <div>Height <span id="statHeight" class="text-nous font-bold">—</span></div>
+        <div>Difficulty <span id="statDifficulty" class="text-white font-bold">—</span></div>
+        <div>Peers <span id="statPeers" class="text-white font-bold">—</span></div>
+        <div>Target <span class="text-white font-bold">150s</span></div>
+        <div class="ml-auto"><span id="statUpdated" class="text-gray-600">updating...</span></div>
+    </div>
+</div>
+
+<!-- Main Content -->
+<main id="app" class="max-w-6xl mx-auto px-4 py-6">
+    <div class="text-center text-gray-500 py-20">Loading...</div>
+</main>
+
+<footer class="border-t border-border text-center py-4 text-xs text-gray-600">
+    <a href="index.html" class="hover:text-nous transition">NOUS</a> — Cogito, ergo sum.
+</footer>
+
+<script>
+const RPC_URL = 'http://80.78.26.7/api';
+
+async function rpc(method, params = []) {
+    const res = await fetch(RPC_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({method, params, id: Date.now()})
+    });
+    const json = await res.json();
+    if (json.error) throw new Error(json.error.message || JSON.stringify(json.error));
+    return json.result;
+}
+
+// --- Helpers ---
+
+function formatNOUS(nou) {
+    const whole = Math.floor(nou / 1e8);
+    const frac = (nou % 1e8).toString().padStart(8, '0').replace(/0+$/, '');
+    return frac ? `${whole}.${frac} NOUS` : `${whole} NOUS`;
+}
+
+function shortHash(hash) {
+    if (!hash || hash.length < 16) return hash || '—';
+    return hash.slice(0, 8) + '...' + hash.slice(-8);
+}
+
+function formatTime(ts) {
+    return new Date(ts * 1000).toLocaleString();
+}
+
+function isCoinbaseInput(input) {
+    return input.prev_txid === '0000000000000000000000000000000000000000000000000000000000000000';
+}
+
+// Decode P2PKH script (76a914{20 bytes pubkeyhash}88ac) to hex pubkeyhash
+function scriptToPubKeyHash(script) {
+    if (script && script.length === 50 && script.startsWith('76a914') && script.endsWith('88ac')) {
+        return script.slice(6, 46);
+    }
+    return null;
+}
+
+// Compact difficulty bits to human-readable
+function diffBitsToDisplay(bits) {
+    if (!bits) return '—';
+    return '0x' + bits.toString(16).padStart(8, '0');
+}
+
+// --- Router ---
+
+function navigate(hash) {
+    window.location.hash = hash;
+}
+
+function getRoute() {
+    const h = window.location.hash.slice(1) || 'home';
+    const parts = h.split('/');
+    return { page: parts[0], param: parts.slice(1).join('/') };
+}
+
+function handleSearch() {
+    const q = document.getElementById('searchInput').value.trim();
+    if (!q) return;
+    if (/^\d+$/.test(q)) {
+        navigate(`block/${q}`);
+    } else if (q.startsWith('nous1')) {
+        navigate(`address/${q}`);
+    } else if (q.length === 64 && /^[0-9a-fA-F]+$/.test(q)) {
+        navigate(`tx/${q}`);
+    } else {
+        navigate(`address/${q}`);
+    }
+    document.getElementById('searchInput').value = '';
+}
+
+document.getElementById('searchInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleSearch();
+});
+
+// --- Status Bar ---
+
+async function updateStatus() {
+    try {
+        const [mining, peers] = await Promise.all([rpc('getmininginfo'), rpc('getpeerinfo')]);
+        document.getElementById('statHeight').textContent = mining.height.toLocaleString();
+        document.getElementById('statDifficulty').textContent = diffBitsToDisplay(mining.difficulty_bits);
+        document.getElementById('statPeers').textContent = peers.length;
+        document.getElementById('statUpdated').textContent = new Date().toLocaleTimeString();
+    } catch (e) {
+        document.getElementById('statUpdated').textContent = 'error';
+    }
+}
+
+// --- Pages ---
+
+async function renderHome() {
+    const app = document.getElementById('app');
+    app.innerHTML = `
+        <div class="grid lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-2">
+                <h2 class="text-sm text-gray-500 uppercase tracking-widest mb-3">Latest Blocks</h2>
+                <div id="blockList" class="space-y-1">
+                    <div class="text-gray-600 py-8 text-center">Loading blocks...</div>
+                </div>
+            </div>
+            <div>
+                <h2 class="text-sm text-gray-500 uppercase tracking-widest mb-3">Difficulty (last 200 blocks)</h2>
+                <div class="bg-card border border-border rounded p-3">
+                    <canvas id="diffChart" height="300"></canvas>
+                </div>
+            </div>
+        </div>`;
+
+    try {
+        const info = await rpc('getmininginfo');
+        const height = info.height;
+        const count = 20;
+        const start = Math.max(0, height - count + 1);
+
+        // Fetch blocks in parallel
+        const promises = [];
+        for (let h = height; h >= start; h--) {
+            promises.push(rpc('getblock', [h]));
+        }
+        const blocks = await Promise.all(promises);
+
+        const listEl = document.getElementById('blockList');
+        listEl.innerHTML = `
+            <div class="hidden sm:grid grid-cols-12 gap-2 text-xs text-gray-600 px-3 py-1 uppercase tracking-wider">
+                <div class="col-span-1">Height</div>
+                <div class="col-span-4">Hash</div>
+                <div class="col-span-3">Time</div>
+                <div class="col-span-1 text-center">Txs</div>
+                <div class="col-span-3 text-right">Difficulty</div>
+            </div>` +
+            blocks.map(b => `
+                <a href="#block/${b.height}" class="grid grid-cols-12 gap-2 text-sm px-3 py-2 rounded hover:bg-card border border-transparent hover:border-border transition cursor-pointer items-center">
+                    <div class="col-span-1 text-nous font-bold">${b.height}</div>
+                    <div class="col-span-4 font-mono text-xs text-gray-500 truncate">${shortHash(b.hash)}</div>
+                    <div class="col-span-3 text-xs text-gray-500">${formatTime(b.timestamp)}</div>
+                    <div class="col-span-1 text-center">${b.tx_count}</div>
+                    <div class="col-span-3 text-right text-xs text-gray-500">${diffBitsToDisplay(b.difficulty)}</div>
+                </a>`).join('');
+
+        // Difficulty chart — fetch last 200 blocks
+        const chartCount = Math.min(200, height + 1);
+        const chartStart = Math.max(0, height - chartCount + 1);
+        const chartPromises = [];
+        for (let h = chartStart; h <= height; h++) {
+            chartPromises.push(rpc('getblock', [h]));
+        }
+        const chartBlocks = await Promise.all(chartPromises);
+
+        const ctx = document.getElementById('diffChart');
+        if (ctx) {
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartBlocks.map(b => b.height),
+                    datasets: [{
+                        label: 'Difficulty Bits',
+                        data: chartBlocks.map(b => b.difficulty),
+                        borderColor: '#00ff88',
+                        backgroundColor: 'rgba(0,255,136,0.1)',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { display: true, ticks: { color: '#555', maxTicksLimit: 6, font: { size: 10 } }, grid: { color: '#1a1a1a' } },
+                        y: { type: 'logarithmic', ticks: { color: '#555', font: { size: 10 }, callback: v => '0x' + v.toString(16).slice(0,6) }, grid: { color: '#1a1a1a' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+    } catch (e) {
+        document.getElementById('blockList').innerHTML = `<div class="text-red-400 py-4">${e.message}</div>`;
+    }
+}
+
+async function renderBlock(heightStr) {
+    const app = document.getElementById('app');
+    const height = parseInt(heightStr);
+    app.innerHTML = '<div class="text-gray-500 py-20 text-center">Loading block...</div>';
+
+    try {
+        const block = await rpc('getblock', [height]);
+
+        // Navigation
+        const prevLink = height > 0 ? `<a href="#block/${height - 1}" class="text-nous hover:underline text-sm">&larr; ${height - 1}</a>` : '<span></span>';
+        const nextLink = `<a href="#block/${height + 1}" class="text-nous hover:underline text-sm">${height + 1} &rarr;</a>`;
+
+        app.innerHTML = `
+            <div class="flex items-center justify-between mb-4">
+                ${prevLink}
+                <h2 class="text-lg text-white">Block <span class="text-nous">#${height}</span></h2>
+                ${nextLink}
+            </div>
+
+            <!-- Block Info -->
+            <div class="bg-card border border-border rounded p-4 mb-4 space-y-2 text-sm">
+                <div class="grid sm:grid-cols-2 gap-2">
+                    <div><span class="text-gray-500">Hash:</span> <span class="font-mono text-xs break-all">${block.hash}</span></div>
+                    <div><span class="text-gray-500">Height:</span> <span class="text-nous font-bold">${block.height}</span></div>
+                    <div><span class="text-gray-500">Timestamp:</span> ${formatTime(block.timestamp)}</div>
+                    <div><span class="text-gray-500">Difficulty:</span> ${diffBitsToDisplay(block.difficulty)}</div>
+                    <div class="sm:col-span-2"><span class="text-gray-500">Prev Hash:</span> <a href="#block/${height - 1}" class="font-mono text-xs text-nous/70 hover:text-nous break-all">${block.prev_hash}</a></div>
+                    <div class="sm:col-span-2"><span class="text-gray-500">Merkle Root:</span> <span class="font-mono text-xs break-all">${block.merkle_root}</span></div>
+                </div>
+            </div>
+
+            <!-- 3-SAT Panel -->
+            <div class="bg-card border border-nous/30 rounded p-4 mb-4">
+                <h3 class="text-nous text-sm font-bold tracking-widest uppercase mb-3">Cogito Consensus</h3>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                    <div class="bg-bg rounded p-3 text-center">
+                        <div class="text-gray-500 text-xs uppercase">Variables</div>
+                        <div class="text-white text-lg font-bold">256</div>
+                    </div>
+                    <div class="bg-bg rounded p-3 text-center">
+                        <div class="text-gray-500 text-xs uppercase">Clauses</div>
+                        <div class="text-white text-lg font-bold">986</div>
+                    </div>
+                    <div class="bg-bg rounded p-3 text-center">
+                        <div class="text-gray-500 text-xs uppercase">Ratio</div>
+                        <div class="text-yellow-400 text-lg font-bold">3.85</div>
+                    </div>
+                    <div class="bg-bg rounded p-3 text-center">
+                        <div class="text-gray-500 text-xs uppercase">Seed</div>
+                        <div class="text-nous text-lg font-bold font-mono">${block.seed}</div>
+                    </div>
+                </div>
+                <div class="mt-3 text-center text-nous text-sm">Verified</div>
+            </div>
+
+            <!-- Transactions -->
+            <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2">Transactions (${block.tx_count})</h3>
+            <div class="space-y-1">
+                ${block.transactions.map((txid, i) => `
+                    <a href="#tx/${txid}" class="block bg-card border border-border rounded px-4 py-2 hover:border-nous/30 transition">
+                        <span class="text-gray-600 text-xs mr-2">#${i}</span>
+                        <span class="font-mono text-xs">${shortHash(txid)}</span>
+                        ${i === 0 ? '<span class="ml-2 text-xs text-yellow-500">Coinbase</span>' : ''}
+                    </a>`).join('')}
+            </div>`;
+    } catch (e) {
+        app.innerHTML = `<div class="text-red-400 py-20 text-center">Block not found: ${e.message}</div>`;
+    }
+}
+
+async function renderTx(txid) {
+    const app = document.getElementById('app');
+    app.innerHTML = '<div class="text-gray-500 py-20 text-center">Loading transaction...</div>';
+
+    try {
+        const t = await rpc('gettx', [txid]);
+
+        const info = await rpc('getmininginfo');
+        const currentHeight = info.height;
+        const confirmations = t.block_height !== undefined ? currentHeight - t.block_height + 1 : 0;
+
+        app.innerHTML = `
+            <h2 class="text-lg text-white mb-4">Transaction</h2>
+
+            <div class="bg-card border border-border rounded p-4 mb-4 space-y-2 text-sm">
+                <div><span class="text-gray-500">TxID:</span> <span class="font-mono text-xs break-all">${t.txid}</span></div>
+                <div><span class="text-gray-500">Block:</span> ${t.block_height !== undefined ? `<a href="#block/${t.block_height}" class="text-nous hover:underline">#${t.block_height}</a>` : '<span class="text-yellow-400">Unconfirmed (mempool)</span>'}</div>
+                <div><span class="text-gray-500">Confirmations:</span> <span class="${confirmations > 0 ? 'text-nous' : 'text-yellow-400'}">${confirmations}</span></div>
+            </div>
+
+            <!-- Inputs -->
+            <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2">Inputs (${t.inputs.length})</h3>
+            <div class="space-y-1 mb-4">
+                ${t.inputs.map(inp => {
+                    if (isCoinbaseInput(inp)) {
+                        return '<div class="bg-card border border-border rounded px-4 py-2 text-sm text-yellow-500">Coinbase (new coins)</div>';
+                    }
+                    return `<div class="bg-card border border-border rounded px-4 py-2 text-sm">
+                        <a href="#tx/${inp.prev_txid}" class="font-mono text-xs text-nous/70 hover:text-nous">${shortHash(inp.prev_txid)}</a>
+                        <span class="text-gray-500">:${inp.prev_index}</span>
+                    </div>`;
+                }).join('')}
+            </div>
+
+            <!-- Outputs -->
+            <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2">Outputs (${t.outputs.length})</h3>
+            <div class="space-y-1">
+                ${t.outputs.map((out, i) => {
+                    const pkh = scriptToPubKeyHash(out.script);
+                    const addrDisplay = pkh ? `<span class="font-mono text-xs">${pkh}</span>` : `<span class="font-mono text-xs text-gray-600">${out.script}</span>`;
+                    return `<div class="bg-card border border-border rounded px-4 py-2 text-sm flex justify-between items-center">
+                        <div><span class="text-gray-600 mr-2">#${i}</span>${addrDisplay}</div>
+                        <div class="text-nous font-bold">${formatNOUS(out.value)}</div>
+                    </div>`;
+                }).join('')}
+            </div>`;
+    } catch (e) {
+        app.innerHTML = `<div class="text-red-400 py-20 text-center">Transaction not found: ${e.message}</div>`;
+    }
+}
+
+async function renderAddress(addr) {
+    const app = document.getElementById('app');
+    app.innerHTML = `
+        <h2 class="text-lg text-white mb-4">Address Lookup</h2>
+        <div class="flex gap-2 mb-6">
+            <input id="addrInput" type="text" value="${addr || ''}" placeholder="nous1q..."
+                class="flex-1 bg-card border border-border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-nous/50 text-gray-300 placeholder-gray-600">
+            <button onclick="lookupAddress()" class="bg-nous/10 border border-nous/30 text-nous px-4 py-2 rounded text-sm hover:bg-nous/20 transition">Lookup</button>
+        </div>
+        <div id="addrResult"></div>`;
+
+    document.getElementById('addrInput').addEventListener('keydown', e => {
+        if (e.key === 'Enter') lookupAddress();
+    });
+
+    if (addr) lookupAddress();
+}
+
+async function lookupAddress() {
+    const addr = document.getElementById('addrInput').value.trim();
+    const resultEl = document.getElementById('addrResult');
+    if (!addr) return;
+
+    resultEl.innerHTML = '<div class="text-gray-500 py-8 text-center">Loading...</div>';
+
+    try {
+        const [balance, utxos] = await Promise.all([
+            rpc('getbalance', [addr]),
+            rpc('listunspent', [addr])
+        ]);
+
+        resultEl.innerHTML = `
+            <div class="bg-card border border-border rounded p-4 mb-4">
+                <div class="text-gray-500 text-xs uppercase tracking-wider mb-1">Address</div>
+                <div class="font-mono text-sm break-all mb-3">${addr}</div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <div class="text-gray-500 text-xs uppercase">Available</div>
+                        <div class="text-nous text-xl font-bold">${formatNOUS(balance.balance)}</div>
+                    </div>
+                    <div>
+                        <div class="text-gray-500 text-xs uppercase">Immature</div>
+                        <div class="text-yellow-400 text-xl font-bold">${formatNOUS(balance.immature)}</div>
+                    </div>
+                </div>
+            </div>
+
+            <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2">UTXOs (${utxos.length})</h3>
+            <div class="space-y-1">
+                ${utxos.length === 0 ? '<div class="text-gray-600 py-4 text-center text-sm">No spendable UTXOs</div>' :
+                utxos.map(u => `
+                    <div class="bg-card border border-border rounded px-4 py-2 text-sm flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                        <div>
+                            <a href="#tx/${u.txid}" class="font-mono text-xs text-nous/70 hover:text-nous">${shortHash(u.txid)}</a>
+                            <span class="text-gray-500">:${u.index}</span>
+                            <span class="text-gray-600 text-xs ml-2">height ${u.height}</span>
+                            ${u.is_coinbase ? '<span class="text-yellow-500 text-xs ml-1">coinbase</span>' : ''}
+                        </div>
+                        <div class="text-nous font-bold">${formatNOUS(u.value)}</div>
+                    </div>`).join('')}
+            </div>`;
+    } catch (e) {
+        resultEl.innerHTML = `<div class="text-red-400 py-4">${e.message}</div>`;
+    }
+}
+
+// --- Router ---
+
+async function route() {
+    const { page, param } = getRoute();
+    switch (page) {
+        case 'block': await renderBlock(param); break;
+        case 'tx': await renderTx(param); break;
+        case 'address': await renderAddress(param); break;
+        default: await renderHome();
+    }
+}
+
+window.addEventListener('hashchange', route);
+
+// Init
+updateStatus();
+setInterval(updateStatus, 30000);
+route();
+</script>
+</body>
+</html>
