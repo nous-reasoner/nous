@@ -100,6 +100,9 @@
             color: #4ade80;
             border: 1px solid #2d5a2d;
         }
+        @media (max-width: 500px) {
+            .vs-grid { grid-template-columns: 1fr !important; }
+        }
     </style>
 </head>
 <body>
@@ -123,6 +126,48 @@
                 <li>150-second block target</li>
                 <li>Cogito Consensus: 3-SAT + SHA-256 + ASERT</li>
             </ul>
+        </div>
+
+        <div class="section">
+            <h2>The Mining Equation</h2>
+            <p style="color: #888; margin-bottom: 20px;">Three lines. That's all it takes.</p>
+            <div class="code" style="font-size: 0.9em; line-height: 1.7; white-space: pre;">Find (seed, S) such that:
+
+  F  = Generate3SAT(prev_hash ‖ seed, n=256, m=986)
+  S  satisfies all 986 clauses of F
+  SHA256(header ‖ seed ‖ S) &lt; target</div>
+
+            <h3 style="color: #aaa; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.15em; margin: 25px 0 12px;">Why 256 variables? Why 986 clauses?</h3>
+            <p>3-SAT undergoes a phase transition at clause-to-variable ratio r &asymp; 4.267.</p>
+            <p style="margin-top: 8px;">Below this threshold: solutions likely exist.<br>Above it: almost certainly unsatisfiable.</p>
+            <p style="margin-top: 12px;">At r = 3.85 (the critical region just below the threshold):</p>
+            <ul>
+                <li>The problem is hardest to solve — NP-complete in practice</li>
+                <li>Solutions are guaranteed to exist</li>
+                <li>No algorithm does significantly better than exhaustive search</li>
+            </ul>
+            <div class="code" style="font-size: 0.9em;">986 = ⌈256 × 3.85⌉</div>
+            <p style="color: #888; font-size: 0.9em;">Not an arbitrary choice. The math chose it.</p>
+
+            <h3 style="color: #aaa; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.15em; margin: 25px 0 12px;">Bitcoin vs NOUS</h3>
+            <div class="vs-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div style="padding: 12px; border: 1px solid #333; border-radius: 4px;">
+                    <p style="color: #888; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px;">Bitcoin</p>
+                    <div class="code" style="font-size: 0.8em; line-height: 1.6; white-space: pre;">Find nonce where
+SHA256(header ‖ nonce) &lt; target</div>
+                    <p style="font-size: 0.85em; margin-top: 8px;">Better hardware → more hashes → more coins</p>
+                    <p style="font-size: 0.85em; color: #888;">Result: ASIC arms race, energy waste</p>
+                </div>
+                <div style="padding: 12px; border: 1px solid #333; border-radius: 4px;">
+                    <p style="color: #888; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px;">NOUS</p>
+                    <div class="code" style="font-size: 0.8em; line-height: 1.6; white-space: pre;">Find (seed, S) where
+S solves an NP-complete problem</div>
+                    <p style="font-size: 0.85em; margin-top: 8px;">Better algorithm → faster solving → more coins</p>
+                    <p style="font-size: 0.85em; color: #888;">Result: algorithmic arms race, scientific progress</p>
+                </div>
+            </div>
+
+            <p style="color: #888; font-style: italic; text-align: center; margin-top: 25px; font-size: 0.95em;">"This is what AI does. Not as a metaphor. Literally."</p>
         </div>
 
         <div class="section">
