@@ -272,19 +272,26 @@ func cmdGetBalance(args []string) error {
 		addr = string(w.GetAddress())
 	}
 
-	var balance int64
-	if err := client.CallInto(&balance, "getbalance", []string{addr}); err != nil {
+	var result struct {
+		Balance  int64 `json:"balance"`
+		Immature int64 `json:"immature"`
+	}
+	if err := client.CallInto(&result, "getbalance", []string{addr}); err != nil {
 		return fmt.Errorf("getbalance: %w", err)
 	}
 
 	if flagJSON {
 		return printJSON(map[string]interface{}{
-			"address": addr,
-			"balance": balance,
-			"nous":    formatNOUS(balance),
+			"address":  addr,
+			"balance":  result.Balance,
+			"immature": result.Immature,
+			"nous":     formatNOUS(result.Balance),
 		})
 	}
-	fmt.Printf("%s NOUS\n", formatNOUS(balance))
+	fmt.Printf("%s NOUS\n", formatNOUS(result.Balance))
+	if result.Immature > 0 {
+		fmt.Printf("(%s NOUS immature)\n", formatNOUS(result.Immature))
+	}
 	return nil
 }
 

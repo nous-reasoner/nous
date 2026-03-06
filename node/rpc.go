@@ -267,8 +267,20 @@ func (r *RPCServer) handleGetBalance(params json.RawMessage) (interface{}, *rpcE
 	if err != nil {
 		return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("invalid address: %v", err)}
 	}
-	balance := r.chain.UTXOSet.GetBalance(pkh)
-	return balance, nil
+	utxos := r.chain.UTXOSet.FindByPubKeyHash(pkh)
+	currentHeight := r.chain.Height
+	var balance, immature int64
+	for _, u := range utxos {
+		if u.IsCoinbase && currentHeight < u.Height+tx.CoinbaseMaturity {
+			immature += u.Output.Amount
+		} else {
+			balance += u.Output.Amount
+		}
+	}
+	return map[string]interface{}{
+		"balance":  balance,
+		"immature": immature,
+	}, nil
 }
 
 func (r *RPCServer) handleGetMiningInfo() interface{} {
