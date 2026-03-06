@@ -281,7 +281,7 @@ func (w *Wallet) CreateTransaction(to crypto.Address, amount, fee int64, utxoSet
 		utxos := utxoSet.FindByPubKeyHash(pkh)
 		for _, u := range utxos {
 			// Skip immature coinbase outputs.
-			if currentHeight > 0 && u.IsCoinbase && currentHeight < u.Height+tx.CoinbaseMaturity {
+			if currentHeight > 0 && u.IsCoinbase && currentHeight < u.Height+tx.CoinbaseMaturityFor(w.IsTestnet) {
 				continue
 			}
 			available = append(available, ownedUTXO{utxo: u, keyIndex: ki})

@@ -9,9 +9,19 @@ import (
 // MaxMoney is kept as a backward-compatible alias for MaxAmount.
 const MaxMoney = MaxAmount
 
-// CoinbaseMaturity is the number of blocks a coinbase output must age
-// before it can be spent.
+// CoinbaseMaturity is the mainnet coinbase maturity (100 blocks).
 const CoinbaseMaturity uint64 = 100
+
+// TestnetCoinbaseMaturity is the testnet coinbase maturity (10 blocks).
+const TestnetCoinbaseMaturity uint64 = 10
+
+// CoinbaseMaturityFor returns the coinbase maturity for the given network.
+func CoinbaseMaturityFor(isTestnet bool) uint64 {
+	if isTestnet {
+		return TestnetCoinbaseMaturity
+	}
+	return CoinbaseMaturity
+}
 
 // safeAdd returns a + b or an error if the result would overflow int64.
 func safeAdd(a, b int64) (int64, error) {
@@ -79,9 +89,10 @@ func ValidateTx(txn *Transaction, utxos UTXOStore, height uint64, isTestnet bool
 		}
 		// Coinbase maturity: coinbase outputs cannot be spent until
 		// CoinbaseMaturity blocks have passed.
-		if utxo.IsCoinbase && height < utxo.Height+CoinbaseMaturity {
+		maturity := CoinbaseMaturityFor(isTestnet)
+		if utxo.IsCoinbase && height < utxo.Height+maturity {
 			return fmt.Errorf("validate: input %d spends immature coinbase (created at height %d, current %d, need %d)",
-				i, utxo.Height, height, utxo.Height+CoinbaseMaturity)
+				i, utxo.Height, height, utxo.Height+maturity)
 		}
 		if utxo.Output.Amount < 0 || utxo.Output.Amount > MaxAmount {
 			return fmt.Errorf("validate: input %d UTXO value %d out of range", i, utxo.Output.Amount)

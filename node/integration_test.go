@@ -191,8 +191,8 @@ func testTransfer(t *testing.T) {
 	chain.Anchor.Target = easyDifficulty().PoWTarget
 	chain.IsTestnet = true
 
-	// Mine 101 blocks so block 1's coinbase matures (CoinbaseMaturity=100).
-	// With easyDifficulty this takes <1s.
+	// Mine 101 blocks so early coinbase outputs mature.
+	// Testnet CoinbaseMaturity=10, so genesis coinbase matures at height 10.
 	prev := &genesis.Header
 	for h := uint64(1); h <= 101; h++ {
 		blk, err := consensus.MineBlock(prev, nil, pkhA, chain.Difficulty, h, nil, true)

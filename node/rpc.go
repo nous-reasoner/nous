@@ -271,7 +271,7 @@ func (r *RPCServer) handleGetBalance(params json.RawMessage) (interface{}, *rpcE
 	currentHeight := r.chain.Height
 	var balance, immature int64
 	for _, u := range utxos {
-		if u.IsCoinbase && currentHeight < u.Height+tx.CoinbaseMaturity {
+		if u.IsCoinbase && currentHeight < u.Height+tx.CoinbaseMaturityFor(r.chain.IsTestnet) {
 			immature += u.Output.Amount
 		} else {
 			balance += u.Output.Amount
@@ -323,7 +323,7 @@ func (r *RPCServer) handleListUnspent(params json.RawMessage) (interface{}, *rpc
 	for _, u := range utxos {
 		// Skip immature coinbase outputs so callers never build
 		// transactions that the node would reject.
-		if u.IsCoinbase && currentHeight < u.Height+tx.CoinbaseMaturity {
+		if u.IsCoinbase && currentHeight < u.Height+tx.CoinbaseMaturityFor(r.chain.IsTestnet) {
 			continue
 		}
 		result = append(result, map[string]interface{}{
