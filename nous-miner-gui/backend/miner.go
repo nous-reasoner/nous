@@ -118,6 +118,11 @@ func mineBlock(config Config, solv solver.Solver) error {
 
 	log.Printf("Mining block %d (difficulty: 0x%08x) with %s", work.Height, work.DiffBits, solv.Name())
 
+	// Reset AI bias for new round (new block height = new formulas).
+	if rr, ok := solv.(interface{ ResetBias() }); ok {
+		rr.ResetBias()
+	}
+
 	headerTemplate, err := hex.DecodeString(work.HeaderHex)
 	if err != nil || len(headerTemplate) != 148 {
 		return fmt.Errorf("invalid header template")

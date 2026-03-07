@@ -76,10 +76,10 @@
       font-size: 12px;
       color: #999;
     }
-    .stats { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 15px; }
-    .stat-card { background: #0a0a0a; padding: 15px; border-radius: 4px; }
-    .stat-label { color: #666; font-size: 12px; margin-bottom: 5px; }
-    .stat-value { color: #00ff88; font-size: 24px; font-weight: 600; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; }
+    .stat-card { background: #0a0a0a; padding: 12px; border-radius: 4px; }
+    .stat-label { color: #666; font-size: 11px; margin-bottom: 4px; }
+    .stat-value { color: #00ff88; font-size: 20px; font-weight: 600; }
     .solver-desc {
       color: #666;
       font-size: 11px;
@@ -182,27 +182,46 @@
     </div>
 
     <div class="section">
-      <h2>Status</h2>
+      <h2>Mining Statistics</h2>
       <div class="status">
         <div class="status-dot" id="statusDot"></div>
         <span id="statusText">Idle</span>
+        <span style="margin-left: auto; color: #666; font-size: 12px;" id="uptimeText"></span>
       </div>
       <div class="stats">
         <div class="stat-card">
-          <div class="stat-label">Available Balance</div>
-          <div class="stat-value" id="balance">0.00</div>
+          <div class="stat-label">Balance</div>
+          <div class="stat-value" id="balance" style="font-size:16px;">0.00</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Immature (Mining)</div>
-          <div class="stat-value" id="immature" style="color:#ffaa00;">0.00</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Blocks Found</div>
-          <div class="stat-value" id="blocksFound">0</div>
+          <div class="stat-label">Immature</div>
+          <div class="stat-value" id="immature" style="color:#ffaa00;font-size:16px;">0.00</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Solve Rate</div>
-          <div class="stat-value" id="solveRate" style="color:#88aaff;">—</div>
+          <div class="stat-value" id="solveRate" style="color:#88aaff;font-size:16px;">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Session Blocks</div>
+          <div class="stat-value" id="blocksFound">0</div>
+        </div>
+      </div>
+      <div class="stats" style="margin-top: 10px;">
+        <div class="stat-card">
+          <div class="stat-label">Avg Time/Block</div>
+          <div class="stat-value" id="avgBlockTime" style="font-size:16px;">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Expected Next</div>
+          <div class="stat-value" id="expectedNext" style="font-size:16px;">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">All-Time Blocks</div>
+          <div class="stat-value" id="totalBlocks" style="font-size:16px;">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Earnings</div>
+          <div class="stat-value" id="totalEarnings" style="font-size:16px;">0</div>
         </div>
       </div>
       <div style="margin-top: 15px;">
@@ -221,6 +240,65 @@
     const { ipcRenderer } = require('electron');
     let isMining = false;
     let blocksFound = 0;
+
+    // Mining statistics
+    let sessionStart = null;
+    let sessionBlocks = 0;
+    let lastBlockTime = null;
+    let blockIntervals = [];
+
+    function getAllTimeStats() {
+      return JSON.parse(localStorage.getItem('nousAllTime') || '{"blocks":0,"intervals":[]}');
+    }
+    function saveAllTimeBlock(interval) {
+      const s = getAllTimeStats();
+      s.blocks++;
+      if (interval > 0) s.intervals.push(interval);
+      if (s.intervals.length > 100) s.intervals = s.intervals.slice(-100);
+      localStorage.setItem('nousAllTime', JSON.stringify(s));
+    }
+
+    function formatDuration(ms) {
+      const min = Math.floor(ms / 60000);
+      if (min < 60) return min + 'm';
+      return Math.floor(min / 60) + 'h ' + (min % 60) + 'm';
+    }
+
+    function updateStatsUI() {
+      // Uptime
+      if (sessionStart) {
+        document.getElementById('uptimeText').textContent = 'Uptime: ' + formatDuration(Date.now() - sessionStart);
+      } else {
+        document.getElementById('uptimeText').textContent = '';
+      }
+      // Session blocks
+      document.getElementById('blocksFound').textContent = sessionBlocks;
+      // Avg time/block
+      if (blockIntervals.length >= 1) {
+        const avg = blockIntervals.reduce((a, b) => a + b, 0) / blockIntervals.length;
+        document.getElementById('avgBlockTime').textContent = formatDuration(avg);
+        // Expected next
+        if (lastBlockTime && isMining) {
+          const elapsed = Date.now() - lastBlockTime;
+          if (elapsed < avg) {
+            document.getElementById('expectedNext').textContent = '~' + formatDuration(avg - elapsed);
+          } else {
+            document.getElementById('expectedNext').textContent = 'Any moment';
+          }
+        } else {
+          document.getElementById('expectedNext').textContent = '—';
+        }
+      } else {
+        document.getElementById('avgBlockTime').textContent = '—';
+        document.getElementById('expectedNext').textContent = '—';
+      }
+      // All-time
+      const allTime = getAllTimeStats();
+      document.getElementById('totalBlocks').textContent = allTime.blocks;
+      document.getElementById('totalEarnings').textContent = allTime.blocks + ' NOUS';
+    }
+
+    setInterval(updateStatsUI, 1000);
 
     const solverDescs = {
       'probsat': 'Fast stochastic local search — CPU-only, ~10 solves/sec',
@@ -265,6 +343,10 @@
       }
 
       isMining = true;
+      sessionStart = Date.now();
+      sessionBlocks = 0;
+      lastBlockTime = Date.now();
+      blockIntervals = [];
       updateUI();
       addLog('Mining started with ' + solver + ' solver...');
     }
@@ -272,6 +354,7 @@
     async function stopMining() {
       await ipcRenderer.invoke('stop-mining');
       isMining = false;
+      sessionStart = null;
       updateUI();
       addLog('Mining stopped');
     }
@@ -317,8 +400,19 @@
           flushMinerLog();
           addLog(stripped);
           if (/block found|accepted/i.test(stripped)) {
+            const now = Date.now();
+            if (lastBlockTime) {
+              const interval = now - lastBlockTime;
+              blockIntervals.push(interval);
+              saveAllTimeBlock(interval);
+            } else {
+              saveAllTimeBlock(0);
+            }
+            sessionBlocks++;
             blocksFound++;
-            document.getElementById('blocksFound').textContent = blocksFound;
+            lastBlockTime = now;
+            document.getElementById('blocksFound').textContent = sessionBlocks;
+            updateStatsUI();
             fetchBalance();
           }
           continue;
@@ -376,6 +470,7 @@
 
     ipcRenderer.on('miner-stopped', () => {
       isMining = false;
+      sessionStart = null;
       updateUI();
     });
 

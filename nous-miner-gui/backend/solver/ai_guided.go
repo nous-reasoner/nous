@@ -13,6 +13,9 @@ import (
 )
 
 // AIGuidedSolver uses AI to suggest an initial assignment, then ProbSAT to refine.
+// AI is called once to generate a "seed bias" — a probability distribution for variable
+// assignments. ProbSAT then uses this bias as its starting point for every solve attempt,
+// making it much faster than calling AI per seed.
 type AIGuidedSolver struct {
 	Provider    string
 	APIKey      string
@@ -20,6 +23,8 @@ type AIGuidedSolver struct {
 	BaseURL     string
 	UseFallback bool
 	Timeout     time.Duration
+	cachedBias  sat.Assignment // reused across solves until formula changes
+	biasReady   bool
 }
 
 func NewAIGuided() *AIGuidedSolver {
@@ -40,22 +45,27 @@ func (s *AIGuidedSolver) Description() string {
 }
 
 func (s *AIGuidedSolver) Solve(formula sat.Formula, nVars int) (sat.Assignment, error) {
-	// Try AI initial guess.
-	initial, err := s.getAIGuess(formula, nVars)
-	if err != nil {
-		log.Printf("AI guess failed: %v", err)
-		if s.UseFallback {
+	// Get AI bias once per formula (cached).
+	if !s.biasReady {
+		initial, err := s.getAIGuess(formula, nVars)
+		if err != nil {
+			log.Printf("AI guess failed: %v, using random initial", err)
+			// Fall back to pure ProbSAT with random start.
 			return sat.Solve(formula, nVars, s.Timeout)
 		}
-		return nil, err
+		s.cachedBias = initial
+		s.biasReady = true
+		log.Printf("AI bias cached, ProbSAT will use it for all seeds")
 	}
 
-	// Use AI guess as starting point for ProbSAT.
-	result, err := sat.SolveWithInitial(formula, nVars, initial, s.Timeout)
-	if err != nil && s.UseFallback {
-		return sat.Solve(formula, nVars, s.Timeout)
-	}
-	return result, err
+	// Always use ProbSAT with AI-suggested starting point.
+	return sat.SolveWithInitial(formula, nVars, s.cachedBias, s.Timeout)
+}
+
+// ResetBias clears the cached bias so AI is called again on next formula.
+func (s *AIGuidedSolver) ResetBias() {
+	s.biasReady = false
+	s.cachedBias = nil
 }
 
 func (s *AIGuidedSolver) getAIGuess(formula sat.Formula, nVars int) (sat.Assignment, error) {
