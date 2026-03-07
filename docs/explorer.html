@@ -46,8 +46,7 @@
         <div>Peers <span id="statPeers" class="text-white font-bold">—</span></div>
         <div>Target <span class="text-white font-bold">150s</span></div>
         <div class="ml-auto flex items-center gap-2">
-            <button onclick="switchNetwork('mainnet')" id="mainnetBtn" class="px-2 py-0.5 rounded text-xs font-bold transition" style="">Mainnet</button>
-            <button onclick="switchNetwork('testnet')" id="testnetBtn" class="px-2 py-0.5 rounded text-xs font-bold transition" style="">Testnet</button>
+            <span class="px-2 py-0.5 rounded text-xs font-bold" style="background:#00ff88;color:#0a0a0a;">Mainnet</span>
             <span id="statUpdated" class="text-gray-600 ml-2">updating...</span>
         </div>
     </div>
@@ -63,10 +62,7 @@
 </footer>
 
 <script>
-const MAINNET_RPC = 'http://80.78.26.7/api';
-const TESTNET_RPC = 'http://80.78.26.7/api/testnet';
-let currentNetwork = localStorage.getItem('nous_network') || 'testnet';
-let RPC_URL = currentNetwork === 'mainnet' ? MAINNET_RPC : TESTNET_RPC;
+const RPC_URL = window.location.origin + '/api';
 
 async function rpc(method, params = []) {
     const res = await fetch(RPC_URL, {
@@ -469,29 +465,7 @@ async function route() {
 
 window.addEventListener('hashchange', route);
 
-function switchNetwork(network) {
-    currentNetwork = network;
-    RPC_URL = network === 'mainnet' ? MAINNET_RPC : TESTNET_RPC;
-    localStorage.setItem('nous_network', network);
-    updateNetworkButtons();
-    updateStatus();
-    route();
-}
-
-function updateNetworkButtons() {
-    const mn = document.getElementById('mainnetBtn');
-    const tn = document.getElementById('testnetBtn');
-    if (currentNetwork === 'mainnet') {
-        mn.style.background = '#00ff88'; mn.style.color = '#0a0a0a';
-        tn.style.background = '#222'; tn.style.color = '#666';
-    } else {
-        tn.style.background = '#00ff88'; tn.style.color = '#0a0a0a';
-        mn.style.background = '#222'; mn.style.color = '#666';
-    }
-}
-
 // Init
-updateNetworkButtons();
 updateStatus();
 setInterval(updateStatus, 30000);
 route();
