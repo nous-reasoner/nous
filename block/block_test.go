@@ -360,7 +360,7 @@ func TestGenesisBlockMainnetOpReturn(t *testing.T) {
 	}
 
 	// Script should contain the genesis message.
-	msg := "NOUS Genesis 2026-03-07 / Cogito, ergo sum."
+	msg := "NOUS Genesis 2026-03-07 / The beginning of wisdom is to call things by their proper name - Confucius / Cogito, ergo sum"
 	script := cb.Outputs[0].PkScript
 	// OP_RETURN (1 byte) + length (1 byte) + message
 	if len(script) != 2+len(msg) {

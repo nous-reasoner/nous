@@ -151,7 +151,7 @@ func GenesisBlock(pubKeyHash []byte, timestamp uint32, difficultyBits uint32, is
 		coinbase = tx.NewCoinbaseTx(0, genesisReward, tx.CreateP2PKHLockScript(pubKeyHash), tx.ChainIDFor(true))
 	} else {
 		// Mainnet: OP_RETURN genesis message, 0 reward (unspendable).
-		msg := []byte("NOUS Genesis 2026-03-07 / Cogito, ergo sum.")
+		msg := []byte("NOUS Genesis 2026-03-07 / The beginning of wisdom is to call things by their proper name - Confucius / Cogito, ergo sum")
 		coinbase = tx.NewCoinbaseTx(0, 0, tx.CreateOpReturnScript(msg), tx.ChainIDFor(false))
 	}
 	txIDs := []crypto.Hash{coinbase.TxID()}
