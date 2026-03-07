@@ -76,7 +76,7 @@
       font-size: 12px;
       color: #999;
     }
-    .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 15px; }
     .stat-card { background: #0a0a0a; padding: 15px; border-radius: 4px; }
     .stat-label { color: #666; font-size: 12px; margin-bottom: 5px; }
     .stat-value { color: #00ff88; font-size: 24px; font-weight: 600; }
@@ -114,14 +114,16 @@
       <h2>Configuration</h2>
       <div class="form-group">
         <label>Node URL</label>
-        <select id="nodeUrl">
-          <option value="http://80.78.26.7/api/testnet">Testnet (80.78.26.7)</option>
-          <option value="http://80.78.26.7/api">Mainnet (80.78.26.7)</option>
-        </select>
+        <input type="text" id="nodeUrl" value="http://rpc.nouschain.org/api" placeholder="http://your-node:8332/rpc" />
       </div>
       <div class="form-group">
         <label>Mining Address</label>
-        <input type="text" id="address" placeholder="nous1q..." />
+        <div style="display: flex; gap: 8px;">
+          <input type="text" id="address" placeholder="nous1q..." readonly style="flex: 1;" />
+          <button onclick="createWallet()" style="width: auto; padding: 10px 16px;">New Wallet</button>
+          <button onclick="exportPrivateKey()" style="width: auto; padding: 10px 16px; background: #ff9500;">Export Key</button>
+        </div>
+        <div style="color: #666; font-size: 11px; margin-top: 5px;">Wallet saved to ~/.nous-miner/wallet.json</div>
       </div>
       <div class="form-group">
         <label>Solver</label>
@@ -197,6 +199,10 @@
         <div class="stat-card">
           <div class="stat-label">Blocks Found</div>
           <div class="stat-value" id="blocksFound">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Solve Rate</div>
+          <div class="stat-value" id="solveRate" style="color:#88aaff;">—</div>
         </div>
       </div>
       <div style="margin-top: 15px;">
@@ -277,20 +283,82 @@
       document.getElementById('statusText').textContent = isMining ? 'Mining...' : 'Idle';
     }
 
-    function addLog(text) {
+    function addLog(text, isError) {
       const log = document.getElementById('log');
       const time = new Date().toLocaleTimeString();
-      log.innerHTML += '[' + time + '] ' + text + '\n';
+      const color = isError ? 'color:#ff4444;' : '';
+      log.innerHTML += '<span style="' + color + '">[' + time + '] ' + text + '</span>\n';
       log.scrollTop = log.scrollHeight;
     }
 
+    // Batch miner logs: accumulate stats, flush every 5s
+    let minerStats = { sat: 0, seeds: 0, lastSeed: 0, rate: '' };
+    let logTimer = null;
+
+    function flushMinerLog() {
+      if (minerStats.seeds > 0) {
+        const rateStr = minerStats.rate ? ' (' + minerStats.rate + ')' : '';
+        addLog('Checked ' + minerStats.seeds + ' seeds, SAT solved: ' + minerStats.sat + rateStr);
+        document.getElementById('solveRate').textContent = minerStats.rate || '—';
+        minerStats = { sat: 0, seeds: 0, lastSeed: 0, rate: '' };
+      }
+    }
+
     ipcRenderer.on('miner-log', (event, data) => {
-      addLog(data.trim());
-      if (data.includes('Block found')) {
-        blocksFound++;
-        document.getElementById('blocksFound').textContent = blocksFound;
-        // Refresh balance after finding a block.
-        fetchBalance();
+      for (const msg of data.split('\n')) {
+        const line = msg.trim();
+        if (!line) continue;
+
+        // Strip timestamp prefix: "2026/03/07 17:38:24 " -> actual message
+        const stripped = line.replace(/^\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\s+/, '');
+
+        // Immediate: block found, submitted, PoW met
+        if (/PoW met|Submitting|Block found|accepted/i.test(stripped)) {
+          flushMinerLog();
+          addLog(stripped);
+          if (/block found|accepted/i.test(stripped)) {
+            blocksFound++;
+            document.getElementById('blocksFound').textContent = blocksFound;
+            fetchBalance();
+          }
+          continue;
+        }
+
+        // Immediate: starting, new block round
+        if (/Starting miner|Mining block/i.test(stripped)) {
+          addLog(stripped);
+          continue;
+        }
+
+        // Immediate: AI-related messages
+        if (/AI guess|AI failed|calling AI|fallback/i.test(stripped)) {
+          addLog(stripped);
+          continue;
+        }
+
+        // Immediate: real errors (not "no PoW match")
+        if (/error|fail|fatal/i.test(stripped) && !/no PoW match/i.test(stripped)) {
+          addLog(stripped, true);
+          continue;
+        }
+
+        // Accumulate progress lines — show immediately if rate is slow
+        const progressMatch = stripped.match(/(\d+) SAT solved \(([^)]+)\), seed=(\d+)/);
+        if (progressMatch) {
+          minerStats.sat = parseInt(progressMatch[1]);
+          minerStats.rate = progressMatch[2];
+          minerStats.seeds = parseInt(progressMatch[3]);
+          document.getElementById('solveRate').textContent = minerStats.rate;
+
+          // Parse rate: if < 10/s, show every progress line immediately
+          const rateNum = parseFloat(minerStats.rate);
+          if (rateNum < 10) {
+            addLog('Checked ' + minerStats.seeds + ' seeds, SAT solved: ' + minerStats.sat + ' (' + minerStats.rate + ')');
+            minerStats = { sat: 0, seeds: 0, lastSeed: 0, rate: '' };
+          } else if (!logTimer) {
+            logTimer = setInterval(flushMinerLog, 5000);
+          }
+        }
       }
     });
 
@@ -312,6 +380,46 @@
     });
 
     setInterval(fetchBalance, 30000);
+
+    // --- Wallet management ---
+
+    async function createWallet() {
+      if (document.getElementById('address').value) {
+        if (!confirm('A wallet already exists. Create a new one? The old wallet will be overwritten.')) return;
+      }
+      try {
+        addLog('Creating wallet...');
+        const wallet = await ipcRenderer.invoke('create-wallet');
+        document.getElementById('address').value = wallet.address;
+        addLog('Wallet created: ' + wallet.address);
+        alert('Wallet created!\n\nAddress: ' + wallet.address + '\n\nSaved to: ~/.nous-miner/wallet.json\n\nClick "Export Key" to backup your private key.');
+      } catch (e) {
+        addLog('Error: ' + e.message);
+      }
+    }
+
+    async function exportPrivateKey() {
+      try {
+        const result = await ipcRenderer.invoke('export-private-key');
+        if (result.canceled) return;
+        addLog('Wallet exported to: ' + result.path);
+        alert('Wallet exported!\n\nFile: ' + result.path + '\nAddress: ' + result.address + '\n\nKeep this file safe!');
+      } catch (e) {
+        addLog('Error: ' + e.message);
+        alert('No wallet found. Create one first.');
+      }
+    }
+
+    // Load wallet on startup
+    (async () => {
+      try {
+        const wallet = await ipcRenderer.invoke('load-wallet');
+        if (wallet && wallet.address) {
+          document.getElementById('address').value = wallet.address;
+          addLog('Wallet loaded: ' + wallet.address);
+        }
+      } catch (e) {}
+    })();
   </script>
 </body>
 </html>

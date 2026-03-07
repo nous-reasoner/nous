@@ -9,7 +9,8 @@
   "dependencies": {
     "electron": "^28.0.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "tiny-secp256k1": "^2.2.4"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.0",
@@ -19,16 +20,29 @@
   "build": {
     "appId": "org.nouschain.miner",
     "productName": "NOUS Miner",
-    "files": ["src/**/*", "public/**/*", "backend/miner"],
+    "files": [
+      "src/**/*",
+      "public/**/*",
+      "backend/miner"
+    ],
     "mac": {
       "category": "public.app-category.finance",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": ["nsis", "portable"]
+      "target": [
+        "nsis",
+        "portable"
+      ]
     },
     "linux": {
-      "target": ["AppImage", "deb"]
+      "target": [
+        "AppImage",
+        "deb"
+      ]
     }
   }
 }
