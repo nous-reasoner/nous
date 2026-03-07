@@ -14,6 +14,11 @@ const (
 // PubKeyToBech32mAddress encodes a public key as a Bech32m address: nous1q...
 func PubKeyToBech32mAddress(pubKey *PublicKey) string {
 	hash := Hash160(pubKey.SerializeCompressed())
+	return PubKeyHashToBech32mAddress(hash)
+}
+
+// PubKeyHashToBech32mAddress encodes a 20-byte public key hash as a Bech32m address.
+func PubKeyHashToBech32mAddress(hash []byte) string {
 	data5, _ := convertBits(hash, 8, 5, true)
 	payload := make([]byte, 1+len(data5))
 	payload[0] = WitnessVersion0

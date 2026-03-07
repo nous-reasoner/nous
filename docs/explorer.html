@@ -209,7 +209,7 @@ async function renderHome() {
         listEl.innerHTML = `
             <div class="hidden sm:grid grid-cols-12 gap-2 text-xs text-gray-600 px-3 py-1 uppercase tracking-wider">
                 <div class="col-span-1">Height</div>
-                <div class="col-span-4">Hash</div>
+                <div class="col-span-4">Miner</div>
                 <div class="col-span-3">Time</div>
                 <div class="col-span-1 text-center">Txs</div>
                 <div class="col-span-3 text-right">Difficulty</div>
@@ -217,7 +217,7 @@ async function renderHome() {
             blocks.map(b => `
                 <a href="#block/${b.height}" class="grid grid-cols-12 gap-2 text-sm px-3 py-2 rounded hover:bg-card border border-transparent hover:border-border transition cursor-pointer items-center">
                     <div class="col-span-1 text-nous font-bold">${b.height}</div>
-                    <div class="col-span-4 font-mono text-xs text-gray-500 truncate">${shortHash(b.hash)}</div>
+                    <div class="col-span-4 font-mono text-xs text-gray-500 truncate">${b.miner_address ? b.miner_address.slice(0, 20) + '...' : 'Genesis'}</div>
                     <div class="col-span-3 text-xs text-gray-500">${formatTime(b.timestamp)}</div>
                     <div class="col-span-1 text-center">${b.tx_count}</div>
                     <div class="col-span-3 text-right text-xs text-gray-500">${diffBitsToMultiplier(b.difficulty)}x</div>
@@ -289,11 +289,31 @@ async function renderBlock(heightStr) {
                     <div><span class="text-gray-500">Hash:</span> <span class="font-mono text-xs break-all">${block.hash}</span></div>
                     <div><span class="text-gray-500">Height:</span> <span class="text-nous font-bold">${block.height}</span></div>
                     <div><span class="text-gray-500">Timestamp:</span> ${formatTime(block.timestamp)}</div>
-                    <div><span class="text-gray-500">Difficulty:</span> ${diffBitsToMultiplier(block.difficulty)}x (target: ${diffBitsToTarget(block.difficulty).slice(0, 18)}...)</div>
-                    <div class="sm:col-span-2"><span class="text-gray-500">Prev Hash:</span> <a href="#block/${height - 1}" class="font-mono text-xs text-nous/70 hover:text-nous break-all">${block.prev_hash}</a></div>
-                    <div class="sm:col-span-2"><span class="text-gray-500">Merkle Root:</span> <span class="font-mono text-xs break-all">${block.merkle_root}</span></div>
+                    <div><span class="text-gray-500">Difficulty:</span> ${diffBitsToMultiplier(block.difficulty)}x</div>
+                    <div><span class="text-gray-500">Miner:</span> ${block.miner_address ? `<a href="#address/${block.miner_address}" class="text-nous hover:underline font-mono text-xs">${block.miner_address}</a>` : '<span class="text-gray-600">N/A</span>'}</div>
+                    <div><span class="text-gray-500">Reward:</span> ${height === 0 ? '0 NOUS (Genesis)' : '1 NOUS'}</div>
+                    <div><span class="text-gray-500">Transactions:</span> ${block.tx_count}</div>
                 </div>
             </div>
+
+            ${height === 0 ? `
+            <!-- Genesis Block -->
+            <div class="bg-card border border-yellow-500/30 rounded p-4 mb-4">
+                <h3 class="text-yellow-400 text-sm font-bold tracking-widest uppercase mb-3">Genesis Block</h3>
+                <div class="bg-bg rounded p-4">
+                    <div class="text-yellow-400 text-center italic mb-3">"The beginning of wisdom is to call things by their proper name" — Confucius</div>
+                    <div class="text-nous text-center italic mb-4">"Cogito, ergo sum"</div>
+                    <hr class="border-border mb-4">
+                    <div class="grid sm:grid-cols-2 gap-3 text-sm">
+                        <div><div class="text-gray-600 text-xs uppercase">Launch Date</div><div class="text-white">2026-03-07 16:30 CST</div></div>
+                        <div><div class="text-gray-600 text-xs uppercase">Reward</div><div class="text-white">0 NOUS (Fair Launch)</div></div>
+                        <div><div class="text-gray-600 text-xs uppercase">Consensus</div><div class="text-white">Cogito Consensus (3-SAT + SHA-256)</div></div>
+                        <div><div class="text-gray-600 text-xs uppercase">Block Reward</div><div class="text-white">1 NOUS forever, no halving</div></div>
+                        <div><div class="text-gray-600 text-xs uppercase">Constitution</div><div class="text-white">Any entity that can reason may participate</div></div>
+                        <div><div class="text-gray-600 text-xs uppercase">Vision</div><div class="text-white">AI as native blockchain participant</div></div>
+                    </div>
+                </div>
+            </div>` : ''}
 
             <!-- 3-SAT Panel -->
             <div class="bg-card border border-nous/30 rounded p-4 mb-4">

@@ -182,17 +182,28 @@ func (r *RPCServer) handleGetBlock(params json.RawMessage) (interface{}, *rpcErr
 	for i, t := range blk.Transactions {
 		txIDs[i] = hex.EncodeToString(t.TxID().Bytes())
 	}
+	// Extract miner address from coinbase tx output.
+	minerAddr := ""
+	if len(blk.Transactions) > 0 {
+		cb := blk.Transactions[0]
+		if len(cb.Outputs) > 0 {
+			if pkh := tx.ExtractPubKeyHashFromP2PKH(cb.Outputs[0].PkScript); pkh != nil {
+				minerAddr = crypto.PubKeyHashToBech32mAddress(pkh)
+			}
+		}
+	}
 	return map[string]interface{}{
-		"hash":         hex.EncodeToString(hash[:]),
-		"height":       height,
-		"version":      blk.Header.Version,
-		"timestamp":    blk.Header.Timestamp,
-		"prev_hash":    hex.EncodeToString(blk.Header.PrevBlockHash[:]),
-		"merkle_root":  hex.EncodeToString(blk.Header.MerkleRoot[:]),
-		"difficulty":   blk.Header.DifficultyBits,
-		"seed":         blk.Header.Seed,
-		"tx_count":     len(blk.Transactions),
-		"transactions": txIDs,
+		"hash":          hex.EncodeToString(hash[:]),
+		"height":        height,
+		"version":       blk.Header.Version,
+		"timestamp":     blk.Header.Timestamp,
+		"prev_hash":     hex.EncodeToString(blk.Header.PrevBlockHash[:]),
+		"merkle_root":   hex.EncodeToString(blk.Header.MerkleRoot[:]),
+		"difficulty":    blk.Header.DifficultyBits,
+		"seed":          blk.Header.Seed,
+		"tx_count":      len(blk.Transactions),
+		"transactions":  txIDs,
+		"miner_address": minerAddr,
 	}, nil
 }
 
