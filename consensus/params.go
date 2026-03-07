@@ -37,7 +37,7 @@ func TestnetDifficultyParams() *DifficultyParams {
 // DefaultDifficultyParams returns the initial difficulty for the genesis epoch.
 func DefaultDifficultyParams() *DifficultyParams {
 	return &DifficultyParams{
-		PoWTarget: CompactToTarget(0x1d00ffff),
+		PoWTarget: CompactToTarget(0x1f03ffff),
 	}
 }
 

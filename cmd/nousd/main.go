@@ -71,7 +71,7 @@ func main() {
 	} else {
 		// Fresh start — create and save genesis.
 		genesisPKH := make([]byte, 20) // zero hash for genesis
-		genesisBits := uint32(0x1d00ffff) // mainnet
+		genesisBits := uint32(0x1f03ffff) // mainnet
 		if *testnet {
 			genesisBits = uint32(0x2000ffff) // testnet
 		}
@@ -79,7 +79,7 @@ func main() {
 		if *testnet {
 			genesisTimestamp = 1772465400 // testnet genesis: 2026-03-01 (~fixed)
 		} else {
-			genesisTimestamp = 1772866800 // mainnet genesis: 2026-03-07 07:00 UTC
+			genesisTimestamp = 1772872200 // mainnet genesis: 2026-03-07 16:30 CST (08:30 UTC)
 		}
 		genesis = block.GenesisBlock(genesisPKH, genesisTimestamp, genesisBits, *testnet)
 		if err := store.SaveBlock(genesis, 0); err != nil {

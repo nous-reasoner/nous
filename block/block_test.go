@@ -339,7 +339,7 @@ func TestGenesisBlock(t *testing.T) {
 
 func TestGenesisBlockMainnetOpReturn(t *testing.T) {
 	// Mainnet genesis: OP_RETURN with 0 reward (fair launch, no premine).
-	genesis := GenesisBlock(nil, 1772866800, 0x1d00ffff, false)
+	genesis := GenesisBlock(nil, 1772872200, 0x1f03ffff, false)
 	if genesis == nil {
 		t.Fatal("GenesisBlock returned nil")
 	}
