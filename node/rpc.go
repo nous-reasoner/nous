@@ -8,10 +8,13 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
 
+	"nous/block"
 	"nous/consensus"
 	"nous/crypto"
 	"nous/network"
+	"nous/sat"
 	"nous/storage"
 	"nous/tx"
 	"nous/wallet"
@@ -138,6 +141,12 @@ func (r *RPCServer) handleRPC(w http.ResponseWriter, req *http.Request) {
 		result, rpcErr = r.handleSendToAddress(rpcReq.Params)
 	case "getaddress":
 		result, rpcErr = r.handleGetAddress()
+	case "gettotalsupply":
+		result = r.handleGetTotalSupply()
+	case "getwork":
+		result, rpcErr = r.handleGetWork(rpcReq.Params)
+	case "submitwork":
+		result, rpcErr = r.handleSubmitWork(rpcReq.Params)
 	default:
 		rpcErr = &rpcError{Code: -32601, Message: "method not found"}
 	}
@@ -424,4 +433,218 @@ func txToJSON(t *tx.Transaction, blockHeight int64) map[string]interface{} {
 		result["mempool"] = true
 	}
 	return result
+}
+
+func (r *RPCServer) handleGetTotalSupply() interface{} {
+	height := r.chain.Height
+	// Mainnet: genesis block has 0 NOUS (OP_RETURN), supply = height * 1 NOUS
+	// Testnet: genesis block has 1 NOUS (P2PKH), supply = (height + 1) * 1 NOUS
+	var expectedSupply int64
+	if r.chain.IsTestnet {
+		expectedSupply = int64(height+1) * 100000000
+	} else {
+		expectedSupply = int64(height) * 100000000
+	}
+	actualSupply := r.chain.UTXOSet.TotalSupply()
+	return map[string]interface{}{
+		"height":          height,
+		"expected_supply": expectedSupply,
+		"actual_supply":   actualSupply,
+		"expected_nous":   float64(expectedSupply) / 100000000,
+		"actual_nous":     float64(actualSupply) / 100000000,
+		"match":           expectedSupply == actualSupply,
+	}
+}
+
+func (r *RPCServer) handleGetWork(params json.RawMessage) (interface{}, *rpcError) {
+	// params: [seed] (seed is uint64, default 0)
+	var args []uint64
+	seed := uint64(0)
+	if err := json.Unmarshal(params, &args); err == nil && len(args) > 0 {
+		seed = args[0]
+	}
+
+	tip := r.chain.Tip
+	height := r.chain.Height + 1
+	diff := r.chain.GetDifficulty()
+	prevHash := tip.Hash()
+
+	// Generate SAT formula for this seed.
+	satSeed := consensus.MakeSATSeed(prevHash, seed)
+	formula := sat.GenerateFormula(satSeed, consensus.SATVariables, consensus.SATClausesRatio)
+
+	// Format as DIMACS CNF.
+	n := consensus.SATVariables
+	m := len(formula)
+	dimacs := fmt.Sprintf("p cnf %d %d\n", n, m)
+	for _, clause := range formula {
+		for _, lit := range clause {
+			v := lit.Var + 1 // DIMACS is 1-indexed
+			if lit.Neg {
+				v = -v
+			}
+			dimacs += fmt.Sprintf("%d ", v)
+		}
+		dimacs += "0\n"
+	}
+
+	return map[string]interface{}{
+		"height":          height,
+		"prev_hash":       hex.EncodeToString(prevHash[:]),
+		"difficulty_bits": consensus.TargetToCompact(diff.PoWTarget),
+		"seed":            seed,
+		"n_vars":          n,
+		"n_clauses":       m,
+		"formula":         dimacs,
+	}, nil
+}
+
+func (r *RPCServer) handleSubmitWork(params json.RawMessage) (interface{}, *rpcError) {
+	// params: [address, seed, solution_binary_string]
+	var args []json.RawMessage
+	if err := json.Unmarshal(params, &args); err != nil || len(args) < 3 {
+		return nil, &rpcError{Code: -32602, Message: "params: [address, seed, solution_bits]"}
+	}
+
+	var addr string
+	if err := json.Unmarshal(args[0], &addr); err != nil {
+		return nil, &rpcError{Code: -32602, Message: "invalid address"}
+	}
+	var seed uint64
+	if err := json.Unmarshal(args[1], &seed); err != nil {
+		return nil, &rpcError{Code: -32602, Message: "invalid seed"}
+	}
+	var solutionStr string
+	if err := json.Unmarshal(args[2], &solutionStr); err != nil {
+		return nil, &rpcError{Code: -32602, Message: "invalid solution"}
+	}
+
+	// Parse solution binary string to Assignment.
+	if len(solutionStr) != consensus.SATVariables {
+		return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("solution must be %d bits, got %d", consensus.SATVariables, len(solutionStr))}
+	}
+	solution := make(sat.Assignment, consensus.SATVariables)
+	for i, ch := range solutionStr {
+		if ch == '1' {
+			solution[i] = true
+		} else if ch != '0' {
+			return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("invalid character at position %d: %c", i, ch)}
+		}
+	}
+
+	// Decode mining address.
+	pkh, err := crypto.DecodePubKeyHash(addr)
+	if err != nil {
+		return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("invalid address: %v", err)}
+	}
+
+	// Verify SAT solution.
+	tip := r.chain.Tip
+	height := r.chain.Height + 1
+	diff := r.chain.GetDifficulty()
+	prevHash := tip.Hash()
+
+	satSeed := consensus.MakeSATSeed(prevHash, seed)
+	formula := sat.GenerateFormula(satSeed, consensus.SATVariables, consensus.SATClausesRatio)
+
+	if !sat.Verify(formula, solution) {
+		return nil, &rpcError{Code: -32000, Message: "SAT solution does not satisfy the formula"}
+	}
+
+	// Build coinbase and block.
+	mempoolTxs := r.server.Mempool().GetTopN(500)
+	var validTxs []*tx.Transaction
+	for _, t := range mempoolTxs {
+		if err := tx.ValidateTransaction(t, r.chain.UTXOSet, height, r.chain.IsTestnet); err == nil {
+			validTxs = append(validTxs, t)
+		}
+	}
+
+	reward := consensus.BlockReward(height)
+	var totalFees int64
+	for _, t := range validTxs {
+		var inputSum, outputSum int64
+		for _, in := range t.Inputs {
+			u := r.chain.UTXOSet.Get(in.PrevOut)
+			if u != nil {
+				inputSum += u.Output.Amount
+			}
+		}
+		for _, out := range t.Outputs {
+			outputSum += out.Amount
+		}
+		if inputSum > outputSum {
+			totalFees += inputSum - outputSum
+		}
+	}
+
+	coinbase := tx.NewCoinbaseTx(height, reward+totalFees, tx.CreateP2PKHLockScript(pkh), tx.ChainIDFor(r.chain.IsTestnet))
+	allTxs := make([]*tx.Transaction, 0, 1+len(validTxs))
+	allTxs = append(allTxs, coinbase)
+	allTxs = append(allTxs, validTxs...)
+
+	txIDs := make([]crypto.Hash, len(allTxs))
+	for i, t := range allTxs {
+		txIDs[i] = t.TxID()
+	}
+	merkleRoot := block.ComputeMerkleRoot(txIDs)
+
+	now := uint32(time.Now().Unix())
+	if now <= tip.Timestamp {
+		now = tip.Timestamp + 1
+	}
+
+	solBytes := sat.SerializeAssignment(solution)
+	solHash := crypto.Sha256(solBytes)
+	var utxoSetHash crypto.Hash
+
+	hdr := block.Header{
+		Version:         1,
+		PrevBlockHash:   prevHash,
+		MerkleRoot:      merkleRoot,
+		Timestamp:       now,
+		DifficultyBits:  consensus.TargetToCompact(diff.PoWTarget),
+		Seed:            seed,
+		SATSolutionHash: solHash,
+		UTXOSetHash:     utxoSetHash,
+	}
+
+	// Check PoW.
+	blockHash := hdr.Hash()
+	if blockHash.Compare(diff.PoWTarget) > 0 {
+		return nil, &rpcError{Code: -32000, Message: "block hash does not meet difficulty target (try different seed)"}
+	}
+
+	blk := &block.Block{
+		Header:       hdr,
+		Transactions: allTxs,
+		SATSolution:  solution,
+	}
+
+	// Apply to chain.
+	if err := r.chain.AddBlock(blk); err != nil {
+		return nil, &rpcError{Code: -32000, Message: fmt.Sprintf("add block: %v", err)}
+	}
+
+	if err := r.store.SaveBlock(blk, height); err != nil {
+		log.Printf("rpc: submitwork save block %d: %v", height, err)
+	}
+	tipHash := blk.Header.Hash()
+	r.store.SaveChainTip(storage.ChainTip{Hash: tipHash, Height: height})
+	r.server.SetBlockHeight(height)
+	r.server.Mempool().RemoveConfirmed(blk.Transactions)
+
+	// Broadcast.
+	payload, err := network.EncodeBlock(blk)
+	if err != nil {
+		log.Printf("rpc: submitwork encode block: %v", err)
+	} else {
+		r.server.BroadcastMessage(&network.MsgBlock{Payload: payload})
+	}
+
+	log.Printf("rpc: submitwork block %d hash=%x from %s", height, tipHash[:8], addr)
+	return map[string]interface{}{
+		"height":     height,
+		"block_hash": hex.EncodeToString(tipHash[:]),
+	}, nil
 }

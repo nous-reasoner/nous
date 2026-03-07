@@ -316,7 +316,7 @@ func TestMineBlockProducesValidSAT(t *testing.T) {
 
 	// Regenerate the formula and verify.
 	prevHash := genesis.Header.Hash()
-	satSeed := makeSATSeed(prevHash, blk.Header.Seed)
+	satSeed := MakeSATSeed(prevHash, blk.Header.Seed)
 	formula := sat.GenerateFormula(satSeed, SATVariables, SATClausesRatio)
 
 	if !sat.Verify(formula, blk.SATSolution) {

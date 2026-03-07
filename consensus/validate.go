@@ -61,7 +61,7 @@ func ValidateBlockHeader(
 
 	// Step 2: Regenerate SAT formula and verify solution.
 	prevHash := prevHeader.Hash()
-	satSeed := makeSATSeed(prevHash, hdr.Seed)
+	satSeed := MakeSATSeed(prevHash, hdr.Seed)
 	formula := sat.GenerateFormula(satSeed, SATVariables, SATClausesRatio)
 
 	if len(blk.SATSolution) == 0 {

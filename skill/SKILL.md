@@ -42,7 +42,15 @@ each block attempt requires genuine logical reasoning.
 - Reward: 1 NOUS per block, forever (no halving)
 - Consensus: Cogito Consensus (3-SAT + SHA-256 + ASERT difficulty)
 - SAT parameters: 256 variables, 986 clauses (ratio 3.85)
-- Testnet seeds: seed1.nouschain.org:9333, seed2.nouschain.org:9333, seed3.nouschain.org:9333
+
+**Networks:**
+- Mainnet: Ports 8333 (P2P) / 8332 (RPC), launched 2026-03-07 15:00 CST
+- Testnet: Ports 9333 (P2P) / 9332 (RPC), for testing only
+
+**Seed Nodes:**
+- seed1.nouschain.org (80.78.26.7)
+- seed2.nouschain.org (80.78.25.211)
+- seed3.nouschain.org (80.78.26.244)
 
 ## Setup
 
@@ -70,6 +78,11 @@ cd /tmp && rm -rf nous-build && \
 3. Create data directory and wallet:
 
 ```bash
+# Mainnet
+mkdir -p ~/.nous/mainnet
+~/.nous/bin/nous-cli --walletfile ~/.nous/mainnet/wallet.dat --walletpass default createwallet
+
+# Testnet
 mkdir -p ~/.nous/testnet
 ~/.nous/bin/nous-cli --walletfile ~/.nous/testnet/wallet.dat --walletpass default createwallet
 ```
@@ -81,18 +94,37 @@ mkdir -p ~/.nous/testnet
 ### Create wallet
 
 ```bash
+# Mainnet
+~/.nous/bin/nous-cli --walletfile ~/.nous/mainnet/wallet.dat --walletpass default createwallet
+
+# Testnet
 ~/.nous/bin/nous-cli --walletfile ~/.nous/testnet/wallet.dat --walletpass default createwallet
 ```
 
 ### Get address
 
 ```bash
+# Mainnet
+~/.nous/bin/nous-cli --walletfile ~/.nous/mainnet/wallet.dat --walletpass default getaddress
+
+# Testnet
 ~/.nous/bin/nous-cli --walletfile ~/.nous/testnet/wallet.dat --walletpass default getaddress
 ```
 
 ### Start mining
 
 ```bash
+# Mainnet (default)
+~/.nous/bin/nousd \
+  --reason \
+  --datadir ~/.nous/mainnet \
+  --key ~/.nous/mainnet/wallet.dat \
+  --password default \
+  --seeds seed1.nouschain.org:8333,seed2.nouschain.org:8333,seed3.nouschain.org:8333 \
+  > ~/.nous/mainnet/nousd.log 2>&1 &
+echo $! > ~/.nous/mainnet/nousd.pid
+
+# Testnet
 ~/.nous/bin/nousd \
   --testnet \
   --reason \
@@ -107,75 +139,99 @@ echo $! > ~/.nous/testnet/nousd.pid
 After starting, wait 10 seconds then verify:
 
 ```bash
+# Mainnet
+sleep 10 && ~/.nous/bin/nous-cli --rpcport 8332 getmininginfo
+
+# Testnet
 sleep 10 && ~/.nous/bin/nous-cli --rpcport 9332 getmininginfo
 ```
 
 ### Stop mining
 
 ```bash
+# Mainnet
+kill $(cat ~/.nous/mainnet/nousd.pid 2>/dev/null) 2>/dev/null && echo "Stopped" || echo "Not running"
+
+# Testnet
 kill $(cat ~/.nous/testnet/nousd.pid 2>/dev/null) 2>/dev/null && echo "Stopped" || echo "Not running"
 ```
 
 ### Check balance
 
 ```bash
+# Mainnet
+~/.nous/bin/nous-cli --rpcport 8332 getbalance
+
+# Testnet
 ~/.nous/bin/nous-cli --rpcport 9332 getbalance
 ```
 
 Or check a specific address:
 
 ```bash
+# Mainnet
+~/.nous/bin/nous-cli --rpcport 8332 getbalance nous1q...
+
+# Testnet
 ~/.nous/bin/nous-cli --rpcport 9332 getbalance nous1q...
 ```
 
 ### Check mining status
 
 ```bash
+# Mainnet
+~/.nous/bin/nous-cli --rpcport 8332 getmininginfo
+
+# Testnet
 ~/.nous/bin/nous-cli --rpcport 9332 getmininginfo
 ```
 
 ### Get block count
 
 ```bash
+# Mainnet
+~/.nous/bin/nous-cli --rpcport 8332 getblockcount
+
+# Testnet
 ~/.nous/bin/nous-cli --rpcport 9332 getblockcount
 ```
 
 ### Get block info
 
 ```bash
+# Mainnet
+~/.nous/bin/nous-cli --rpcport 8332 getblock <height>
+
+# Testnet
 ~/.nous/bin/nous-cli --rpcport 9332 getblock <height>
 ```
 
 ### Get peer info
 
 ```bash
+# Mainnet
+~/.nous/bin/nous-cli --rpcport 8332 getpeerinfo
+
+# Testnet
 ~/.nous/bin/nous-cli --rpcport 9332 getpeerinfo
 ```
 
 ### Send NOUS
 
 ```bash
+# Mainnet
+~/.nous/bin/nous-cli \
+  --rpcport 8332 \
+  --walletfile ~/.nous/mainnet/wallet.dat \
+  --walletpass default \
+  send <to_address> <amount>
+
+# Testnet
 ~/.nous/bin/nous-cli \
   --rpcport 9332 \
   --walletfile ~/.nous/testnet/wallet.dat \
   --walletpass default \
   send <to_address> <amount>
-```
-
-Example: send 0.5 NOUS:
-
-```bash
-~/.nous/bin/nous-cli \
-  --rpcport 9332 \
-  --walletfile ~/.nous/testnet/wallet.dat \
-  --walletpass default \
-  send nous1qxyz... 0.5
-```
-
-### List unspent outputs
-
-```bash
-~/.nous/bin/nous-cli --rpcport 9332 --json getbalance nous1q...
 ```
 
 ## Display Format
@@ -184,10 +240,10 @@ When mining starts, tell the user:
 
 ```
 NOUS Reasoner started!
-  Network: testnet
+  Network: mainnet (or testnet)
   Each block attempt solves a 256-variable, 986-clause 3-SAT formula.
   Reward: 1 NOUS per block (150 second target).
-  Seeds: seed1.nouschain.org:9333, seed2.nouschain.org:9333, seed3.nouschain.org:9333
+  Seeds: seed1.nouschain.org, seed2.nouschain.org, seed3.nouschain.org
 
   Say "check mining status" or "stop mining".
 ```
@@ -210,10 +266,10 @@ Mining Status:
 
 ## Troubleshooting
 
-- Port in use: `lsof -i :9333` or `lsof -i :9332`
+- Port in use: `lsof -i :8333` or `lsof -i :8332` (mainnet), `lsof -i :9333` or `lsof -i :9332` (testnet)
 - Another instance: `ps aux | grep nousd`
 - Logs: `tail -20 ~/.nous/testnet/nousd.log`
-- No peers: `nc -zv seed1.nouschain.org 9333`
+- No peers: `nc -zv seed1.nouschain.org 8333` (mainnet) or `nc -zv seed1.nouschain.org 9333` (testnet)
 - Sync issues: delete data and restart:
   `rm -rf ~/.nous/testnet/blocks ~/.nous/testnet/chaintip.dat`
 
@@ -223,8 +279,9 @@ Mining Status:
 nous-cli [flags] <command> [args]
 
 Flags:
+  --testnet              Use testnet instead of mainnet (ports 9333/9332)
   --rpchost <host>       RPC server host (default: localhost)
-  --rpcport <port>       RPC server port (default: 9332)
+  --rpcport <port>       RPC server port (default: 8332, testnet: 9332)
   --walletfile <path>    wallet file path (default: ~/.nous/wallet.dat)
   --walletpass <pass>    wallet password
   --json                 output in JSON format
@@ -244,7 +301,8 @@ Commands:
 
 ## Safety
 
-- Testnet only. NOUS on testnet have no real value.
+- **Mainnet**: Real NOUS with value. Use carefully. Back up your wallet.
+- **Testnet**: For testing only, no real value.
 - Private keys stored in wallet.dat — do not share.
 - Uses 1 CPU core, ~50MB memory. Low system impact.
-- Coinbase maturity: mined coins require 100 block confirmations before spending.
+- Coinbase maturity: mined coins require 100 block confirmations before spending (testnet: 10).

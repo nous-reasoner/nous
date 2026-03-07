@@ -45,7 +45,11 @@
         <div>Difficulty <span id="statDifficulty" class="text-white font-bold">—</span></div>
         <div>Peers <span id="statPeers" class="text-white font-bold">—</span></div>
         <div>Target <span class="text-white font-bold">150s</span></div>
-        <div class="ml-auto"><span id="statUpdated" class="text-gray-600">updating...</span></div>
+        <div class="ml-auto flex items-center gap-2">
+            <button onclick="switchNetwork('mainnet')" id="mainnetBtn" class="px-2 py-0.5 rounded text-xs font-bold transition" style="">Mainnet</button>
+            <button onclick="switchNetwork('testnet')" id="testnetBtn" class="px-2 py-0.5 rounded text-xs font-bold transition" style="">Testnet</button>
+            <span id="statUpdated" class="text-gray-600 ml-2">updating...</span>
+        </div>
     </div>
 </div>
 
@@ -59,7 +63,10 @@
 </footer>
 
 <script>
-const RPC_URL = 'http://80.78.26.7/api';
+const MAINNET_RPC = 'http://80.78.26.7/api';
+const TESTNET_RPC = 'http://80.78.26.7/api/testnet';
+let currentNetwork = localStorage.getItem('nous_network') || 'testnet';
+let RPC_URL = currentNetwork === 'mainnet' ? MAINNET_RPC : TESTNET_RPC;
 
 async function rpc(method, params = []) {
     const res = await fetch(RPC_URL, {
@@ -101,10 +108,27 @@ function scriptToPubKeyHash(script) {
     return null;
 }
 
-// Compact difficulty bits to human-readable
-function diffBitsToDisplay(bits) {
-    if (!bits) return '—';
-    return '0x' + bits.toString(16).padStart(8, '0');
+// Compact difficulty bits to target hash
+function diffBitsToTarget(bits) {
+    const exp = bits >> 24;
+    const mant = bits & 0xffffff;
+    let target = '0x';
+    for (let i = 0; i < 64; i++) {
+        if (i < (exp - 3) * 2) target += '00';
+        else if (i < exp * 2) target += mant.toString(16).padStart(6, '0').charAt(i - (exp - 3) * 2);
+        else target += '0';
+    }
+    return target.slice(0, 66);
+}
+
+// Difficulty as multiplier relative to genesis
+function diffBitsToMultiplier(bits) {
+    const genesisTarget = BigInt('0x00ffff' + '0'.repeat(58));
+    const exp = bits >> 24;
+    const mant = bits & 0xffffff;
+    const targetInt = BigInt(mant) * (BigInt(2) ** BigInt(8 * (exp - 3)));
+    const multiplier = Number(genesisTarget * BigInt(1000) / targetInt) / 1000;
+    return multiplier.toFixed(2);
 }
 
 // --- Router ---
@@ -144,7 +168,7 @@ async function updateStatus() {
     try {
         const [mining, peers] = await Promise.all([rpc('getmininginfo'), rpc('getpeerinfo')]);
         document.getElementById('statHeight').textContent = mining.height.toLocaleString();
-        document.getElementById('statDifficulty').textContent = diffBitsToDisplay(mining.difficulty_bits);
+        document.getElementById('statDifficulty').textContent = diffBitsToMultiplier(mining.difficulty_bits) + 'x';
         document.getElementById('statPeers').textContent = peers.length;
         document.getElementById('statUpdated').textContent = new Date().toLocaleTimeString();
     } catch (e) {
@@ -200,7 +224,7 @@ async function renderHome() {
                     <div class="col-span-4 font-mono text-xs text-gray-500 truncate">${shortHash(b.hash)}</div>
                     <div class="col-span-3 text-xs text-gray-500">${formatTime(b.timestamp)}</div>
                     <div class="col-span-1 text-center">${b.tx_count}</div>
-                    <div class="col-span-3 text-right text-xs text-gray-500">${diffBitsToDisplay(b.difficulty)}</div>
+                    <div class="col-span-3 text-right text-xs text-gray-500">${diffBitsToMultiplier(b.difficulty)}x</div>
                 </a>`).join('');
 
         // Difficulty chart — fetch last 200 blocks
@@ -220,7 +244,7 @@ async function renderHome() {
                     labels: chartBlocks.map(b => b.height),
                     datasets: [{
                         label: 'Difficulty Bits',
-                        data: chartBlocks.map(b => b.difficulty),
+                        data: chartBlocks.map(b => parseFloat(diffBitsToMultiplier(b.difficulty))),
                         borderColor: '#00ff88',
                         backgroundColor: 'rgba(0,255,136,0.1)',
                         borderWidth: 1.5,
@@ -232,8 +256,8 @@ async function renderHome() {
                 options: {
                     responsive: true,
                     scales: {
-                        x: { display: true, ticks: { color: '#555', maxTicksLimit: 6, font: { size: 10 } }, grid: { color: '#1a1a1a' } },
-                        y: { type: 'logarithmic', ticks: { color: '#555', font: { size: 10 }, callback: v => '0x' + v.toString(16).slice(0,6) }, grid: { color: '#1a1a1a' } }
+                        x: { display: true, ticks: { color: '#666', maxTicksLimit: 6, font: { size: 10 } }, grid: { color: '#1a1a1a' } },
+                        y: { type: 'linear', ticks: { color: '#666', font: { size: 10 }, callback: v => v.toFixed(2) + 'x' }, grid: { color: '#1a1a1a' } }
                     },
                     plugins: { legend: { display: false } }
                 }
@@ -269,7 +293,7 @@ async function renderBlock(heightStr) {
                     <div><span class="text-gray-500">Hash:</span> <span class="font-mono text-xs break-all">${block.hash}</span></div>
                     <div><span class="text-gray-500">Height:</span> <span class="text-nous font-bold">${block.height}</span></div>
                     <div><span class="text-gray-500">Timestamp:</span> ${formatTime(block.timestamp)}</div>
-                    <div><span class="text-gray-500">Difficulty:</span> ${diffBitsToDisplay(block.difficulty)}</div>
+                    <div><span class="text-gray-500">Difficulty:</span> ${diffBitsToMultiplier(block.difficulty)}x (target: ${diffBitsToTarget(block.difficulty).slice(0, 18)}...)</div>
                     <div class="sm:col-span-2"><span class="text-gray-500">Prev Hash:</span> <a href="#block/${height - 1}" class="font-mono text-xs text-nous/70 hover:text-nous break-all">${block.prev_hash}</a></div>
                     <div class="sm:col-span-2"><span class="text-gray-500">Merkle Root:</span> <span class="font-mono text-xs break-all">${block.merkle_root}</span></div>
                 </div>
@@ -445,7 +469,29 @@ async function route() {
 
 window.addEventListener('hashchange', route);
 
+function switchNetwork(network) {
+    currentNetwork = network;
+    RPC_URL = network === 'mainnet' ? MAINNET_RPC : TESTNET_RPC;
+    localStorage.setItem('nous_network', network);
+    updateNetworkButtons();
+    updateStatus();
+    route();
+}
+
+function updateNetworkButtons() {
+    const mn = document.getElementById('mainnetBtn');
+    const tn = document.getElementById('testnetBtn');
+    if (currentNetwork === 'mainnet') {
+        mn.style.background = '#00ff88'; mn.style.color = '#0a0a0a';
+        tn.style.background = '#222'; tn.style.color = '#666';
+    } else {
+        tn.style.background = '#00ff88'; tn.style.color = '#0a0a0a';
+        mn.style.background = '#222'; mn.style.color = '#666';
+    }
+}
+
 // Init
+updateNetworkButtons();
 updateStatus();
 setInterval(updateStatus, 30000);
 route();

@@ -284,6 +284,19 @@ func (s *BoltUTXOSet) Count() int {
 	return count
 }
 
+// TotalSupply returns the sum of all UTXO amounts.
+func (s *BoltUTXOSet) TotalSupply() int64 {
+	var total int64
+	s.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(utxoBucket).ForEach(func(k, v []byte) error {
+			u := decodeValue(k, v)
+			total += u.Output.Amount
+			return nil
+		})
+	})
+	return total
+}
+
 func (s *BoltUTXOSet) FindByPubKeyHash(pubKeyHash []byte) []*UTXO {
 	var result []*UTXO
 	s.db.View(func(tx *bolt.Tx) error {

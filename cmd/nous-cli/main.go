@@ -79,6 +79,8 @@ func main() {
 		err = cmdImportPrivKey(cmdArgs)
 	case "backupwallet":
 		err = cmdBackupWallet(cmdArgs)
+	case "gettotalsupply":
+		err = cmdGetTotalSupply()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		printUsage()
@@ -154,6 +156,7 @@ Commands:
   getblock <height>      get block by height
   getmininginfo          get mining information
   getpeerinfo            get connected peers
+  gettotalsupply         get total NOUS supply and verify
   version                show version
 `, version)
 }
@@ -459,6 +462,33 @@ func cmdGetPeerInfo() error {
 		fmt.Printf("  version:      %v\n", p["version"])
 		fmt.Printf("  block_height: %v\n", p["block_height"])
 		fmt.Printf("  handshaked:   %v\n", p["handshaked"])
+	}
+	return nil
+}
+
+func cmdGetTotalSupply() error {
+	client := rpcClient()
+	var supply struct {
+		Height         uint64  `json:"height"`
+		ExpectedSupply int64   `json:"expected_supply"`
+		ActualSupply   int64   `json:"actual_supply"`
+		ExpectedNOUS   float64 `json:"expected_nous"`
+		ActualNOUS     float64 `json:"actual_nous"`
+		Match          bool    `json:"match"`
+	}
+	if err := client.CallInto(&supply, "gettotalsupply", nil); err != nil {
+		return fmt.Errorf("gettotalsupply: %w", err)
+	}
+	if flagJSON {
+		return printJSON(supply)
+	}
+	fmt.Printf("height:          %d\n", supply.Height)
+	fmt.Printf("expected supply: %s NOUS\n", formatNOUS(supply.ExpectedSupply))
+	fmt.Printf("actual supply:   %s NOUS\n", formatNOUS(supply.ActualSupply))
+	if supply.Match {
+		fmt.Println("status:          verified")
+	} else {
+		fmt.Println("status:          MISMATCH")
 	}
 	return nil
 }

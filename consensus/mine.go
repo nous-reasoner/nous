@@ -118,7 +118,7 @@ func MineBlock(
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("mining timeout after %v", DefaultMineTimeout)
 		}
-		satSeed := makeSATSeed(prevHash, seed)
+		satSeed := MakeSATSeed(prevHash, seed)
 		formula := sat.GenerateFormula(satSeed, SATVariables, SATClausesRatio)
 
 		solution, err := sat.ProbSATSolve(formula, SATVariables, SATSolveTimeout)
@@ -159,9 +159,9 @@ func MineBlock(
 	}
 }
 
-// makeSATSeed derives a deterministic 32-byte seed for SAT formula generation.
+// MakeSATSeed derives a deterministic 32-byte seed for SAT formula generation.
 // seed = SHA256(prevHash || seed_le_bytes)
-func makeSATSeed(prevHash crypto.Hash, seed uint64) [32]byte {
+func MakeSATSeed(prevHash crypto.Hash, seed uint64) [32]byte {
 	var buf [40]byte
 	copy(buf[:32], prevHash[:])
 	binary.LittleEndian.PutUint64(buf[32:], seed)

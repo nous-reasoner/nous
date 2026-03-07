@@ -39,6 +39,7 @@ type UTXOStore interface {
 	ApplyBlockWithUndo(txs []*Transaction, height uint64) *UndoData
 	RollbackBlock(undo *UndoData) error
 	Count() int
+	TotalSupply() int64
 	FindByPubKeyHash(pubKeyHash []byte) []*UTXO
 	GetBalance(pubKeyHash []byte) int64
 }
@@ -187,6 +188,17 @@ func (s *UTXOSet) Count() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.utxos)
+}
+
+// TotalSupply returns the sum of all UTXO amounts.
+func (s *UTXOSet) TotalSupply() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var total int64
+	for _, u := range s.utxos {
+		total += u.Output.Amount
+	}
+	return total
 }
 
 // Clone returns a deep copy of the UTXO set.
