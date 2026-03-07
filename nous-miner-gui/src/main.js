@@ -8,7 +8,7 @@ let minerProcess;
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 800,
-    height: 600,
+    height: 700,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -30,14 +30,26 @@ ipcMain.handle('start-mining', async (event, config) => {
   if (minerProcess) return { error: 'Already mining' };
 
   const minerPath = path.join(__dirname, '../backend/miner');
-  minerProcess = spawn(minerPath, [
+  const args = [
     '--node', config.nodeUrl,
-    '--ai', config.aiProvider,
-    '--key', config.apiKey,
-    '--model', config.model,
     '--address', config.address,
-    '--base-url', config.apiBaseUrl || ''
-  ]);
+    '--solver', config.solver || 'probsat'
+  ];
+
+  // AI config (for ai-guided and pure-ai)
+  if (config.solver === 'ai-guided' || config.solver === 'pure-ai') {
+    if (config.aiProvider) args.push('--ai-provider', config.aiProvider);
+    if (config.apiKey) args.push('--api-key', config.apiKey);
+    if (config.model) args.push('--model', config.model);
+    if (config.baseUrl) args.push('--base-url', config.baseUrl);
+  }
+
+  // Custom solver config
+  if (config.solver === 'custom' && config.scriptPath) {
+    args.push('--script', config.scriptPath);
+  }
+
+  minerProcess = spawn(minerPath, args);
 
   minerProcess.stdout.on('data', (data) => {
     const log = data.toString();
@@ -74,7 +86,7 @@ ipcMain.handle('stop-mining', async () => {
 });
 
 ipcMain.handle('get-balance', async (event, { nodeUrl, address }) => {
-  const response = await fetch(`${nodeUrl}/api`, {
+  const response = await fetch(`${nodeUrl}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

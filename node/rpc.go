@@ -457,11 +457,24 @@ func (r *RPCServer) handleGetTotalSupply() interface{} {
 }
 
 func (r *RPCServer) handleGetWork(params json.RawMessage) (interface{}, *rpcError) {
-	// params: [seed] (seed is uint64, default 0)
-	var args []uint64
+	// params: [address, seed] or [address]
+	var args []json.RawMessage
+	if err := json.Unmarshal(params, &args); err != nil || len(args) < 1 {
+		return nil, &rpcError{Code: -32602, Message: "params: [address] or [address, seed]"}
+	}
+
+	var addr string
+	if err := json.Unmarshal(args[0], &addr); err != nil {
+		return nil, &rpcError{Code: -32602, Message: "invalid address"}
+	}
 	seed := uint64(0)
-	if err := json.Unmarshal(params, &args); err == nil && len(args) > 0 {
-		seed = args[0]
+	if len(args) >= 2 {
+		json.Unmarshal(args[1], &seed)
+	}
+
+	pkh, err := crypto.DecodePubKeyHash(addr)
+	if err != nil {
+		return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("invalid address: %v", err)}
 	}
 
 	tip := r.chain.Tip
@@ -488,22 +501,77 @@ func (r *RPCServer) handleGetWork(params json.RawMessage) (interface{}, *rpcErro
 		dimacs += "0\n"
 	}
 
+	// Build header template for client-side PoW verification.
+	// Build coinbase + merkle root (same as submitwork).
+	mempoolTxs := r.server.Mempool().GetTopN(500)
+	var validTxs []*tx.Transaction
+	for _, t := range mempoolTxs {
+		if err := tx.ValidateTransaction(t, r.chain.UTXOSet, height, r.chain.IsTestnet); err == nil {
+			validTxs = append(validTxs, t)
+		}
+	}
+	reward := consensus.BlockReward(height)
+	var totalFees int64
+	for _, t := range validTxs {
+		var inputSum, outputSum int64
+		for _, in := range t.Inputs {
+			u := r.chain.UTXOSet.Get(in.PrevOut)
+			if u != nil {
+				inputSum += u.Output.Amount
+			}
+		}
+		for _, out := range t.Outputs {
+			outputSum += out.Amount
+		}
+		if inputSum > outputSum {
+			totalFees += inputSum - outputSum
+		}
+	}
+	coinbase := tx.NewCoinbaseTx(height, reward+totalFees, tx.CreateP2PKHLockScript(pkh), tx.ChainIDFor(r.chain.IsTestnet))
+	allTxs := make([]*tx.Transaction, 0, 1+len(validTxs))
+	allTxs = append(allTxs, coinbase)
+	allTxs = append(allTxs, validTxs...)
+	txIDs := make([]crypto.Hash, len(allTxs))
+	for i, t := range allTxs {
+		txIDs[i] = t.TxID()
+	}
+	merkleRoot := block.ComputeMerkleRoot(txIDs)
+
+	now := uint32(time.Now().Unix())
+	if now <= tip.Timestamp {
+		now = tip.Timestamp + 1
+	}
+
+	diffBits := consensus.TargetToCompact(diff.PoWTarget)
+
+	// Build 148-byte header template (seed=0, solution_hash=0 as placeholders).
+	hdr := block.Header{
+		Version:        1,
+		PrevBlockHash:  prevHash,
+		MerkleRoot:     merkleRoot,
+		Timestamp:      now,
+		DifficultyBits: diffBits,
+		Seed:           0,
+	}
+	headerHex := hex.EncodeToString(hdr.Serialize())
+
 	return map[string]interface{}{
 		"height":          height,
 		"prev_hash":       hex.EncodeToString(prevHash[:]),
-		"difficulty_bits": consensus.TargetToCompact(diff.PoWTarget),
+		"difficulty_bits": diffBits,
 		"seed":            seed,
 		"n_vars":          n,
 		"n_clauses":       m,
 		"formula":         dimacs,
+		"header_hex":      headerHex,
 	}, nil
 }
 
 func (r *RPCServer) handleSubmitWork(params json.RawMessage) (interface{}, *rpcError) {
-	// params: [address, seed, solution_binary_string]
+	// params: [address, seed, solution_binary_string, timestamp]
 	var args []json.RawMessage
 	if err := json.Unmarshal(params, &args); err != nil || len(args) < 3 {
-		return nil, &rpcError{Code: -32602, Message: "params: [address, seed, solution_bits]"}
+		return nil, &rpcError{Code: -32602, Message: "params: [address, seed, solution_bits, timestamp?]"}
 	}
 
 	var addr string
@@ -517,6 +585,11 @@ func (r *RPCServer) handleSubmitWork(params json.RawMessage) (interface{}, *rpcE
 	var solutionStr string
 	if err := json.Unmarshal(args[2], &solutionStr); err != nil {
 		return nil, &rpcError{Code: -32602, Message: "invalid solution"}
+	}
+	// Optional timestamp from getwork.
+	var clientTimestamp uint32
+	if len(args) >= 4 {
+		json.Unmarshal(args[3], &clientTimestamp)
 	}
 
 	// Parse solution binary string to Assignment.
@@ -589,9 +662,20 @@ func (r *RPCServer) handleSubmitWork(params json.RawMessage) (interface{}, *rpcE
 	}
 	merkleRoot := block.ComputeMerkleRoot(txIDs)
 
-	now := uint32(time.Now().Unix())
+	now := clientTimestamp
+	if now == 0 {
+		now = uint32(time.Now().Unix())
+	}
 	if now <= tip.Timestamp {
 		now = tip.Timestamp + 1
+	}
+	// Don't allow timestamps too far in the future.
+	maxAllowed := uint32(time.Now().Unix()) + 300
+	if now > maxAllowed {
+		now = uint32(time.Now().Unix())
+		if now <= tip.Timestamp {
+			now = tip.Timestamp + 1
+		}
 	}
 
 	solBytes := sat.SerializeAssignment(solution)

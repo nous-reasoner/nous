@@ -1,25 +1,34 @@
 package main
 
 import (
-	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
+
+	"github.com/nous-reasoner/nous-miner-gui/backend/sat"
+	"github.com/nous-reasoner/nous-miner-gui/backend/solver"
 )
 
 type Config struct {
 	NodeURL    string
+	Address    string
+	SolverName string
+	// AI config (for ai-guided and pure-ai solvers)
 	AIProvider string
 	APIKey     string
 	Model      string
-	Address    string
 	BaseURL    string
+	// Custom solver
+	ScriptPath string
 }
 
 type RPCRequest struct {
@@ -42,87 +51,140 @@ type RPCError struct {
 func main() {
 	config := Config{}
 	flag.StringVar(&config.NodeURL, "node", "http://localhost:8332", "Node RPC URL")
-	flag.StringVar(&config.AIProvider, "ai", "openai", "AI provider")
-	flag.StringVar(&config.APIKey, "key", "", "API key")
-	flag.StringVar(&config.Model, "model", "gpt-4o", "Model name")
 	flag.StringVar(&config.Address, "address", "", "Mining address")
+	flag.StringVar(&config.SolverName, "solver", "probsat", "Solver: probsat, ai-guided, pure-ai, custom")
+	flag.StringVar(&config.AIProvider, "ai-provider", "anthropic", "AI provider: openai, anthropic")
+	flag.StringVar(&config.APIKey, "api-key", "", "AI API key")
+	flag.StringVar(&config.Model, "model", "claude-sonnet-4-6", "AI model name")
 	flag.StringVar(&config.BaseURL, "base-url", "", "Custom API base URL")
+	flag.StringVar(&config.ScriptPath, "script", "", "Custom solver script path")
 	flag.Parse()
 
 	if config.Address == "" {
 		log.Fatal("Mining address required")
 	}
 
-	log.Printf("Starting miner: node=%s, ai=%s, model=%s", config.NodeURL, config.AIProvider, config.Model)
+	// Configure solver.
+	solv, err := solver.Get(config.SolverName)
+	if err != nil {
+		log.Fatal(err)
+	}
+	configureSolver(solv, config)
+
+	log.Printf("Starting miner: node=%s, solver=%s", config.NodeURL, solv.Name())
 
 	for {
-		if err := mineBlock(config); err != nil {
+		if err := mineBlock(config, solv); err != nil {
 			log.Printf("Mining error: %v", err)
 			time.Sleep(10 * time.Second)
 		}
 	}
 }
 
-func mineBlock(config Config) error {
-	// Try seeds 0..99 per round.
-	for seed := uint64(0); seed < 100; seed++ {
-		// Get work from node (includes actual SAT formula).
-		workRaw, err := rpcCall(config.NodeURL, "getwork", []interface{}{seed})
+func configureSolver(s solver.Solver, config Config) {
+	switch v := s.(type) {
+	case *solver.AIGuidedSolver:
+		v.Provider = config.AIProvider
+		v.APIKey = config.APIKey
+		v.Model = config.Model
+		v.BaseURL = config.BaseURL
+		v.UseFallback = true
+	case *solver.PureAISolver:
+		v.Provider = config.AIProvider
+		v.APIKey = config.APIKey
+		v.Model = config.Model
+		v.BaseURL = config.BaseURL
+	case *solver.CustomSolver:
+		v.ScriptPath = config.ScriptPath
+	}
+}
+
+func mineBlock(config Config, solv solver.Solver) error {
+	// Single RPC call to get header template and mining info.
+	workRaw, err := rpcCall(config.NodeURL, "getwork", []interface{}{config.Address, uint64(0)})
+	if err != nil {
+		return fmt.Errorf("getwork: %w", err)
+	}
+
+	var work struct {
+		Height    uint64 `json:"height"`
+		PrevHash  string `json:"prev_hash"`
+		DiffBits  uint32 `json:"difficulty_bits"`
+		HeaderHex string `json:"header_hex"`
+	}
+	if err := json.Unmarshal(workRaw, &work); err != nil {
+		return fmt.Errorf("parse work: %w", err)
+	}
+
+	log.Printf("Mining block %d (difficulty: 0x%08x) with %s", work.Height, work.DiffBits, solv.Name())
+
+	headerTemplate, err := hex.DecodeString(work.HeaderHex)
+	if err != nil || len(headerTemplate) != 148 {
+		return fmt.Errorf("invalid header template")
+	}
+
+	prevHashBytes, err := hex.DecodeString(work.PrevHash)
+	if err != nil || len(prevHashBytes) != 32 {
+		return fmt.Errorf("invalid prev_hash")
+	}
+	var prevHash [32]byte
+	copy(prevHash[:], prevHashBytes)
+
+	target := compactToTarget(work.DiffBits)
+	// Extract timestamp from header template (offset 68, uint32 LE).
+	headerTimestamp := binary.LittleEndian.Uint32(headerTemplate[68:72])
+	satSolved := 0
+	startTime := time.Now()
+
+	for seed := uint64(0); seed < 10000; seed++ {
+		// Generate SAT formula locally.
+		satSeed := sat.MakeSATSeed(prevHash, seed)
+		formula := sat.GenerateFormula(satSeed, sat.SATVariables, sat.SATClausesRatio)
+
+		// Solve with configured solver.
+		solution, err := solv.Solve(formula, sat.SATVariables)
 		if err != nil {
-			return fmt.Errorf("getwork: %w", err)
-		}
-
-		var work struct {
-			Height        uint64 `json:"height"`
-			PrevHash      string `json:"prev_hash"`
-			DiffBits      uint32 `json:"difficulty_bits"`
-			Seed          uint64 `json:"seed"`
-			NVars         int    `json:"n_vars"`
-			NClauses      int    `json:"n_clauses"`
-			Formula       string `json:"formula"`
-		}
-		if err := json.Unmarshal(workRaw, &work); err != nil {
-			return fmt.Errorf("parse work: %w", err)
-		}
-
-		if seed == 0 {
-			log.Printf("Mining block %d (difficulty: 0x%08x)", work.Height, work.DiffBits)
-		}
-
-		// Ask AI to solve the actual SAT formula.
-		prompt := fmt.Sprintf(`Solve this 3-SAT problem. Find a variable assignment that satisfies ALL clauses.
-
-%s
-Return ONLY a %d-character binary string (0s and 1s) where position i is the value of variable i+1.
-No explanation, no formatting, just the binary string.`, work.Formula, work.NVars)
-
-		response, err := callAI(config, prompt)
-		if err != nil {
-			return fmt.Errorf("AI (seed=%d): %w", seed, err)
-		}
-
-		// Extract the 256-bit binary string from AI response.
-		solution := extractBinaryString(response, work.NVars)
-		if solution == "" {
-			log.Printf("Seed %d: AI did not return valid %d-bit binary string, trying next seed", seed, work.NVars)
 			continue
 		}
 
-		log.Printf("Seed %d: solution=%s...", seed, solution[:32])
+		if !sat.Verify(formula, solution) {
+			continue
+		}
+		satSolved++
 
-		// Submit work to node.
+		// Compute solution hash.
+		solBytes := sat.SerializeAssignment(solution)
+		solHash := sha256.Sum256(solBytes)
+
+		// Build header and check PoW.
+		header := make([]byte, 148)
+		copy(header, headerTemplate)
+		binary.LittleEndian.PutUint64(header[76:84], seed)
+		copy(header[84:116], solHash[:])
+
+		blockHash := doubleSha256(header)
+		if !meetsTarget(blockHash, target) {
+			if satSolved%20 == 0 {
+				elapsed := time.Since(startTime).Seconds()
+				rate := float64(satSolved) / elapsed
+				log.Printf("Progress: %d SAT solved (%.1f/s), seed=%d, no PoW match yet", satSolved, rate, seed)
+			}
+			continue
+		}
+
+		// PoW met — submit.
+		solutionStr := assignmentToString(solution)
+		log.Printf("Seed %d: SAT solved + PoW met! Submitting...", seed)
+
 		result, err := rpcCall(config.NodeURL, "submitwork", []interface{}{
 			config.Address,
 			seed,
-			solution,
+			solutionStr,
+			headerTimestamp,
 		})
 		if err != nil {
-			if strings.Contains(err.Error(), "does not meet difficulty") ||
-				strings.Contains(err.Error(), "does not satisfy") {
-				log.Printf("Seed %d: %v, trying next seed", seed, err)
-				continue
-			}
-			return fmt.Errorf("submitwork: %w", err)
+			log.Printf("Seed %d: submit error: %v", seed, err)
+			continue
 		}
 
 		var submitResult struct {
@@ -134,162 +196,46 @@ No explanation, no formatting, just the binary string.`, work.Formula, work.NVar
 		return nil
 	}
 
-	log.Printf("No valid block found in 100 seeds, retrying...")
+	elapsed := time.Since(startTime).Seconds()
+	log.Printf("Round: %d SAT solved in %.1fs (%.1f/s), no block", satSolved, elapsed, float64(satSolved)/elapsed)
 	return nil
 }
 
-// extractBinaryString finds the first N-length binary string in the AI response.
-func extractBinaryString(text string, n int) string {
-	// Try to find an exact N-length binary string.
-	pattern := fmt.Sprintf(`[01]{%d}`, n)
-	re := regexp.MustCompile(pattern)
-	match := re.FindString(text)
-	if match != "" {
-		return match
+func compactToTarget(bits uint32) *big.Int {
+	exponent := bits >> 24
+	mantissa := int64(bits & 0x007FFFFF)
+	if bits&0x00800000 != 0 {
+		mantissa = -mantissa
 	}
+	target := big.NewInt(mantissa)
+	if exponent <= 3 {
+		target.Rsh(target, uint(8*(3-exponent)))
+	} else {
+		target.Lsh(target, uint(8*(exponent-3)))
+	}
+	return target
+}
 
-	// Fallback: collect all 0s and 1s from the text and take the first N.
-	var bits strings.Builder
-	for _, ch := range text {
-		if ch == '0' || ch == '1' {
-			bits.WriteRune(ch)
-			if bits.Len() >= n {
-				return bits.String()[:n]
-			}
+func meetsTarget(hash [32]byte, target *big.Int) bool {
+	hashInt := new(big.Int).SetBytes(hash[:])
+	return hashInt.Cmp(target) <= 0
+}
+
+func doubleSha256(data []byte) [32]byte {
+	first := sha256.Sum256(data)
+	return sha256.Sum256(first[:])
+}
+
+func assignmentToString(a sat.Assignment) string {
+	var b strings.Builder
+	for _, v := range a {
+		if v {
+			b.WriteByte('1')
+		} else {
+			b.WriteByte('0')
 		}
 	}
-	return ""
-}
-
-func callAI(config Config, prompt string) (string, error) {
-	switch config.AIProvider {
-	case "openai":
-		return callOpenAI(config, prompt)
-	case "anthropic":
-		return callAnthropic(config, prompt)
-	case "ollama":
-		return callOllama(config, prompt)
-	default:
-		return "", fmt.Errorf("unknown AI provider: %s", config.AIProvider)
-	}
-}
-
-func callOpenAI(config Config, prompt string) (string, error) {
-	reqBody, _ := json.Marshal(map[string]interface{}{
-		"model": config.Model,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
-		"temperature": 0.9,
-	})
-
-	baseURL := config.BaseURL
-	if baseURL == "" {
-		baseURL = "https://api.openai.com"
-	}
-	req, _ := http.NewRequest("POST", baseURL+"/v1/chat/completions", bytes.NewBuffer(reqBody))
-	req.Header.Set("Authorization", "Bearer "+config.APIKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", err
-	}
-
-	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("no response from OpenAI")
-	}
-
-	return result.Choices[0].Message.Content, nil
-}
-
-func callAnthropic(config Config, prompt string) (string, error) {
-	reqBody, _ := json.Marshal(map[string]interface{}{
-		"model": config.Model,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
-		"max_tokens": 1024,
-	})
-
-	baseURL := config.BaseURL
-	if baseURL == "" {
-		baseURL = "https://api.anthropic.com"
-	}
-	req, _ := http.NewRequest("POST", baseURL+"/v1/messages", bytes.NewBuffer(reqBody))
-	req.Header.Set("x-api-key", config.APIKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Anthropic API error (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	var result struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", err
-	}
-
-	if len(result.Content) == 0 {
-		return "", fmt.Errorf("no response from Anthropic")
-	}
-
-	return result.Content[0].Text, nil
-}
-
-func callOllama(config Config, prompt string) (string, error) {
-	baseURL := config.BaseURL
-	if baseURL == "" {
-		baseURL = "http://localhost:11434"
-	}
-	reqBody, _ := json.Marshal(map[string]interface{}{
-		"model":  config.Model,
-		"prompt": prompt,
-		"stream": false,
-	})
-
-	resp, err := http.Post(baseURL+"/api/generate", "application/json", bytes.NewBuffer(reqBody))
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Response string `json:"response"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
-	}
-
-	return result.Response, nil
+	return b.String()
 }
 
 func rpcCall(url, method string, params []interface{}) (json.RawMessage, error) {
@@ -305,7 +251,7 @@ func rpcCall(url, method string, params []interface{}) (json.RawMessage, error) 
 		rpcURL = url + "/rpc"
 	}
 
-	resp, err := http.Post(rpcURL, "application/json", bytes.NewBuffer(reqBody))
+	resp, err := http.Post(rpcURL, "application/json", strings.NewReader(string(reqBody)))
 	if err != nil {
 		return nil, err
 	}

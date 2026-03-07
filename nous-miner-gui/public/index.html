@@ -41,10 +41,7 @@
       color: #e0e0e0;
       font-size: 14px;
     }
-    input:focus, select:focus {
-      outline: none;
-      border-color: #00ff88;
-    }
+    input:focus, select:focus { outline: none; border-color: #00ff88; }
     button {
       padding: 12px 24px;
       background: #00ff88;
@@ -56,11 +53,7 @@
       font-size: 14px;
     }
     button:hover { background: #00dd77; }
-    button:disabled {
-      background: #333;
-      color: #666;
-      cursor: not-allowed;
-    }
+    button:disabled { background: #333; color: #666; cursor: not-allowed; }
     .status {
       display: flex;
       align-items: center;
@@ -70,44 +63,47 @@
       border-radius: 4px;
       margin-bottom: 15px;
     }
-    .status-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: #666;
-    }
+    .status-dot { width: 12px; height: 12px; border-radius: 50%; background: #666; }
     .status-dot.active { background: #00ff88; }
     .log {
       background: #0a0a0a;
       border: 1px solid #333;
       border-radius: 4px;
       padding: 15px;
-      height: 200px;
+      height: 250px;
       overflow-y: auto;
       font-family: 'Courier New', monospace;
       font-size: 12px;
       color: #999;
     }
-    .stats {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 15px;
-    }
-    .stat-card {
-      background: #0a0a0a;
-      padding: 15px;
-      border-radius: 4px;
-    }
-    .stat-label {
+    .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
+    .stat-card { background: #0a0a0a; padding: 15px; border-radius: 4px; }
+    .stat-label { color: #666; font-size: 12px; margin-bottom: 5px; }
+    .stat-value { color: #00ff88; font-size: 24px; font-weight: 600; }
+    .solver-desc {
       color: #666;
-      font-size: 12px;
-      margin-bottom: 5px;
+      font-size: 11px;
+      margin-top: 5px;
+      font-style: italic;
     }
-    .stat-value {
-      color: #00ff88;
-      font-size: 24px;
-      font-weight: 600;
+    .solver-config {
+      margin-top: 10px;
+      padding: 12px;
+      background: #0a0a0a;
+      border-radius: 4px;
+      border: 1px solid #222;
     }
+    .solver-config .form-group { margin-bottom: 10px; }
+    .solver-config .form-group:last-child { margin-bottom: 0; }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #999;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .checkbox-label input[type="checkbox"] { width: auto; }
   </style>
 </head>
 <body>
@@ -128,37 +124,58 @@
         <input type="text" id="address" placeholder="nous1q..." />
       </div>
       <div class="form-group">
-        <label>AI Provider</label>
-        <select id="aiProvider" onchange="onProviderChange()">
-          <option value="openai">OpenAI</option>
-          <option value="anthropic">Anthropic</option>
-          <option value="ollama">Ollama (Local)</option>
+        <label>Solver</label>
+        <select id="solver" onchange="updateSolverUI()">
+          <option value="probsat">ProbSAT (Fast, recommended)</option>
+          <option value="ai-guided">AI-Guided ProbSAT (Experimental)</option>
+          <option value="pure-ai">Pure AI (Educational only)</option>
+          <option value="custom">Custom Solver (Advanced)</option>
         </select>
+        <div class="solver-desc" id="solverDesc">Fast stochastic local search — CPU-only, ~10 solves/sec</div>
       </div>
-      <div class="form-group">
-        <label>API Base URL (leave default for official, or enter proxy URL)</label>
-        <input type="text" id="apiBaseUrl" placeholder="https://api.anthropic.com" />
+
+      <!-- AI Config (for ai-guided and pure-ai) -->
+      <div id="aiConfig" style="display:none;">
+        <div class="solver-config">
+          <div class="form-group">
+            <label>AI Provider</label>
+            <select id="aiProvider">
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>API Base URL (optional, for proxies)</label>
+            <input type="text" id="baseUrl" placeholder="https://api.anthropic.com" />
+          </div>
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" id="apiKey" placeholder="sk-..." />
+          </div>
+          <div class="form-group">
+            <label>Model</label>
+            <input type="text" id="aiModel" value="claude-sonnet-4-6" />
+          </div>
+          <div id="fallbackOption" class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="useFallback" checked />
+              Fallback to ProbSAT if AI fails
+            </label>
+          </div>
+        </div>
       </div>
-      <div class="form-group">
-        <label>API Key (leave empty for Ollama)</label>
-        <input type="password" id="apiKey" placeholder="sk-..." />
-      </div>
-      <div class="form-group">
-        <label>Model</label>
-        <select id="model">
-          <optgroup label="Anthropic">
-            <option value="claude-sonnet-4-6" selected>Claude Sonnet 4.6</option>
-            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-          </optgroup>
-          <optgroup label="OpenAI">
-            <option value="gpt-4o">gpt-4o</option>
-            <option value="gpt-4o-mini">gpt-4o-mini</option>
-          </optgroup>
-          <optgroup label="Ollama">
-            <option value="llama3">Llama 3</option>
-            <option value="mistral">Mistral</option>
-          </optgroup>
-        </select>
+
+      <!-- Custom Solver Config -->
+      <div id="customConfig" style="display:none;">
+        <div class="solver-config">
+          <div class="form-group">
+            <label>Solver Script Path</label>
+            <input type="text" id="scriptPath" placeholder="/path/to/solver.py" />
+          </div>
+          <div style="color:#666; font-size:11px;">
+            Script reads DIMACS CNF from stdin, outputs 256 binary digits to stdout
+          </div>
+        </div>
       </div>
     </div>
 
@@ -170,8 +187,12 @@
       </div>
       <div class="stats">
         <div class="stat-card">
-          <div class="stat-label">Balance</div>
+          <div class="stat-label">Available Balance</div>
           <div class="stat-value" id="balance">0.00</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Immature (Mining)</div>
+          <div class="stat-value" id="immature" style="color:#ffaa00;">0.00</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Blocks Found</div>
@@ -195,25 +216,35 @@
     let isMining = false;
     let blocksFound = 0;
 
-    function onProviderChange() {
-      const provider = document.getElementById('aiProvider').value;
-      const baseUrlInput = document.getElementById('apiBaseUrl');
-      const defaults = {
-        openai: 'https://api.openai.com',
-        anthropic: 'https://api.anthropic.com',
-        ollama: 'http://localhost:11434'
-      };
-      baseUrlInput.placeholder = defaults[provider] || '';
+    const solverDescs = {
+      'probsat': 'Fast stochastic local search — CPU-only, ~10 solves/sec',
+      'ai-guided': 'AI suggests initial assignment, ProbSAT refines — requires API key',
+      'pure-ai': 'AI attempts direct solve — very slow, nearly 0% success rate',
+      'custom': 'Run your own solver script — reads DIMACS from stdin'
+    };
+
+    function updateSolverUI() {
+      const solver = document.getElementById('solver').value;
+      document.getElementById('solverDesc').textContent = solverDescs[solver] || '';
+      document.getElementById('aiConfig').style.display =
+        (solver === 'ai-guided' || solver === 'pure-ai') ? 'block' : 'none';
+      document.getElementById('customConfig').style.display =
+        solver === 'custom' ? 'block' : 'none';
+      document.getElementById('fallbackOption').style.display =
+        solver === 'ai-guided' ? 'block' : 'none';
     }
 
     async function startMining() {
+      const solver = document.getElementById('solver').value;
       const config = {
         nodeUrl: document.getElementById('nodeUrl').value,
         address: document.getElementById('address').value,
+        solver: solver,
         aiProvider: document.getElementById('aiProvider').value,
-        apiBaseUrl: document.getElementById('apiBaseUrl').value,
+        baseUrl: document.getElementById('baseUrl').value,
         apiKey: document.getElementById('apiKey').value,
-        model: document.getElementById('model').value
+        model: document.getElementById('aiModel').value,
+        scriptPath: document.getElementById('scriptPath').value
       };
 
       if (!config.address) {
@@ -223,13 +254,13 @@
 
       const result = await ipcRenderer.invoke('start-mining', config);
       if (result.error) {
-        addLog(`Error: ${result.error}`);
+        addLog('Error: ' + result.error);
         return;
       }
 
       isMining = true;
       updateUI();
-      addLog('Mining started...');
+      addLog('Mining started with ' + solver + ' solver...');
     }
 
     async function stopMining() {
@@ -249,7 +280,7 @@
     function addLog(text) {
       const log = document.getElementById('log');
       const time = new Date().toLocaleTimeString();
-      log.innerHTML += `[${time}] ${text}\n`;
+      log.innerHTML += '[' + time + '] ' + text + '\n';
       log.scrollTop = log.scrollHeight;
     }
 
@@ -258,27 +289,29 @@
       if (data.includes('Block found')) {
         blocksFound++;
         document.getElementById('blocksFound').textContent = blocksFound;
+        // Refresh balance after finding a block.
+        fetchBalance();
       }
     });
+
+    async function fetchBalance() {
+      const address = document.getElementById('address').value;
+      const nodeUrl = document.getElementById('nodeUrl').value;
+      if (address && nodeUrl) {
+        try {
+          const result = await ipcRenderer.invoke('get-balance', { nodeUrl, address });
+          document.getElementById('balance').textContent = (result.balance / 100000000).toFixed(8);
+          document.getElementById('immature').textContent = (result.immature / 100000000).toFixed(8);
+        } catch (e) {}
+      }
+    }
 
     ipcRenderer.on('miner-stopped', () => {
       isMining = false;
       updateUI();
     });
 
-    // Update balance every 30s
-    setInterval(async () => {
-      const address = document.getElementById('address').value;
-      const nodeUrl = document.getElementById('nodeUrl').value;
-      if (address && nodeUrl) {
-        try {
-          const balance = await ipcRenderer.invoke('get-balance', { nodeUrl, address });
-          document.getElementById('balance').textContent = (balance.balance / 100000000).toFixed(8);
-        } catch (e) {
-          console.error('Failed to fetch balance:', e);
-        }
-      }
-    }, 30000);
+    setInterval(fetchBalance, 30000);
   </script>
 </body>
 </html>
