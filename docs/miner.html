@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOUS — Browser Miner</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 700px;
+            width: 100%;
+        }
+        h1 {
+            font-size: 2.5em;
+            color: #ffffff;
+            text-align: center;
+            letter-spacing: 0.3em;
+            margin-bottom: 5px;
+        }
+        .tagline {
+            text-align: center;
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #333;
+            border-radius: 4px;
+        }
+        .section h2 {
+            color: #aaa;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            color: #888;
+            font-size: 0.85em;
+            margin-bottom: 5px;
+            margin-top: 12px;
+        }
+        label:first-child { margin-top: 0; }
+        input {
+            width: 100%;
+            padding: 10px 12px;
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 3px;
+            color: #e0e0e0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        input:focus {
+            outline: none;
+            border-color: #555;
+        }
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        button {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #333;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        #startBtn {
+            background: #1a3a1a;
+            color: #4ade80;
+            border-color: #2d5a2d;
+        }
+        #startBtn:hover { background: #2d5a2d; }
+        #startBtn:disabled {
+            background: #1a1a1a;
+            color: #555;
+            border-color: #333;
+            cursor: not-allowed;
+        }
+        #stopBtn {
+            background: #3a1a1a;
+            color: #f87171;
+            border-color: #5a2d2d;
+        }
+        #stopBtn:hover { background: #5a2d2d; }
+        #stopBtn:disabled {
+            background: #1a1a1a;
+            color: #555;
+            border-color: #333;
+            cursor: not-allowed;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        .stat {
+            padding: 12px;
+            background: #111;
+            border-radius: 3px;
+            text-align: center;
+        }
+        .stat .value {
+            font-size: 1.4em;
+            color: #7aa2f7;
+            margin-bottom: 4px;
+        }
+        .stat .label {
+            font-size: 0.75em;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        #log {
+            background: #050505;
+            border: 1px solid #222;
+            border-radius: 3px;
+            padding: 12px;
+            height: 250px;
+            overflow-y: auto;
+            font-size: 0.8em;
+            line-height: 1.6;
+            color: #888;
+        }
+        #log .info { color: #888; }
+        #log .success { color: #4ade80; }
+        #log .error { color: #f87171; }
+        #log .progress { color: #7aa2f7; }
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .status-indicator.idle { background: #555; }
+        .status-indicator.loading { background: #f59e0b; animation: pulse 1s infinite; }
+        .status-indicator.mining { background: #4ade80; animation: pulse 1.5s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #444;
+            font-size: 0.8em;
+        }
+        a { color: #7aa2f7; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .note {
+            font-size: 0.8em;
+            color: #555;
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>NOUS</h1>
+        <p class="tagline"><span class="status-indicator idle" id="statusDot"></span>Browser Miner</p>
+
+        <div class="section">
+            <h2>Configuration</h2>
+            <label>Node URL</label>
+            <input type="text" id="nodeUrl" value="http://rpc.nouschain.org/api" placeholder="http://rpc.nouschain.org/api">
+            <label>Mining Address</label>
+            <input type="text" id="address" placeholder="nous1..." >
+            <p class="note">Your address only. Private key never leaves your device.</p>
+            <div class="btn-row">
+                <button id="startBtn" disabled>Loading WASM...</button>
+                <button id="stopBtn" disabled>Stop</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Statistics</h2>
+            <div class="stats-grid">
+                <div class="stat">
+                    <div class="value" id="statRate">0.0</div>
+                    <div class="label">SAT/sec</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="statSolved">0</div>
+                    <div class="label">SAT Solved</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="statBlocks">0</div>
+                    <div class="label">Blocks Mined</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="statHeight">-</div>
+                    <div class="label">Block Height</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Log</h2>
+            <div id="log"></div>
+        </div>
+
+        <div class="footer">
+            <p><a href="/">nouschain.org</a> &middot; <a href="https://github.com/nous-reasoner/nous">GitHub</a> &middot; <a href="https://discord.gg/SzKUuEjuQW">Discord</a></p>
+            <p style="margin-top: 8px;">Mining = Reasoning. Cogito, ergo sum.</p>
+        </div>
+    </div>
+
+    <script src="wasm_exec.js"></script>
+    <script>
+        const logEl = document.getElementById('log');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDot = document.getElementById('statusDot');
+        let statsInterval = null;
+
+        function appendLog(msg, cls) {
+            const line = document.createElement('div');
+            line.className = cls || 'info';
+            const time = new Date().toLocaleTimeString();
+            line.textContent = `[${time}] ${msg}`;
+            logEl.appendChild(line);
+            logEl.scrollTop = logEl.scrollHeight;
+            // Keep last 200 lines.
+            while (logEl.children.length > 200) {
+                logEl.removeChild(logEl.firstChild);
+            }
+        }
+
+        // Called by Go WASM.
+        window.postMinerLog = function(msg) {
+            let cls = 'info';
+            if (msg.includes('Block found') || msg.includes('Block mined')) cls = 'success';
+            else if (msg.includes('Error') || msg.includes('error')) cls = 'error';
+            else if (msg.includes('Progress') || msg.includes('Round')) cls = 'progress';
+            appendLog(msg, cls);
+        };
+
+        function updateStats() {
+            if (typeof nousMiner === 'undefined' || !nousMiner.getStats) return;
+            try {
+                const stats = JSON.parse(nousMiner.getStats());
+                document.getElementById('statRate').textContent = stats.hash_rate.toFixed(1);
+                document.getElementById('statSolved').textContent = stats.sat_solved.toLocaleString();
+                document.getElementById('statBlocks').textContent = stats.blocks_mined;
+                document.getElementById('statHeight').textContent = stats.height || '-';
+            } catch(e) {}
+        }
+
+        async function loadWasm() {
+            appendLog('Loading WASM miner...');
+            statusDot.className = 'status-indicator loading';
+            const go = new Go();
+            try {
+                const result = await WebAssembly.instantiateStreaming(
+                    fetch('miner.wasm'), go.importObject
+                );
+                go.run(result.instance);
+                startBtn.textContent = 'Start Mining';
+                startBtn.disabled = false;
+                appendLog('WASM loaded. Ready to mine.', 'success');
+                statusDot.className = 'status-indicator idle';
+            } catch(e) {
+                appendLog('Failed to load WASM: ' + e.message, 'error');
+                startBtn.textContent = 'WASM Failed';
+            }
+        }
+
+        startBtn.addEventListener('click', () => {
+            const nodeUrl = document.getElementById('nodeUrl').value.trim();
+            const address = document.getElementById('address').value.trim();
+            if (!address) {
+                appendLog('Please enter a mining address', 'error');
+                return;
+            }
+            if (!address.startsWith('nous1')) {
+                appendLog('Address should start with "nous1"', 'error');
+                return;
+            }
+            const result = nousMiner.start(nodeUrl, address);
+            if (result === 'started') {
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                statusDot.className = 'status-indicator mining';
+                statsInterval = setInterval(updateStats, 2000);
+            } else {
+                appendLog('Start failed: ' + result, 'error');
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            nousMiner.stop();
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            statusDot.className = 'status-indicator idle';
+            if (statsInterval) {
+                clearInterval(statsInterval);
+                statsInterval = null;
+            }
+            updateStats();
+        });
+
+        loadWasm();
+    </script>
+</body>
+</html>
