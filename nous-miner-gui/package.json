@@ -18,13 +18,19 @@
   "build": {
     "appId": "org.nouschain.miner",
     "productName": "NOUS Miner",
-    "files": ["src/**/*", "public/**/*", "backend/miner"],
+    "files": ["src/**/*", "public/**/*", "backend/miner", "backend/miner.exe"],
+    "asarUnpack": ["backend/miner", "backend/miner.exe"],
     "mac": {
       "category": "public.app-category.finance",
       "target": ["dmg", "zip"]
     },
     "win": {
       "target": ["nsis", "portable"]
+    },
+    "nsis": {
+      "oneClick": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     },
     "linux": {
       "target": ["AppImage", "deb"]

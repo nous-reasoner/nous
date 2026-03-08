@@ -28,7 +28,12 @@ function createWindow() {
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
-  if (minerProcess) minerProcess.kill();
+  if (minerProcess) {
+    minerProcess.removeAllListeners();
+    minerProcess.kill();
+    minerProcess = null;
+  }
+  mainWindow = null;
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -65,24 +70,24 @@ ipcMain.handle('start-mining', async (event, config) => {
   minerProcess.stdout.on('data', (data) => {
     const log = data.toString();
     console.log('[Miner]', log);
-    mainWindow.webContents.send('miner-log', log);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('miner-log', log);
   });
 
   minerProcess.stderr.on('data', (data) => {
     const log = data.toString();
     console.error('[Miner Error]', log);
-    mainWindow.webContents.send('miner-log', log);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('miner-log', log);
   });
 
   minerProcess.on('error', (err) => {
     console.error('[Miner Process Error]', err);
-    mainWindow.webContents.send('miner-log', '[FATAL] ' + err.message);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('miner-log', '[FATAL] ' + err.message);
     minerProcess = null;
   });
 
   minerProcess.on('close', () => {
     minerProcess = null;
-    mainWindow.webContents.send('miner-stopped');
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('miner-stopped');
   });
 
   return { success: true };
