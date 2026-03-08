@@ -120,7 +120,8 @@
 
 <script>
 const RPC_URL = window.location.origin + '/api';
-const BATCH = 50; // parallel requests per batch
+const BATCH = 50;
+const CACHE_KEY = 'nous_leaderboard_v1';
 
 async function rpc(method, params = []) {
     const res = await fetch(RPC_URL, {
@@ -131,6 +132,19 @@ async function rpc(method, params = []) {
     const json = await res.json();
     if (json.error) throw new Error(json.error.message);
     return json.result;
+}
+
+function saveCache(height, minerMap) {
+    try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ height, minerMap }));
+    } catch(e) {}
+}
+
+function loadCache() {
+    try {
+        const raw = localStorage.getItem(CACHE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch(e) { return null; }
 }
 
 function formatNOUS(blocks) {
@@ -164,6 +178,64 @@ function rankSymbol(rank) {
     return '#' + rank;
 }
 
+function renderTable(minerMap, height, totalNous) {
+    const sorted = Object.entries(minerMap)
+        .map(([addr, d]) => ({ addr, ...d }))
+        .sort((a, b) => b.blocks - a.blocks);
+
+    document.getElementById('totalBlocks').textContent = height.toLocaleString();
+    document.getElementById('totalMiners').textContent = sorted.length;
+    document.getElementById('totalSupply').textContent = totalNous.toLocaleString() + ' NOUS';
+    document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+
+    // Podium top 3
+    const top3 = sorted.slice(0, 3);
+    const podiumOrder = top3.length >= 3 ? [top3[1], top3[0], top3[2]] : top3;
+    const podiumRanks = top3.length >= 3 ? [2, 1, 3] : [1, 2, 3];
+    document.getElementById('podium').innerHTML = podiumOrder.map((m, i) => {
+        if (!m) return '<div></div>';
+        const rank = podiumRanks[i];
+        const share = ((m.blocks / height) * 100).toFixed(1);
+        return `
+        <a href="/explorer.html#address/${m.addr}"
+           class="bg-card border border-border rounded p-4 text-center hover:border-nous/40 transition block">
+            <div class="text-3xl mb-2">${rankSymbol(rank)}</div>
+            <div class="${rankColor(rank)} font-bold text-lg mb-1">#${rank}</div>
+            <div class="font-mono text-xs text-gray-400 mb-2 truncate">${shortAddr(m.addr)}</div>
+            <div class="text-nous font-bold text-xl">${m.blocks.toLocaleString()}</div>
+            <div class="text-gray-500 text-xs">blocks · ${share}%</div>
+            <div class="text-gray-600 text-xs mt-1">${timeAgo(m.lastTs)}</div>
+        </a>`;
+    }).join('');
+
+    // Full table
+    document.getElementById('leaderboardRows').innerHTML = sorted.map((m, i) => {
+        const rank = i + 1;
+        const share = ((m.blocks / height) * 100).toFixed(2);
+        const barWidth = Math.max(2, Math.round(m.blocks / sorted[0].blocks * 100));
+        return `
+        <a href="/explorer.html#address/${m.addr}"
+           class="grid grid-cols-12 gap-2 px-4 py-3 hover:bg-bg transition items-center group">
+            <div class="col-span-1 font-bold ${rankColor(rank)} text-sm">${rank <= 3 ? rankSymbol(rank) : '#' + rank}</div>
+            <div class="col-span-5">
+                <div class="font-mono text-xs text-gray-300 group-hover:text-nous transition truncate">${m.addr}</div>
+                <div class="mt-1 h-0.5 bg-border rounded overflow-hidden">
+                    <div class="h-full bg-nous/40 rounded" style="width:${barWidth}%"></div>
+                </div>
+            </div>
+            <div class="col-span-2 text-right">
+                <span class="text-white font-bold">${m.blocks.toLocaleString()}</span>
+                <span class="text-gray-600 text-xs ml-1">blks</span>
+            </div>
+            <div class="col-span-2 text-right text-nous font-bold text-sm">${m.blocks.toLocaleString()}</div>
+            <div class="col-span-2 text-right">
+                <div class="text-gray-400 text-sm">${share}%</div>
+                <div class="text-gray-600 text-xs">${timeAgo(m.lastTs)}</div>
+            </div>
+        </a>`;
+    }).join('');
+}
+
 async function loadLeaderboard() {
     document.getElementById('loadingSection').classList.remove('hidden');
     document.getElementById('leaderboardSection').classList.add('hidden');
@@ -178,12 +250,28 @@ async function loadLeaderboard() {
         document.getElementById('statHeight').textContent = height.toLocaleString();
         document.getElementById('totalSupply').textContent = supply.actual_nous.toLocaleString() + ' NOUS';
 
-        // Scan all blocks in batches
-        const minerMap = {}; // address -> { blocks, lastTs, lastHeight }
-        let scanned = 0;
-        const total = height + 1; // block 0 to height
+        // Load cache — only fetch blocks newer than what's cached
+        const cache = loadCache();
+        const minerMap = (cache && cache.minerMap) ? cache.minerMap : {};
+        const scanFrom = cache ? cache.height + 1 : 0;
+        const newBlocks = height - scanFrom + 1;
 
-        for (let start = 0; start <= height; start += BATCH) {
+        if (scanFrom > height) {
+            // Already up to date — render immediately from cache
+            renderTable(minerMap, height, supply.actual_nous);
+            document.getElementById('loadingSection').classList.add('hidden');
+            document.getElementById('leaderboardSection').classList.remove('hidden');
+            document.getElementById('refreshNote').textContent = '数据来自缓存，自动每 60 秒更新';
+            return;
+        }
+
+        const total = newBlocks;
+        let scanned = 0;
+
+        document.getElementById('loadingLabel').textContent =
+            cache ? `更新新区块中... (从 ${scanFrom} 到 ${height})` : 'Scanning blockchain...';
+
+        for (let start = scanFrom; start <= height; start += BATCH) {
             const end = Math.min(start + BATCH - 1, height);
             const promises = [];
             for (let h = start; h <= end; h++) {
@@ -192,7 +280,7 @@ async function loadLeaderboard() {
             const blocks = await Promise.all(promises);
 
             for (const b of blocks) {
-                if (!b.miner_address) continue; // genesis
+                if (!b.miner_address) continue;
                 const addr = b.miner_address;
                 if (!minerMap[addr]) {
                     minerMap[addr] = { blocks: 0, lastTs: 0, lastHeight: 0 };
@@ -209,73 +297,16 @@ async function loadLeaderboard() {
             document.getElementById('progressBar').style.width = pct + '%';
             document.getElementById('loadingPct').textContent = pct + '%';
             document.getElementById('loadingLabel').textContent =
-                `Scanning blockchain... (${scanned.toLocaleString()} / ${total.toLocaleString()})`;
+                `扫描区块中... (${(scanFrom + scanned - 1).toLocaleString()} / ${height.toLocaleString()})`;
         }
 
-        // Sort by blocks desc
-        const sorted = Object.entries(minerMap)
-            .map(([addr, d]) => ({ addr, ...d }))
-            .sort((a, b) => b.blocks - a.blocks);
+        // Save to cache
+        saveCache(height, minerMap);
 
-        // Update stats
-        document.getElementById('totalBlocks').textContent = height.toLocaleString();
-        document.getElementById('totalMiners').textContent = sorted.length;
-        document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
-
-        // Podium (top 3)
-        const podiumEl = document.getElementById('podium');
-        const top3 = sorted.slice(0, 3);
-        const podiumOrder = top3.length >= 3 ? [top3[1], top3[0], top3[2]] : top3;
-        const podiumHeights = top3.length >= 3 ? ['h-24', 'h-32', 'h-20'] : ['h-32', 'h-24', 'h-20'];
-        const podiumRanks = top3.length >= 3 ? [2, 1, 3] : [1, 2, 3];
-
-        podiumEl.innerHTML = podiumOrder.map((m, i) => {
-            if (!m) return '<div></div>';
-            const rank = podiumRanks[i];
-            const share = ((m.blocks / height) * 100).toFixed(1);
-            return `
-            <a href="/explorer.html#address/${m.addr}" onclick="event.stopPropagation()"
-               class="bg-card border border-border rounded p-4 text-center hover:border-nous/40 transition cursor-pointer block">
-                <div class="text-3xl mb-2">${rankSymbol(rank)}</div>
-                <div class="${rankColor(rank)} font-bold text-lg mb-1">#${rank}</div>
-                <div class="font-mono text-xs text-gray-400 mb-2 truncate">${shortAddr(m.addr)}</div>
-                <div class="text-nous font-bold text-xl">${m.blocks.toLocaleString()}</div>
-                <div class="text-gray-500 text-xs">blocks · ${share}%</div>
-                <div class="text-gray-600 text-xs mt-1">${timeAgo(m.lastTs)}</div>
-            </a>`;
-        }).join('');
-
-        // Full table
-        const rowsEl = document.getElementById('leaderboardRows');
-        rowsEl.innerHTML = sorted.map((m, i) => {
-            const rank = i + 1;
-            const share = ((m.blocks / height) * 100).toFixed(2);
-            const barWidth = Math.max(2, Math.round(m.blocks / sorted[0].blocks * 100));
-            return `
-            <a href="/explorer.html#address/${m.addr}" onclick="event.stopPropagation()"
-               class="grid grid-cols-12 gap-2 px-4 py-3 hover:bg-bg transition cursor-pointer items-center group">
-                <div class="col-span-1 font-bold ${rankColor(rank)} text-sm">${rank <= 3 ? rankSymbol(rank) : '#' + rank}</div>
-                <div class="col-span-5">
-                    <div class="font-mono text-xs text-gray-300 group-hover:text-nous transition truncate">${m.addr}</div>
-                    <div class="mt-1 h-0.5 bg-border rounded overflow-hidden">
-                        <div class="h-full bg-nous/40 rounded" style="width:${barWidth}%"></div>
-                    </div>
-                </div>
-                <div class="col-span-2 text-right">
-                    <span class="text-white font-bold">${m.blocks.toLocaleString()}</span>
-                    <span class="text-gray-600 text-xs ml-1">blks</span>
-                </div>
-                <div class="col-span-2 text-right text-nous font-bold text-sm">${m.blocks.toLocaleString()}</div>
-                <div class="col-span-2 text-right">
-                    <div class="text-gray-400 text-sm">${share}%</div>
-                    <div class="text-gray-600 text-xs">${timeAgo(m.lastTs)}</div>
-                </div>
-            </a>`;
-        }).join('');
-
+        renderTable(minerMap, height, supply.actual_nous);
         document.getElementById('loadingSection').classList.add('hidden');
         document.getElementById('leaderboardSection').classList.remove('hidden');
-        document.getElementById('refreshNote').textContent = '自动每 60 秒刷新';
+        document.getElementById('refreshNote').textContent = '已缓存，自动每 60 秒增量更新';
 
     } catch (e) {
         document.getElementById('loadingLabel').textContent = '加载失败: ' + e.message;
