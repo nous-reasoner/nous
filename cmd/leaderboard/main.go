@@ -67,11 +67,23 @@ type leaderboardData struct {
 	Miners      []minerStat `json:"miners"`
 }
 
+type diffPoint struct {
+	Height     int   `json:"h"`
+	Difficulty int64 `json:"d"`
+	Timestamp  int64 `json:"t"`
+}
+
+type diffChartData struct {
+	UpdatedAt int64       `json:"updated_at"`
+	Points    []diffPoint `json:"points"`
+}
+
 // state kept in memory across update cycles
 var (
-	mu       sync.Mutex
-	minerMap = map[string]*minerStat{}
-	lastScan = -1 // last block height that was scanned
+	mu         sync.Mutex
+	minerMap   = map[string]*minerStat{}
+	diffPoints []diffPoint // all blocks, for chart
+	lastScan   = -1        // last block height that was scanned
 )
 
 const batchSize = 50
@@ -90,8 +102,9 @@ func scanNewBlocks(height int) error {
 		}
 
 		type blockResult struct {
-			Height       int    `json:"height"`
-			Timestamp    int64  `json:"timestamp"`
+			Height       int   `json:"height"`
+			Timestamp    int64 `json:"timestamp"`
+			Difficulty   int64 `json:"difficulty"`
 			MinerAddress string `json:"miner_address"`
 		}
 
@@ -114,7 +127,16 @@ func scanNewBlocks(height int) error {
 
 		mu.Lock()
 		for i, b := range results {
-			if errs[i] != nil || b.MinerAddress == "" {
+			if errs[i] != nil {
+				continue
+			}
+			// difficulty chart data
+			diffPoints = append(diffPoints, diffPoint{
+				Height:     b.Height,
+				Difficulty: b.Difficulty,
+				Timestamp:  b.Timestamp,
+			})
+			if b.MinerAddress == "" {
 				continue
 			}
 			s, ok := minerMap[b.MinerAddress]
@@ -123,7 +145,7 @@ func scanNewBlocks(height int) error {
 				minerMap[b.MinerAddress] = s
 			}
 			s.Blocks++
-			s.TotalNous = s.Blocks // 1 NOUS per block
+			s.TotalNous = s.Blocks
 			if b.Timestamp > s.LastTs {
 				s.LastTs = b.Timestamp
 				s.LastHeight = b.Height
@@ -155,6 +177,18 @@ func buildJSON(height int) leaderboardData {
 	}
 }
 
+func writeJSON(path string, v any) error {
+	out, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 func update(outFile string) {
 	raw, err := rpc("getblockcount")
 	if err != nil {
@@ -173,27 +207,31 @@ func update(outFile string) {
 	}
 
 	data := buildJSON(height)
-	out, err := json.Marshal(data)
-	if err != nil {
-		log.Printf("leaderboard: marshal: %v", err)
+	if err := writeJSON(outFile, data); err != nil {
+		log.Printf("leaderboard: write %s: %v", outFile, err)
 		return
 	}
 
-	tmp := outFile + ".tmp"
-	if err := os.WriteFile(tmp, out, 0644); err != nil {
-		log.Printf("leaderboard: write: %v", err)
-		return
+	// Write difficulty chart JSON (last 200 points)
+	mu.Lock()
+	pts := diffPoints
+	if len(pts) > 200 {
+		pts = pts[len(pts)-200:]
 	}
-	if err := os.Rename(tmp, outFile); err != nil {
-		log.Printf("leaderboard: rename: %v", err)
-		return
+	diffData := diffChartData{UpdatedAt: time.Now().Unix(), Points: pts}
+	mu.Unlock()
+
+	diffFile := outFile[:len(outFile)-len("leaderboard.json")] + "difficulty.json"
+	if err := writeJSON(diffFile, diffData); err != nil {
+		log.Printf("leaderboard: write %s: %v", diffFile, err)
 	}
+
 	log.Printf("leaderboard: updated height=%d miners=%d", height, data.TotalMiners)
 }
 
 func main() {
 	node := flag.String("node", "http://localhost:8332/rpc", "Node RPC URL")
-	out := flag.String("out", "/var/www/nous/leaderboard.json", "Output JSON file")
+	out  := flag.String("out", "/var/www/nous/leaderboard.json", "Output JSON file")
 	interval := flag.Duration("interval", 30*time.Second, "Update interval")
 	flag.Parse()
 

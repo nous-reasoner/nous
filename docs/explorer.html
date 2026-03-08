@@ -227,29 +227,28 @@ async function renderHome() {
                     <div class="col-span-3 text-right text-xs text-gray-500">${diffBitsToMultiplier(b.difficulty)}x</div>
                 </a>`).join('');
 
-        // Difficulty chart — load async so it doesn't block the block list
-        loadDiffChart(height);
+        // Difficulty chart — fetch pre-built JSON, no block scanning needed
+        loadDiffChart();
     } catch (e) {
         document.getElementById('blockList').innerHTML = `<div class="text-red-400 py-4">${e.message}</div>`;
     }
 }
 
-async function loadDiffChart(height) {
+async function loadDiffChart() {
     try {
-        const chartCount = Math.min(200, height + 1);
-        const chartStart = Math.max(0, height - chartCount + 1);
-        const promises = [];
-        for (let h = chartStart; h <= height; h++) promises.push(rpc('getblock', [h]));
-        const chartBlocks = await Promise.all(promises);
+        const res = await fetch('/difficulty.json?_=' + Date.now());
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const pts = data.points || [];
         const ctx = document.getElementById('diffChart');
-        if (!ctx) return;
+        if (!ctx || !pts.length) return;
         new Chart(ctx, {
             type: 'line',
             data: {
-                labels: chartBlocks.map(b => b.height),
+                labels: pts.map(p => p.h),
                 datasets: [{
                     label: 'Difficulty',
-                    data: chartBlocks.map(b => parseFloat(diffBitsToMultiplier(b.difficulty))),
+                    data: pts.map(p => parseFloat(diffBitsToMultiplier(p.d))),
                     borderColor: '#00ff88',
                     backgroundColor: 'rgba(0,255,136,0.1)',
                     borderWidth: 1.5,
