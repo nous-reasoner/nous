@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOUS Leaderboard — Top Reasoners</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { nous: '#00ff88', nousdim: '#00cc6a', bg: '#0a0a0a', card: '#111111', border: '#222222' }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #0a0a0a; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #111; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        .rank-1 { color: #ffd700; }
+        .rank-2 { color: #c0c0c0; }
+        .rank-3 { color: #cd7f32; }
+        .progress-bar { transition: width 0.3s ease; }
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+        .pulse { animation: pulse 1.5s ease-in-out infinite; }
+    </style>
+</head>
+<body class="text-gray-300 min-h-screen">
+
+<!-- Header -->
+<header class="border-b border-border bg-card/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-4">
+            <a href="/" class="text-xl font-bold text-white tracking-widest">NOUS</a>
+            <nav class="flex items-center gap-3 text-sm">
+                <a href="/explorer.html" class="text-gray-500 hover:text-nous transition">Explorer</a>
+                <span class="text-nous font-bold">Leaderboard</span>
+            </nav>
+        </div>
+        <div class="flex items-center gap-3 text-xs text-gray-500">
+            <span>Height <span id="statHeight" class="text-nous font-bold">—</span></span>
+            <span class="px-2 py-0.5 rounded font-bold" style="background:#00ff88;color:#0a0a0a;">Mainnet</span>
+        </div>
+    </div>
+</header>
+
+<!-- Main -->
+<main class="max-w-6xl mx-auto px-4 py-8">
+
+    <!-- Title -->
+    <div class="mb-8">
+        <h1 class="text-2xl font-bold text-white mb-1">Miner Leaderboard</h1>
+        <p class="text-gray-500 text-sm">Top reasoners ranked by blocks produced. Each block = 1 NOUS.</p>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+        <div class="bg-card border border-border rounded p-4 text-center">
+            <div class="text-gray-500 text-xs uppercase tracking-wider mb-1">Total Blocks</div>
+            <div id="totalBlocks" class="text-nous text-2xl font-bold">—</div>
+        </div>
+        <div class="bg-card border border-border rounded p-4 text-center">
+            <div class="text-gray-500 text-xs uppercase tracking-wider mb-1">Total Reasoners</div>
+            <div id="totalMiners" class="text-white text-2xl font-bold">—</div>
+        </div>
+        <div class="bg-card border border-border rounded p-4 text-center">
+            <div class="text-gray-500 text-xs uppercase tracking-wider mb-1">Total Supply</div>
+            <div id="totalSupply" class="text-white text-2xl font-bold">—</div>
+        </div>
+        <div class="bg-card border border-border rounded p-4 text-center">
+            <div class="text-gray-500 text-xs uppercase tracking-wider mb-1">Last Updated</div>
+            <div id="lastUpdated" class="text-white text-sm font-bold pt-1">—</div>
+        </div>
+    </div>
+
+    <!-- Loading Progress -->
+    <div id="loadingSection" class="mb-6">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-gray-500 text-sm pulse" id="loadingLabel">Scanning blockchain...</span>
+            <span id="loadingPct" class="text-nous text-sm font-bold">0%</span>
+        </div>
+        <div class="h-1 bg-border rounded overflow-hidden">
+            <div id="progressBar" class="progress-bar h-full bg-nous rounded" style="width:0%"></div>
+        </div>
+    </div>
+
+    <!-- Leaderboard Table -->
+    <div id="leaderboardSection" class="hidden">
+        <!-- Top 3 Podium -->
+        <div id="podium" class="grid grid-cols-3 gap-3 mb-6"></div>
+
+        <!-- Full Table -->
+        <div class="bg-card border border-border rounded overflow-hidden">
+            <div class="hidden sm:grid grid-cols-12 gap-2 text-xs text-gray-600 px-4 py-3 uppercase tracking-wider border-b border-border">
+                <div class="col-span-1">Rank</div>
+                <div class="col-span-5">Address</div>
+                <div class="col-span-2 text-right">Blocks</div>
+                <div class="col-span-2 text-right">NOUS</div>
+                <div class="col-span-2 text-right">Share</div>
+            </div>
+            <div id="leaderboardRows" class="divide-y divide-border"></div>
+        </div>
+
+        <div class="mt-4 text-center">
+            <button onclick="refresh()" class="bg-nous/10 border border-nous/30 text-nous px-4 py-2 rounded text-sm hover:bg-nous/20 transition">
+                ↻ Refresh
+            </button>
+            <span id="refreshNote" class="text-gray-600 text-xs ml-3"></span>
+        </div>
+    </div>
+
+</main>
+
+<footer class="border-t border-border text-center py-4 text-xs text-gray-600 mt-8">
+    <a href="/" class="hover:text-nous transition">NOUS</a> — Cogito, ergo sum.
+</footer>
+
+<script>
+const RPC_URL = window.location.origin + '/api';
+const BATCH = 50; // parallel requests per batch
+
+async function rpc(method, params = []) {
+    const res = await fetch(RPC_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({method, params, id: Date.now()})
+    });
+    const json = await res.json();
+    if (json.error) throw new Error(json.error.message);
+    return json.result;
+}
+
+function formatNOUS(blocks) {
+    return blocks.toLocaleString() + ' NOUS';
+}
+
+function timeAgo(ts) {
+    const diff = Math.floor(Date.now() / 1000) - ts;
+    if (diff < 60) return '刚刚';
+    if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+    return Math.floor(diff / 86400) + ' 天前';
+}
+
+function shortAddr(addr) {
+    if (!addr || addr.length < 20) return addr || '—';
+    return addr.slice(0, 10) + '...' + addr.slice(-6);
+}
+
+function rankColor(rank) {
+    if (rank === 1) return 'text-yellow-400';
+    if (rank === 2) return 'text-gray-300';
+    if (rank === 3) return 'text-orange-400';
+    return 'text-gray-500';
+}
+
+function rankSymbol(rank) {
+    if (rank === 1) return '🥇';
+    if (rank === 2) return '🥈';
+    if (rank === 3) return '🥉';
+    return '#' + rank;
+}
+
+async function loadLeaderboard() {
+    document.getElementById('loadingSection').classList.remove('hidden');
+    document.getElementById('leaderboardSection').classList.add('hidden');
+
+    try {
+        const [info, supply] = await Promise.all([
+            rpc('getmininginfo'),
+            rpc('gettotalsupply')
+        ]);
+
+        const height = info.height;
+        document.getElementById('statHeight').textContent = height.toLocaleString();
+        document.getElementById('totalSupply').textContent = supply.actual_nous.toLocaleString() + ' NOUS';
+
+        // Scan all blocks in batches
+        const minerMap = {}; // address -> { blocks, lastTs, lastHeight }
+        let scanned = 0;
+        const total = height + 1; // block 0 to height
+
+        for (let start = 0; start <= height; start += BATCH) {
+            const end = Math.min(start + BATCH - 1, height);
+            const promises = [];
+            for (let h = start; h <= end; h++) {
+                promises.push(rpc('getblock', [h]));
+            }
+            const blocks = await Promise.all(promises);
+
+            for (const b of blocks) {
+                if (!b.miner_address) continue; // genesis
+                const addr = b.miner_address;
+                if (!minerMap[addr]) {
+                    minerMap[addr] = { blocks: 0, lastTs: 0, lastHeight: 0 };
+                }
+                minerMap[addr].blocks++;
+                if (b.timestamp > minerMap[addr].lastTs) {
+                    minerMap[addr].lastTs = b.timestamp;
+                    minerMap[addr].lastHeight = b.height;
+                }
+            }
+
+            scanned += blocks.length;
+            const pct = Math.round(scanned / total * 100);
+            document.getElementById('progressBar').style.width = pct + '%';
+            document.getElementById('loadingPct').textContent = pct + '%';
+            document.getElementById('loadingLabel').textContent =
+                `Scanning blockchain... (${scanned.toLocaleString()} / ${total.toLocaleString()})`;
+        }
+
+        // Sort by blocks desc
+        const sorted = Object.entries(minerMap)
+            .map(([addr, d]) => ({ addr, ...d }))
+            .sort((a, b) => b.blocks - a.blocks);
+
+        // Update stats
+        document.getElementById('totalBlocks').textContent = height.toLocaleString();
+        document.getElementById('totalMiners').textContent = sorted.length;
+        document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+
+        // Podium (top 3)
+        const podiumEl = document.getElementById('podium');
+        const top3 = sorted.slice(0, 3);
+        const podiumOrder = top3.length >= 3 ? [top3[1], top3[0], top3[2]] : top3;
+        const podiumHeights = top3.length >= 3 ? ['h-24', 'h-32', 'h-20'] : ['h-32', 'h-24', 'h-20'];
+        const podiumRanks = top3.length >= 3 ? [2, 1, 3] : [1, 2, 3];
+
+        podiumEl.innerHTML = podiumOrder.map((m, i) => {
+            if (!m) return '<div></div>';
+            const rank = podiumRanks[i];
+            const share = ((m.blocks / height) * 100).toFixed(1);
+            return `
+            <a href="/explorer.html#address/${m.addr}"
+               class="bg-card border border-border rounded p-4 text-center hover:border-nous/40 transition cursor-pointer block">
+                <div class="text-3xl mb-2">${rankSymbol(rank)}</div>
+                <div class="${rankColor(rank)} font-bold text-lg mb-1">#${rank}</div>
+                <div class="font-mono text-xs text-gray-400 mb-2 truncate">${shortAddr(m.addr)}</div>
+                <div class="text-nous font-bold text-xl">${m.blocks.toLocaleString()}</div>
+                <div class="text-gray-500 text-xs">blocks · ${share}%</div>
+                <div class="text-gray-600 text-xs mt-1">${timeAgo(m.lastTs)}</div>
+            </a>`;
+        }).join('');
+
+        // Full table
+        const rowsEl = document.getElementById('leaderboardRows');
+        rowsEl.innerHTML = sorted.map((m, i) => {
+            const rank = i + 1;
+            const share = ((m.blocks / height) * 100).toFixed(2);
+            const barWidth = Math.max(2, Math.round(m.blocks / sorted[0].blocks * 100));
+            return `
+            <a href="/explorer.html#address/${m.addr}"
+               class="grid grid-cols-12 gap-2 px-4 py-3 hover:bg-bg transition cursor-pointer items-center group">
+                <div class="col-span-1 font-bold ${rankColor(rank)} text-sm">${rank <= 3 ? rankSymbol(rank) : '#' + rank}</div>
+                <div class="col-span-5">
+                    <div class="font-mono text-xs text-gray-300 group-hover:text-nous transition truncate">${m.addr}</div>
+                    <div class="mt-1 h-0.5 bg-border rounded overflow-hidden">
+                        <div class="h-full bg-nous/40 rounded" style="width:${barWidth}%"></div>
+                    </div>
+                </div>
+                <div class="col-span-2 text-right">
+                    <span class="text-white font-bold">${m.blocks.toLocaleString()}</span>
+                    <span class="text-gray-600 text-xs ml-1">blks</span>
+                </div>
+                <div class="col-span-2 text-right text-nous font-bold text-sm">${m.blocks.toLocaleString()}</div>
+                <div class="col-span-2 text-right">
+                    <div class="text-gray-400 text-sm">${share}%</div>
+                    <div class="text-gray-600 text-xs">${timeAgo(m.lastTs)}</div>
+                </div>
+            </a>`;
+        }).join('');
+
+        document.getElementById('loadingSection').classList.add('hidden');
+        document.getElementById('leaderboardSection').classList.remove('hidden');
+        document.getElementById('refreshNote').textContent = '自动每 60 秒刷新';
+
+    } catch (e) {
+        document.getElementById('loadingLabel').textContent = '加载失败: ' + e.message;
+        document.getElementById('loadingLabel').classList.add('text-red-400');
+        document.getElementById('loadingLabel').classList.remove('pulse');
+    }
+}
+
+async function refresh() {
+    document.getElementById('progressBar').style.width = '0%';
+    document.getElementById('loadingPct').textContent = '0%';
+    document.getElementById('loadingLabel').textContent = 'Scanning blockchain...';
+    document.getElementById('loadingLabel').classList.remove('text-red-400');
+    document.getElementById('loadingLabel').classList.add('pulse');
+    await loadLeaderboard();
+}
+
+// Auto refresh every 60s
+setInterval(refresh, 60000);
+loadLeaderboard();
+</script>
+</body>
+</html>
