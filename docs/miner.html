@@ -99,8 +99,6 @@
     .footer a:hover { text-decoration: underline; }
     .btn-export { background: #ff9500; }
     .btn-export:hover { background: #e08500; }
-    .btn-download { background: #7aa2f7; }
-    .btn-download:hover { background: #6090e0; }
     .btn-stop { background: #ff4444; margin-left: 10px; }
     .btn-stop:hover { background: #dd3333; }
     @media (max-width: 600px) {
@@ -116,7 +114,7 @@
       <h2>Configuration</h2>
       <div class="form-group">
         <label>Node URL</label>
-        <input type="text" id="nodeUrl" value="/api" placeholder="/api or http://rpc.nouschain.org/api" />
+        <input type="text" id="nodeUrl" value="http://rpc.nouschain.org/api" placeholder="http://rpc.nouschain.org/api" />
       </div>
       <div class="form-group">
         <label>Address</label>
@@ -127,6 +125,9 @@
         </div>
         <div style="color: #666; font-size: 11px; margin-top: 5px;">
           Wallet stored in browser localStorage. Use Export to backup.
+        </div>
+        <div style="color: #ff9500; font-size: 11px; margin-top: 4px;">
+          Note: Browser wallets are for testing only. For security, generate your wallet locally with nous-cli.
         </div>
       </div>
     </div>
@@ -191,7 +192,6 @@
     </div>
   </div>
 
-  <script src="wasm_exec.js"></script>
   <script>
     let isReasoning = false;
     let sessionStart = null;
@@ -200,6 +200,7 @@
     let blockIntervals = [];
     let statsInterval = null;
     let balanceInterval = null;
+    let worker = null;
 
     // --- All-time stats ---
     function getAllTimeStats() {
@@ -233,21 +234,18 @@
       while (log.children.length > 200) log.removeChild(log.firstChild);
     }
 
-    // Called by Go WASM.
     let logStats = { sat: 0, seeds: 0, rate: '' };
     let logTimer = null;
 
     function flushLog() {
       if (logStats.seeds > 0) {
-        const rateStr = logStats.rate ? ' (' + logStats.rate + ')' : '';
-        addLog('Checked ' + logStats.seeds + ' seeds, SAT solved: ' + logStats.sat + rateStr, 'progress');
+        addLog('Checked ' + logStats.seeds + ' seeds, SAT solved: ' + logStats.sat + ' (' + logStats.rate + ')', 'progress');
         document.getElementById('solveRate').textContent = logStats.rate || '\u2014';
         logStats = { sat: 0, seeds: 0, rate: '' };
       }
     }
 
-    window.postReasonerLog = function(msg) {
-      // Block found
+    function handleReasonerLog(msg) {
       if (/Block found|Block reasoned|accepted/i.test(msg)) {
         flushLog();
         addLog(msg, 'success');
@@ -266,20 +264,14 @@
         fetchBalance();
         return;
       }
-
-      // Reasoning start / new block
       if (/Reasoner loaded|Reasoning started|Reasoning block/i.test(msg)) {
         addLog(msg);
         return;
       }
-
-      // Errors
       if (/error|fail|fatal/i.test(msg) && !/no PoW match/i.test(msg)) {
         addLog(msg, 'error');
         return;
       }
-
-      // Progress lines — batch them
       const m = msg.match(/(\d+) SAT solved \(([^)]+)\), seed=(\d+)/);
       if (m) {
         logStats.sat = parseInt(m[1]);
@@ -295,17 +287,14 @@
         }
         return;
       }
-
-      // Round done
       if (/Round done/i.test(msg)) {
         const rm = msg.match(/(\d+) SAT solved.*\(([^)]+)\)/);
         if (rm) document.getElementById('solveRate').textContent = rm[2];
         addLog(msg, 'progress');
         return;
       }
-
       addLog(msg);
-    };
+    }
 
     // --- Stats UI ---
     function updateStatsUI() {
@@ -331,26 +320,14 @@
       const allTime = getAllTimeStats();
       document.getElementById('totalBlocks').textContent = allTime.blocks;
       document.getElementById('totalEarnings').textContent = allTime.blocks + ' NOUS';
-
-      // WASM stats
-      if (typeof nousReasoner !== 'undefined' && nousReasoner.getStats) {
-        try {
-          const s = JSON.parse(nousReasoner.getStats());
-          if (s.solve_rate > 0) document.getElementById('solveRate').textContent = s.solve_rate.toFixed(1) + '/s';
-        } catch(e) {}
-      }
     }
 
     // --- Balance ---
-    async function fetchBalance() {
+    function fetchBalance() {
       const address = document.getElementById('address').value;
       const nodeUrl = document.getElementById('nodeUrl').value;
-      if (!address || typeof nousReasoner === 'undefined') return;
-      try {
-        const result = await nousReasoner.getBalance(nodeUrl, address);
-        document.getElementById('balance').textContent = (result.balance / 100000000).toFixed(8);
-        document.getElementById('immature').textContent = (result.immature / 100000000).toFixed(8);
-      } catch(e) {}
+      if (!address || !worker) return;
+      worker.postMessage({ action: 'getBalance', nodeUrl: nodeUrl, address: address });
     }
 
     // --- Wallet ---
@@ -363,32 +340,13 @@
       if (document.getElementById('address').value) {
         if (!confirm('A wallet already exists. Create a new one? The old wallet will be overwritten.')) return;
       }
-      if (typeof nousReasoner === 'undefined') {
-        addLog('WASM not loaded yet', 'error');
-        return;
-      }
-      const wallet = nousReasoner.createWallet();
-      if (wallet.error) {
-        addLog('Wallet error: ' + wallet.error, 'error');
-        return;
-      }
-      const w = {
-        private_key: wallet.private_key,
-        public_key: wallet.public_key,
-        address: wallet.address
-      };
-      localStorage.setItem('nousWallet', JSON.stringify(w));
-      document.getElementById('address').value = w.address;
-      addLog('Wallet created: ' + w.address, 'success');
-      alert('Wallet created!\n\nAddress: ' + w.address + '\n\nStored in browser. Click "Export" to backup your private key.');
+      if (!worker) { addLog('WASM not loaded yet', 'error'); return; }
+      worker.postMessage({ action: 'createWallet' });
     }
 
     function exportWallet() {
       const w = getStoredWallet();
-      if (!w) {
-        alert('No wallet found. Create one first.');
-        return;
-      }
+      if (!w) { alert('No wallet found. Create one first.'); return; }
       const blob = new Blob([JSON.stringify(w, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -405,70 +363,116 @@
       const address = document.getElementById('address').value.trim();
       if (!address) { addLog('Please enter an address or create a wallet', 'error'); return; }
       if (!address.startsWith('nous1')) { addLog('Address should start with "nous1"', 'error'); return; }
+      worker.postMessage({ action: 'start', nodeUrl: nodeUrl, address: address });
+    }
 
-      const result = nousReasoner.start(nodeUrl, address);
-      if (result === 'started') {
-        isReasoning = true;
+    function stopReasoning() {
+      worker.postMessage({ action: 'stop' });
+    }
+
+    function setReasoningUI(active) {
+      isReasoning = active;
+      document.getElementById('startBtn').disabled = active;
+      document.getElementById('stopBtn').disabled = !active;
+      document.getElementById('statusDot').className = 'status-dot' + (active ? ' active' : '');
+      document.getElementById('statusText').textContent = active ? 'Reasoning...' : 'Idle';
+      if (active) {
         sessionStart = Date.now();
         sessionBlocks = 0;
         lastBlockTime = Date.now();
         blockIntervals = [];
-        document.getElementById('startBtn').disabled = true;
-        document.getElementById('stopBtn').disabled = false;
-        document.getElementById('statusDot').className = 'status-dot active';
-        document.getElementById('statusText').textContent = 'Reasoning...';
-        statsInterval = setInterval(updateStatsUI, 1000);
+        statsInterval = setInterval(function() {
+          updateStatsUI();
+          worker.postMessage({ action: 'stats' });
+        }, 2000);
         balanceInterval = setInterval(fetchBalance, 30000);
-        addLog('Reasoning started with ProbSAT solver...');
       } else {
-        addLog('Start failed: ' + result, 'error');
-      }
-    }
-
-    function stopReasoning() {
-      nousReasoner.stop();
-      isReasoning = false;
-      sessionStart = null;
-      document.getElementById('startBtn').disabled = false;
-      document.getElementById('stopBtn').disabled = true;
-      document.getElementById('statusDot').className = 'status-dot';
-      document.getElementById('statusText').textContent = 'Idle';
-      if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
-      if (balanceInterval) { clearInterval(balanceInterval); balanceInterval = null; }
-      updateStatsUI();
-    }
-
-    // --- Load WASM ---
-    async function loadWasm() {
-      addLog('Loading WASM reasoner...');
-      const go = new Go();
-      try {
-        const result = await WebAssembly.instantiateStreaming(fetch('miner.wasm'), go.importObject);
-        go.run(result.instance);
-        document.getElementById('startBtn').textContent = 'Start Reasoning';
-        document.getElementById('startBtn').disabled = false;
-        document.getElementById('statusDot').className = 'status-dot';
-        document.getElementById('statusText').textContent = 'Idle';
-        addLog('WASM loaded. Ready.', 'success');
-
-        // Load wallet
-        const w = getStoredWallet();
-        if (w && w.address) {
-          document.getElementById('address').value = w.address;
-          addLog('Wallet loaded: ' + w.address);
-          fetchBalance();
-        }
-
-        // Load all-time stats
+        sessionStart = null;
+        if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
+        if (balanceInterval) { clearInterval(balanceInterval); balanceInterval = null; }
         updateStatsUI();
-      } catch(e) {
-        addLog('Failed to load WASM: ' + e.message, 'error');
-        document.getElementById('startBtn').textContent = 'WASM Failed';
-        document.getElementById('statusText').textContent = 'Error';
       }
     }
 
-    loadWasm();
+    // --- Worker message handler ---
+    function initWorker() {
+      addLog('Loading WASM reasoner...');
+      worker = new Worker('worker.js');
+
+      worker.onmessage = function(e) {
+        const msg = e.data;
+        switch (msg.type) {
+          case 'ready':
+            document.getElementById('startBtn').textContent = 'Start Reasoning';
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('statusDot').className = 'status-dot';
+            document.getElementById('statusText').textContent = 'Idle';
+            addLog('WASM loaded. Ready.', 'success');
+            // Load saved wallet
+            const w = getStoredWallet();
+            if (w && w.address) {
+              document.getElementById('address').value = w.address;
+              addLog('Wallet loaded: ' + w.address);
+              fetchBalance();
+            }
+            updateStatsUI();
+            break;
+
+          case 'log':
+            handleReasonerLog(msg.msg);
+            break;
+
+          case 'started':
+            if (msg.result === 'started') {
+              setReasoningUI(true);
+              addLog('Reasoning started with ProbSAT solver...');
+            } else {
+              addLog('Start failed: ' + msg.result, 'error');
+            }
+            break;
+
+          case 'stopped':
+            setReasoningUI(false);
+            addLog('Reasoning stopped');
+            break;
+
+          case 'stats':
+            try {
+              const s = JSON.parse(msg.data);
+              if (s.solve_rate > 0) document.getElementById('solveRate').textContent = s.solve_rate.toFixed(1) + '/s';
+            } catch(err) {}
+            break;
+
+          case 'wallet':
+            if (msg.data.error) {
+              addLog('Wallet error: ' + msg.data.error, 'error');
+            } else {
+              localStorage.setItem('nousWallet', JSON.stringify(msg.data));
+              document.getElementById('address').value = msg.data.address;
+              addLog('Wallet created: ' + msg.data.address, 'success');
+              alert('Wallet created!\n\nAddress: ' + msg.data.address + '\n\nStored in browser. Click "Export" to backup your private key.');
+            }
+            break;
+
+          case 'balance':
+            if (msg.data) {
+              document.getElementById('balance').textContent = (msg.data.balance / 100000000).toFixed(8);
+              document.getElementById('immature').textContent = (msg.data.immature / 100000000).toFixed(8);
+            }
+            break;
+
+          case 'error':
+            addLog(msg.msg, 'error');
+            document.getElementById('startBtn').textContent = 'WASM Failed';
+            document.getElementById('statusText').textContent = 'Error';
+            break;
+        }
+      };
+
+      worker.postMessage({ action: 'load' });
+    }
+
+    initWorker();
   </script>
 </body>
 </html>
