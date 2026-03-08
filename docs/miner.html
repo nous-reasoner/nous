@@ -1,324 +1,474 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NOUS — Browser Miner</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Courier New', monospace;
-            background: #0a0a0a;
-            color: #e0e0e0;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            padding: 40px 20px;
-        }
-        .container {
-            max-width: 700px;
-            width: 100%;
-        }
-        h1 {
-            font-size: 2.5em;
-            color: #ffffff;
-            text-align: center;
-            letter-spacing: 0.3em;
-            margin-bottom: 5px;
-        }
-        .tagline {
-            text-align: center;
-            font-size: 0.9em;
-            color: #666;
-            margin-bottom: 30px;
-        }
-        .section {
-            margin: 20px 0;
-            padding: 20px;
-            border: 1px solid #333;
-            border-radius: 4px;
-        }
-        .section h2 {
-            color: #aaa;
-            font-size: 0.85em;
-            text-transform: uppercase;
-            letter-spacing: 0.2em;
-            margin-bottom: 15px;
-        }
-        label {
-            display: block;
-            color: #888;
-            font-size: 0.85em;
-            margin-bottom: 5px;
-            margin-top: 12px;
-        }
-        label:first-child { margin-top: 0; }
-        input {
-            width: 100%;
-            padding: 10px 12px;
-            background: #111;
-            border: 1px solid #333;
-            border-radius: 3px;
-            color: #e0e0e0;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-        }
-        input:focus {
-            outline: none;
-            border-color: #555;
-        }
-        .btn-row {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        button {
-            flex: 1;
-            padding: 12px;
-            border: 1px solid #333;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        #startBtn {
-            background: #1a3a1a;
-            color: #4ade80;
-            border-color: #2d5a2d;
-        }
-        #startBtn:hover { background: #2d5a2d; }
-        #startBtn:disabled {
-            background: #1a1a1a;
-            color: #555;
-            border-color: #333;
-            cursor: not-allowed;
-        }
-        #stopBtn {
-            background: #3a1a1a;
-            color: #f87171;
-            border-color: #5a2d2d;
-        }
-        #stopBtn:hover { background: #5a2d2d; }
-        #stopBtn:disabled {
-            background: #1a1a1a;
-            color: #555;
-            border-color: #333;
-            cursor: not-allowed;
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-        .stat {
-            padding: 12px;
-            background: #111;
-            border-radius: 3px;
-            text-align: center;
-        }
-        .stat .value {
-            font-size: 1.4em;
-            color: #7aa2f7;
-            margin-bottom: 4px;
-        }
-        .stat .label {
-            font-size: 0.75em;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-        }
-        #log {
-            background: #050505;
-            border: 1px solid #222;
-            border-radius: 3px;
-            padding: 12px;
-            height: 250px;
-            overflow-y: auto;
-            font-size: 0.8em;
-            line-height: 1.6;
-            color: #888;
-        }
-        #log .info { color: #888; }
-        #log .success { color: #4ade80; }
-        #log .error { color: #f87171; }
-        #log .progress { color: #7aa2f7; }
-        .status-indicator {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-right: 6px;
-        }
-        .status-indicator.idle { background: #555; }
-        .status-indicator.loading { background: #f59e0b; animation: pulse 1s infinite; }
-        .status-indicator.mining { background: #4ade80; animation: pulse 1.5s infinite; }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            color: #444;
-            font-size: 0.8em;
-        }
-        a { color: #7aa2f7; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        .note {
-            font-size: 0.8em;
-            color: #555;
-            margin-top: 8px;
-            line-height: 1.5;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NOUS Reasoner</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      padding: 20px;
+    }
+    .container { max-width: 700px; margin: 0 auto; }
+    h1 { color: #00ff88; margin-bottom: 30px; }
+    .section {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .section h2 {
+      color: #00ff88;
+      font-size: 18px;
+      margin-bottom: 15px;
+    }
+    .form-group { margin-bottom: 15px; }
+    label {
+      display: block;
+      color: #999;
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px;
+      background: #0a0a0a;
+      border: 1px solid #333;
+      border-radius: 4px;
+      color: #e0e0e0;
+      font-size: 14px;
+    }
+    input:focus, select:focus { outline: none; border-color: #00ff88; }
+    button {
+      padding: 12px 24px;
+      background: #00ff88;
+      color: #0a0a0a;
+      border: none;
+      border-radius: 4px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover { background: #00dd77; }
+    button:disabled { background: #333; color: #666; cursor: not-allowed; }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 15px;
+      background: #0a0a0a;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+    .status-dot { width: 12px; height: 12px; border-radius: 50%; background: #666; }
+    .status-dot.active { background: #00ff88; animation: pulse 1.5s infinite; }
+    .status-dot.loading { background: #f59e0b; animation: pulse 1s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .log {
+      background: #0a0a0a;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 15px;
+      height: 250px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      color: #999;
+    }
+    .log .success { color: #00ff88; }
+    .log .error { color: #ff4444; }
+    .log .progress { color: #88aaff; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; }
+    .stat-card { background: #0a0a0a; padding: 12px; border-radius: 4px; }
+    .stat-label { color: #666; font-size: 11px; margin-bottom: 4px; }
+    .stat-value { color: #00ff88; font-size: 20px; font-weight: 600; }
+    .footer {
+      text-align: center;
+      margin-top: 20px;
+      color: #444;
+      font-size: 12px;
+    }
+    .footer a { color: #7aa2f7; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+    .btn-export { background: #ff9500; }
+    .btn-export:hover { background: #e08500; }
+    .btn-download { background: #7aa2f7; }
+    .btn-download:hover { background: #6090e0; }
+    .btn-stop { background: #ff4444; margin-left: 10px; }
+    .btn-stop:hover { background: #dd3333; }
+    @media (max-width: 600px) {
+      .stats { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>NOUS</h1>
-        <p class="tagline"><span class="status-indicator idle" id="statusDot"></span>Browser Miner</p>
+  <div class="container">
+    <h1>NOUS Reasoner</h1>
 
-        <div class="section">
-            <h2>Configuration</h2>
-            <label>Node URL</label>
-            <input type="text" id="nodeUrl" value="http://rpc.nouschain.org/api" placeholder="http://rpc.nouschain.org/api">
-            <label>Mining Address</label>
-            <input type="text" id="address" placeholder="nous1..." >
-            <p class="note">Your address only. Private key never leaves your device.</p>
-            <div class="btn-row">
-                <button id="startBtn" disabled>Loading WASM...</button>
-                <button id="stopBtn" disabled>Stop</button>
-            </div>
+    <div class="section">
+      <h2>Configuration</h2>
+      <div class="form-group">
+        <label>Node URL</label>
+        <input type="text" id="nodeUrl" value="/api" placeholder="/api or http://rpc.nouschain.org/api" />
+      </div>
+      <div class="form-group">
+        <label>Address</label>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" id="address" placeholder="nous1q..." style="flex: 1;" />
+          <button onclick="createWallet()" style="width: auto; padding: 10px 16px;">New Wallet</button>
+          <button class="btn-export" onclick="exportWallet()" style="width: auto; padding: 10px 16px;">Export</button>
         </div>
-
-        <div class="section">
-            <h2>Statistics</h2>
-            <div class="stats-grid">
-                <div class="stat">
-                    <div class="value" id="statRate">0.0</div>
-                    <div class="label">SAT/sec</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="statSolved">0</div>
-                    <div class="label">SAT Solved</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="statBlocks">0</div>
-                    <div class="label">Blocks Mined</div>
-                </div>
-                <div class="stat">
-                    <div class="value" id="statHeight">-</div>
-                    <div class="label">Block Height</div>
-                </div>
-            </div>
+        <div style="color: #666; font-size: 11px; margin-top: 5px;">
+          Wallet stored in browser localStorage. Use Export to backup.
         </div>
-
-        <div class="section">
-            <h2>Log</h2>
-            <div id="log"></div>
-        </div>
-
-        <div class="footer">
-            <p><a href="/">nouschain.org</a> &middot; <a href="https://github.com/nous-reasoner/nous">GitHub</a> &middot; <a href="https://discord.gg/SzKUuEjuQW">Discord</a></p>
-            <p style="margin-top: 8px;">Mining = Reasoning. Cogito, ergo sum.</p>
-        </div>
+      </div>
     </div>
 
-    <script src="wasm_exec.js"></script>
-    <script>
-        const logEl = document.getElementById('log');
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const statusDot = document.getElementById('statusDot');
-        let statsInterval = null;
+    <div class="section">
+      <h2>Reasoning</h2>
+      <div class="status">
+        <div class="status-dot loading" id="statusDot"></div>
+        <span id="statusText">Loading WASM...</span>
+        <span style="margin-left: auto; color: #666; font-size: 12px;" id="uptimeText"></span>
+      </div>
+      <div class="stats">
+        <div class="stat-card">
+          <div class="stat-label">Balance</div>
+          <div class="stat-value" id="balance" style="font-size:16px;">0.00</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Immature</div>
+          <div class="stat-value" id="immature" style="color:#ffaa00;font-size:16px;">0.00</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Solve Rate</div>
+          <div class="stat-value" id="solveRate" style="color:#88aaff;font-size:16px;">&mdash;</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Session Blocks</div>
+          <div class="stat-value" id="blocksFound">0</div>
+        </div>
+      </div>
+      <div class="stats" style="margin-top: 10px;">
+        <div class="stat-card">
+          <div class="stat-label">Avg Time/Block</div>
+          <div class="stat-value" id="avgBlockTime" style="font-size:16px;">&mdash;</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Expected Next</div>
+          <div class="stat-value" id="expectedNext" style="font-size:16px;">&mdash;</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">All-Time Blocks</div>
+          <div class="stat-value" id="totalBlocks" style="font-size:16px;">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Earnings</div>
+          <div class="stat-value" id="totalEarnings" style="font-size:16px;">0</div>
+        </div>
+      </div>
+      <div style="margin-top: 15px;">
+        <button id="startBtn" onclick="startReasoning()" disabled>Loading...</button>
+        <button id="stopBtn" class="btn-stop" onclick="stopReasoning()" disabled>Stop</button>
+      </div>
+    </div>
 
-        function appendLog(msg, cls) {
-            const line = document.createElement('div');
-            line.className = cls || 'info';
-            const time = new Date().toLocaleTimeString();
-            line.textContent = `[${time}] ${msg}`;
-            logEl.appendChild(line);
-            logEl.scrollTop = logEl.scrollHeight;
-            // Keep last 200 lines.
-            while (logEl.children.length > 200) {
-                logEl.removeChild(logEl.firstChild);
-            }
+    <div class="section">
+      <h2>Logs</h2>
+      <div class="log" id="log"></div>
+    </div>
+
+    <div class="footer">
+      <p><a href="https://nouschain.org">nouschain.org</a> &middot; <a href="https://github.com/nous-reasoner/nous">GitHub</a> &middot; <a href="https://discord.gg/SzKUuEjuQW">Discord</a></p>
+      <p style="margin-top: 6px;">Cogito, ergo sum.</p>
+    </div>
+  </div>
+
+  <script src="wasm_exec.js"></script>
+  <script>
+    let isReasoning = false;
+    let sessionStart = null;
+    let sessionBlocks = 0;
+    let lastBlockTime = null;
+    let blockIntervals = [];
+    let statsInterval = null;
+    let balanceInterval = null;
+
+    // --- All-time stats ---
+    function getAllTimeStats() {
+      return JSON.parse(localStorage.getItem('nousAllTime') || '{"blocks":0,"intervals":[]}');
+    }
+    function saveAllTimeBlock(interval) {
+      const s = getAllTimeStats();
+      s.blocks++;
+      if (interval > 0) s.intervals.push(interval);
+      if (s.intervals.length > 100) s.intervals = s.intervals.slice(-100);
+      localStorage.setItem('nousAllTime', JSON.stringify(s));
+    }
+
+    function formatDuration(ms) {
+      const sec = Math.floor(ms / 1000);
+      if (sec < 60) return sec + 's';
+      const min = Math.floor(sec / 60);
+      if (min < 60) return min + 'm';
+      return Math.floor(min / 60) + 'h ' + (min % 60) + 'm';
+    }
+
+    // --- Logging ---
+    function addLog(text, cls) {
+      const log = document.getElementById('log');
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = cls || '';
+      div.textContent = '[' + time + '] ' + text;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+      while (log.children.length > 200) log.removeChild(log.firstChild);
+    }
+
+    // Called by Go WASM.
+    let logStats = { sat: 0, seeds: 0, rate: '' };
+    let logTimer = null;
+
+    function flushLog() {
+      if (logStats.seeds > 0) {
+        const rateStr = logStats.rate ? ' (' + logStats.rate + ')' : '';
+        addLog('Checked ' + logStats.seeds + ' seeds, SAT solved: ' + logStats.sat + rateStr, 'progress');
+        document.getElementById('solveRate').textContent = logStats.rate || '\u2014';
+        logStats = { sat: 0, seeds: 0, rate: '' };
+      }
+    }
+
+    window.postReasonerLog = function(msg) {
+      // Block found
+      if (/Block found|Block reasoned|accepted/i.test(msg)) {
+        flushLog();
+        addLog(msg, 'success');
+        const now = Date.now();
+        if (lastBlockTime) {
+          const interval = now - lastBlockTime;
+          blockIntervals.push(interval);
+          saveAllTimeBlock(interval);
+        } else {
+          saveAllTimeBlock(0);
+        }
+        sessionBlocks++;
+        lastBlockTime = now;
+        document.getElementById('blocksFound').textContent = sessionBlocks;
+        updateStatsUI();
+        fetchBalance();
+        return;
+      }
+
+      // Reasoning start / new block
+      if (/Reasoner loaded|Reasoning started|Reasoning block/i.test(msg)) {
+        addLog(msg);
+        return;
+      }
+
+      // Errors
+      if (/error|fail|fatal/i.test(msg) && !/no PoW match/i.test(msg)) {
+        addLog(msg, 'error');
+        return;
+      }
+
+      // Progress lines — batch them
+      const m = msg.match(/(\d+) SAT solved \(([^)]+)\), seed=(\d+)/);
+      if (m) {
+        logStats.sat = parseInt(m[1]);
+        logStats.rate = m[2];
+        logStats.seeds = parseInt(m[3]);
+        document.getElementById('solveRate').textContent = logStats.rate;
+        const rateNum = parseFloat(logStats.rate);
+        if (rateNum < 10) {
+          addLog('Checked ' + logStats.seeds + ' seeds, SAT solved: ' + logStats.sat + ' (' + logStats.rate + ')', 'progress');
+          logStats = { sat: 0, seeds: 0, rate: '' };
+        } else if (!logTimer) {
+          logTimer = setInterval(flushLog, 5000);
+        }
+        return;
+      }
+
+      // Round done
+      if (/Round done/i.test(msg)) {
+        const rm = msg.match(/(\d+) SAT solved.*\(([^)]+)\)/);
+        if (rm) document.getElementById('solveRate').textContent = rm[2];
+        addLog(msg, 'progress');
+        return;
+      }
+
+      addLog(msg);
+    };
+
+    // --- Stats UI ---
+    function updateStatsUI() {
+      if (sessionStart) {
+        document.getElementById('uptimeText').textContent = 'Uptime: ' + formatDuration(Date.now() - sessionStart);
+      } else {
+        document.getElementById('uptimeText').textContent = '';
+      }
+      document.getElementById('blocksFound').textContent = sessionBlocks;
+      if (blockIntervals.length >= 1) {
+        const avg = blockIntervals.reduce((a, b) => a + b, 0) / blockIntervals.length;
+        document.getElementById('avgBlockTime').textContent = formatDuration(avg);
+        if (lastBlockTime && isReasoning) {
+          const elapsed = Date.now() - lastBlockTime;
+          document.getElementById('expectedNext').textContent = elapsed < avg ? '~' + formatDuration(avg - elapsed) : 'Any moment';
+        } else {
+          document.getElementById('expectedNext').textContent = '\u2014';
+        }
+      } else {
+        document.getElementById('avgBlockTime').textContent = '\u2014';
+        document.getElementById('expectedNext').textContent = '\u2014';
+      }
+      const allTime = getAllTimeStats();
+      document.getElementById('totalBlocks').textContent = allTime.blocks;
+      document.getElementById('totalEarnings').textContent = allTime.blocks + ' NOUS';
+
+      // WASM stats
+      if (typeof nousReasoner !== 'undefined' && nousReasoner.getStats) {
+        try {
+          const s = JSON.parse(nousReasoner.getStats());
+          if (s.solve_rate > 0) document.getElementById('solveRate').textContent = s.solve_rate.toFixed(1) + '/s';
+        } catch(e) {}
+      }
+    }
+
+    // --- Balance ---
+    async function fetchBalance() {
+      const address = document.getElementById('address').value;
+      const nodeUrl = document.getElementById('nodeUrl').value;
+      if (!address || typeof nousReasoner === 'undefined') return;
+      try {
+        const result = await nousReasoner.getBalance(nodeUrl, address);
+        document.getElementById('balance').textContent = (result.balance / 100000000).toFixed(8);
+        document.getElementById('immature').textContent = (result.immature / 100000000).toFixed(8);
+      } catch(e) {}
+    }
+
+    // --- Wallet ---
+    function getStoredWallet() {
+      const w = localStorage.getItem('nousWallet');
+      return w ? JSON.parse(w) : null;
+    }
+
+    function createWallet() {
+      if (document.getElementById('address').value) {
+        if (!confirm('A wallet already exists. Create a new one? The old wallet will be overwritten.')) return;
+      }
+      if (typeof nousReasoner === 'undefined') {
+        addLog('WASM not loaded yet', 'error');
+        return;
+      }
+      const wallet = nousReasoner.createWallet();
+      if (wallet.error) {
+        addLog('Wallet error: ' + wallet.error, 'error');
+        return;
+      }
+      const w = {
+        private_key: wallet.private_key,
+        public_key: wallet.public_key,
+        address: wallet.address
+      };
+      localStorage.setItem('nousWallet', JSON.stringify(w));
+      document.getElementById('address').value = w.address;
+      addLog('Wallet created: ' + w.address, 'success');
+      alert('Wallet created!\n\nAddress: ' + w.address + '\n\nStored in browser. Click "Export" to backup your private key.');
+    }
+
+    function exportWallet() {
+      const w = getStoredWallet();
+      if (!w) {
+        alert('No wallet found. Create one first.');
+        return;
+      }
+      const blob = new Blob([JSON.stringify(w, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'nous-wallet-backup.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      addLog('Wallet exported: ' + w.address);
+    }
+
+    // --- Reasoning controls ---
+    function startReasoning() {
+      const nodeUrl = document.getElementById('nodeUrl').value.trim();
+      const address = document.getElementById('address').value.trim();
+      if (!address) { addLog('Please enter an address or create a wallet', 'error'); return; }
+      if (!address.startsWith('nous1')) { addLog('Address should start with "nous1"', 'error'); return; }
+
+      const result = nousReasoner.start(nodeUrl, address);
+      if (result === 'started') {
+        isReasoning = true;
+        sessionStart = Date.now();
+        sessionBlocks = 0;
+        lastBlockTime = Date.now();
+        blockIntervals = [];
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('stopBtn').disabled = false;
+        document.getElementById('statusDot').className = 'status-dot active';
+        document.getElementById('statusText').textContent = 'Reasoning...';
+        statsInterval = setInterval(updateStatsUI, 1000);
+        balanceInterval = setInterval(fetchBalance, 30000);
+        addLog('Reasoning started with ProbSAT solver...');
+      } else {
+        addLog('Start failed: ' + result, 'error');
+      }
+    }
+
+    function stopReasoning() {
+      nousReasoner.stop();
+      isReasoning = false;
+      sessionStart = null;
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+      document.getElementById('statusDot').className = 'status-dot';
+      document.getElementById('statusText').textContent = 'Idle';
+      if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
+      if (balanceInterval) { clearInterval(balanceInterval); balanceInterval = null; }
+      updateStatsUI();
+    }
+
+    // --- Load WASM ---
+    async function loadWasm() {
+      addLog('Loading WASM reasoner...');
+      const go = new Go();
+      try {
+        const result = await WebAssembly.instantiateStreaming(fetch('miner.wasm'), go.importObject);
+        go.run(result.instance);
+        document.getElementById('startBtn').textContent = 'Start Reasoning';
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('statusDot').className = 'status-dot';
+        document.getElementById('statusText').textContent = 'Idle';
+        addLog('WASM loaded. Ready.', 'success');
+
+        // Load wallet
+        const w = getStoredWallet();
+        if (w && w.address) {
+          document.getElementById('address').value = w.address;
+          addLog('Wallet loaded: ' + w.address);
+          fetchBalance();
         }
 
-        // Called by Go WASM.
-        window.postMinerLog = function(msg) {
-            let cls = 'info';
-            if (msg.includes('Block found') || msg.includes('Block mined')) cls = 'success';
-            else if (msg.includes('Error') || msg.includes('error')) cls = 'error';
-            else if (msg.includes('Progress') || msg.includes('Round')) cls = 'progress';
-            appendLog(msg, cls);
-        };
+        // Load all-time stats
+        updateStatsUI();
+      } catch(e) {
+        addLog('Failed to load WASM: ' + e.message, 'error');
+        document.getElementById('startBtn').textContent = 'WASM Failed';
+        document.getElementById('statusText').textContent = 'Error';
+      }
+    }
 
-        function updateStats() {
-            if (typeof nousMiner === 'undefined' || !nousMiner.getStats) return;
-            try {
-                const stats = JSON.parse(nousMiner.getStats());
-                document.getElementById('statRate').textContent = stats.hash_rate.toFixed(1);
-                document.getElementById('statSolved').textContent = stats.sat_solved.toLocaleString();
-                document.getElementById('statBlocks').textContent = stats.blocks_mined;
-                document.getElementById('statHeight').textContent = stats.height || '-';
-            } catch(e) {}
-        }
-
-        async function loadWasm() {
-            appendLog('Loading WASM miner...');
-            statusDot.className = 'status-indicator loading';
-            const go = new Go();
-            try {
-                const result = await WebAssembly.instantiateStreaming(
-                    fetch('miner.wasm'), go.importObject
-                );
-                go.run(result.instance);
-                startBtn.textContent = 'Start Mining';
-                startBtn.disabled = false;
-                appendLog('WASM loaded. Ready to mine.', 'success');
-                statusDot.className = 'status-indicator idle';
-            } catch(e) {
-                appendLog('Failed to load WASM: ' + e.message, 'error');
-                startBtn.textContent = 'WASM Failed';
-            }
-        }
-
-        startBtn.addEventListener('click', () => {
-            const nodeUrl = document.getElementById('nodeUrl').value.trim();
-            const address = document.getElementById('address').value.trim();
-            if (!address) {
-                appendLog('Please enter a mining address', 'error');
-                return;
-            }
-            if (!address.startsWith('nous1')) {
-                appendLog('Address should start with "nous1"', 'error');
-                return;
-            }
-            const result = nousMiner.start(nodeUrl, address);
-            if (result === 'started') {
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
-                statusDot.className = 'status-indicator mining';
-                statsInterval = setInterval(updateStats, 2000);
-            } else {
-                appendLog('Start failed: ' + result, 'error');
-            }
-        });
-
-        stopBtn.addEventListener('click', () => {
-            nousMiner.stop();
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-            statusDot.className = 'status-indicator idle';
-            if (statsInterval) {
-                clearInterval(statsInterval);
-                statsInterval = null;
-            }
-            updateStats();
-        });
-
-        loadWasm();
-    </script>
+    loadWasm();
+  </script>
 </body>
 </html>

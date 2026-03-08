@@ -3,6 +3,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -16,51 +17,188 @@ import (
 	"syscall/js"
 	"time"
 
+	"nous/crypto"
 	"nous/sat"
+
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 const (
-	satVariables   = 256
+	satVariables    = 256
 	satClausesRatio = 3.85
 	satSolveTimeout = 100 * time.Millisecond
 	seedsPerRound   = 10000
 )
 
 var (
-	mining   bool
-	stopCh   chan struct{}
-	mu       sync.Mutex
-	stats    miningStats
+	reasoning bool
+	stopCh    chan struct{}
+	mu        sync.Mutex
+	stats     reasoningStats
 )
 
-type miningStats struct {
-	SATSolved   int     `json:"sat_solved"`
-	SeedsTried  int     `json:"seeds_tried"`
-	BlocksMined int     `json:"blocks_mined"`
-	HashRate    float64 `json:"hash_rate"`
-	Running     bool    `json:"running"`
-	Height      uint64  `json:"height"`
-	Elapsed     float64 `json:"elapsed"`
+type reasoningStats struct {
+	SATSolved    int     `json:"sat_solved"`
+	SeedsTried   int     `json:"seeds_tried"`
+	BlocksFound  int     `json:"blocks_found"`
+	SolveRate    float64 `json:"solve_rate"`
+	Running      bool    `json:"running"`
+	Height       uint64  `json:"height"`
+	Elapsed      float64 `json:"elapsed"`
 }
 
 func main() {
-	miner := js.Global().Get("Object").New()
-	miner.Set("start", js.FuncOf(startMining))
-	miner.Set("stop", js.FuncOf(stopMining))
-	miner.Set("getStats", js.FuncOf(getStats))
-	js.Global().Set("nousMiner", miner)
+	reasoner := js.Global().Get("Object").New()
+	reasoner.Set("start", js.FuncOf(startReasoning))
+	reasoner.Set("stop", js.FuncOf(stopReasoning))
+	reasoner.Set("getStats", js.FuncOf(getStats))
+	reasoner.Set("createWallet", js.FuncOf(createWallet))
+	reasoner.Set("getBalance", js.FuncOf(getBalance))
+	js.Global().Set("nousReasoner", reasoner)
 
-	jsLog("NOUS WebAssembly Miner loaded")
+	jsLog("NOUS Reasoner loaded")
 
-	// Keep Go running.
 	select {}
 }
 
 func jsLog(msg string) {
-	js.Global().Call("postMinerLog", msg)
+	cb := js.Global().Get("postReasonerLog")
+	if !cb.IsUndefined() && !cb.IsNull() {
+		cb.Invoke(msg)
+	}
 }
 
-func startMining(this js.Value, args []js.Value) interface{} {
+// --- Wallet ---
+
+func createWallet(this js.Value, args []js.Value) interface{} {
+	// Generate 32-byte private key.
+	var privKey [32]byte
+	if _, err := rand.Read(privKey[:]); err != nil {
+		return js.ValueOf(map[string]interface{}{"error": err.Error()})
+	}
+
+	// Derive compressed public key.
+	sk := secp256k1.PrivKeyFromBytes(privKey[:])
+	pubKey := sk.PubKey().SerializeCompressed()
+
+	// hash160 → bech32m address.
+	pkh := crypto.Hash160(pubKey)
+	address := pubKeyHashToAddress(pkh)
+
+	result := js.Global().Get("Object").New()
+	result.Set("private_key", hex.EncodeToString(privKey[:]))
+	result.Set("public_key", hex.EncodeToString(pubKey))
+	result.Set("address", address)
+	return result
+}
+
+func pubKeyHashToAddress(pkh []byte) string {
+	data5 := convertBits(pkh, 8, 5, true)
+	return bech32mEncode("nous", append([]int{0}, data5...))
+}
+
+// --- Bech32m ---
+
+const bech32mConst = 0x2bc830a3
+const charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+func bech32mPolymod(values []int) int {
+	gen := [5]int{0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3}
+	chk := 1
+	for _, v := range values {
+		b := chk >> 25
+		chk = ((chk & 0x1ffffff) << 5) ^ v
+		for i := 0; i < 5; i++ {
+			if (b>>i)&1 == 1 {
+				chk ^= gen[i]
+			}
+		}
+	}
+	return chk
+}
+
+func bech32mHrpExpand(hrp string) []int {
+	ret := make([]int, 0, len(hrp)*2+1)
+	for _, c := range hrp {
+		ret = append(ret, int(c)>>5)
+	}
+	ret = append(ret, 0)
+	for _, c := range hrp {
+		ret = append(ret, int(c)&31)
+	}
+	return ret
+}
+
+func bech32mEncode(hrp string, data5 []int) string {
+	values := append(bech32mHrpExpand(hrp), data5...)
+	polymod := bech32mPolymod(append(values, 0, 0, 0, 0, 0, 0)) ^ bech32mConst
+	checksum := make([]int, 6)
+	for i := 0; i < 6; i++ {
+		checksum[i] = (polymod >> (5 * (5 - i))) & 31
+	}
+	var b strings.Builder
+	b.WriteString(hrp)
+	b.WriteByte('1')
+	for _, d := range append(data5, checksum...) {
+		b.WriteByte(charset[d])
+	}
+	return b.String()
+}
+
+func convertBits(data []byte, fromBits, toBits int, pad bool) []int {
+	acc, bits := 0, 0
+	var ret []int
+	maxv := (1 << toBits) - 1
+	for _, d := range data {
+		acc = (acc << fromBits) | int(d)
+		bits += fromBits
+		for bits >= toBits {
+			bits -= toBits
+			ret = append(ret, (acc>>bits)&maxv)
+		}
+	}
+	if pad && bits > 0 {
+		ret = append(ret, (acc<<(toBits-bits))&maxv)
+	}
+	return ret
+}
+
+// --- Balance ---
+
+func getBalance(this js.Value, args []js.Value) interface{} {
+	if len(args) < 2 {
+		return js.Null()
+	}
+	nodeURL := args[0].String()
+	address := args[1].String()
+
+	promise := js.Global().Get("Promise").New(js.FuncOf(func(_ js.Value, promArgs []js.Value) interface{} {
+		resolve := promArgs[0]
+		reject := promArgs[1]
+		go func() {
+			result, err := rpcCall(nodeURL, "getbalance", []interface{}{address})
+			if err != nil {
+				reject.Invoke(err.Error())
+				return
+			}
+			var bal struct {
+				Balance  int64 `json:"balance"`
+				Immature int64 `json:"immature"`
+			}
+			json.Unmarshal(result, &bal)
+			obj := js.Global().Get("Object").New()
+			obj.Set("balance", bal.Balance)
+			obj.Set("immature", bal.Immature)
+			resolve.Invoke(obj)
+		}()
+		return nil
+	}))
+	return promise
+}
+
+// --- Reasoning ---
+
+func startReasoning(this js.Value, args []js.Value) interface{} {
 	if len(args) < 2 {
 		return "error: need nodeURL and address"
 	}
@@ -68,29 +206,29 @@ func startMining(this js.Value, args []js.Value) interface{} {
 	address := args[1].String()
 
 	mu.Lock()
-	if mining {
+	if reasoning {
 		mu.Unlock()
-		return "already mining"
+		return "already reasoning"
 	}
-	mining = true
+	reasoning = true
 	stopCh = make(chan struct{})
-	stats = miningStats{Running: true}
+	stats = reasoningStats{Running: true}
 	mu.Unlock()
 
-	go mineLoop(nodeURL, address)
+	go reasonLoop(nodeURL, address)
 	return "started"
 }
 
-func stopMining(this js.Value, args []js.Value) interface{} {
+func stopReasoning(this js.Value, args []js.Value) interface{} {
 	mu.Lock()
 	defer mu.Unlock()
-	if !mining {
-		return "not mining"
+	if !reasoning {
+		return "not reasoning"
 	}
 	close(stopCh)
-	mining = false
+	reasoning = false
 	stats.Running = false
-	jsLog("Mining stopped")
+	jsLog("Reasoning stopped")
 	return "stopped"
 }
 
@@ -101,15 +239,15 @@ func getStats(this js.Value, args []js.Value) interface{} {
 	return string(b)
 }
 
-func mineLoop(nodeURL, address string) {
+func reasonLoop(nodeURL, address string) {
 	defer func() {
 		mu.Lock()
-		mining = false
+		reasoning = false
 		stats.Running = false
 		mu.Unlock()
 	}()
 
-	jsLog(fmt.Sprintf("Mining started: node=%s", nodeURL))
+	jsLog(fmt.Sprintf("Reasoning started: node=%s", nodeURL))
 	globalStart := time.Now()
 
 	for {
@@ -119,10 +257,9 @@ func mineLoop(nodeURL, address string) {
 		default:
 		}
 
-		err := mineRound(nodeURL, address, globalStart)
+		err := reasonRound(nodeURL, address, globalStart)
 		if err != nil {
 			jsLog(fmt.Sprintf("Error: %v", err))
-			// Wait before retry.
 			select {
 			case <-stopCh:
 				return
@@ -132,8 +269,7 @@ func mineLoop(nodeURL, address string) {
 	}
 }
 
-func mineRound(nodeURL, address string, globalStart time.Time) error {
-	// getwork
+func reasonRound(nodeURL, address string, globalStart time.Time) error {
 	workRaw, err := rpcCall(nodeURL, "getwork", []interface{}{address, uint64(0)})
 	if err != nil {
 		return fmt.Errorf("getwork: %w", err)
@@ -153,7 +289,7 @@ func mineRound(nodeURL, address string, globalStart time.Time) error {
 	stats.Height = work.Height
 	mu.Unlock()
 
-	jsLog(fmt.Sprintf("Mining block %d (diff: 0x%08x)", work.Height, work.DiffBits))
+	jsLog(fmt.Sprintf("Reasoning block %d (diff: 0x%08x)", work.Height, work.DiffBits))
 
 	headerTemplate, err := hex.DecodeString(work.HeaderHex)
 	if err != nil || len(headerTemplate) != 148 {
@@ -192,11 +328,9 @@ func mineRound(nodeURL, address string, globalStart time.Time) error {
 		}
 		satSolved++
 
-		// Compute solution hash.
 		solBytes := sat.SerializeAssignment(solution)
 		solHash := sha256.Sum256(solBytes)
 
-		// Build header and check PoW.
 		header := make([]byte, 148)
 		copy(header, headerTemplate)
 		binary.LittleEndian.PutUint64(header[76:84], seed)
@@ -208,8 +342,7 @@ func mineRound(nodeURL, address string, globalStart time.Time) error {
 				elapsed := time.Since(roundStart).Seconds()
 				rate := float64(satSolved) / elapsed
 				mu.Lock()
-				stats.SATSolved += 0 // don't double count, updated at end
-				stats.HashRate = rate
+				stats.SolveRate = rate
 				stats.Elapsed = time.Since(globalStart).Seconds()
 				mu.Unlock()
 				jsLog(fmt.Sprintf("Progress: %d SAT solved (%.1f/s), seed=%d", satSolved, rate, seed))
@@ -217,7 +350,6 @@ func mineRound(nodeURL, address string, globalStart time.Time) error {
 			continue
 		}
 
-		// PoW met — submit!
 		solutionStr := assignmentToString(solution)
 		jsLog(fmt.Sprintf("Block found at seed %d! Submitting...", seed))
 
@@ -237,10 +369,10 @@ func mineRound(nodeURL, address string, globalStart time.Time) error {
 			BlockHash string `json:"block_hash"`
 		}
 		json.Unmarshal(result, &submitResult)
-		jsLog(fmt.Sprintf("Block mined! Height: %d, Hash: %s", submitResult.Height, submitResult.BlockHash))
+		jsLog(fmt.Sprintf("Block reasoned! Height: %d, Hash: %s", submitResult.Height, submitResult.BlockHash))
 
 		mu.Lock()
-		stats.BlocksMined++
+		stats.BlocksFound++
 		mu.Unlock()
 
 		return nil
@@ -252,7 +384,7 @@ func mineRound(nodeURL, address string, globalStart time.Time) error {
 	mu.Lock()
 	stats.SATSolved += satSolved
 	stats.SeedsTried += seedsPerRound
-	stats.HashRate = rate
+	stats.SolveRate = rate
 	stats.Elapsed = time.Since(globalStart).Seconds()
 	mu.Unlock()
 

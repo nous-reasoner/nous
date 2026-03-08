@@ -202,21 +202,17 @@
           <div class="stat-value" id="solveRate" style="color:#88aaff;font-size:16px;">—</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Session Blocks</div>
+          <div class="stat-label">Blocks Found</div>
           <div class="stat-value" id="blocksFound">0</div>
         </div>
       </div>
-      <div class="stats" style="margin-top: 10px;">
+      <div class="stats" style="margin-top: 10px; grid-template-columns: 1fr 1fr 1fr;">
         <div class="stat-card">
           <div class="stat-label">Avg Time/Block</div>
           <div class="stat-value" id="avgBlockTime" style="font-size:16px;">—</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Expected Next</div>
-          <div class="stat-value" id="expectedNext" style="font-size:16px;">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">All-Time Blocks</div>
+          <div class="stat-label">Total Blocks</div>
           <div class="stat-value" id="totalBlocks" style="font-size:16px;">0</div>
         </div>
         <div class="stat-card">
@@ -271,31 +267,20 @@
       } else {
         document.getElementById('uptimeText').textContent = '';
       }
-      // Session blocks
+      // Blocks found (session)
       document.getElementById('blocksFound').textContent = sessionBlocks;
-      // Avg time/block
-      if (blockIntervals.length >= 1) {
-        const avg = blockIntervals.reduce((a, b) => a + b, 0) / blockIntervals.length;
-        document.getElementById('avgBlockTime').textContent = formatDuration(avg);
-        // Expected next
-        if (lastBlockTime && isMining) {
-          const elapsed = Date.now() - lastBlockTime;
-          if (elapsed < avg) {
-            document.getElementById('expectedNext').textContent = '~' + formatDuration(avg - elapsed);
-          } else {
-            document.getElementById('expectedNext').textContent = 'Any moment';
-          }
-        } else {
-          document.getElementById('expectedNext').textContent = '—';
-        }
-      } else {
-        document.getElementById('avgBlockTime').textContent = '—';
-        document.getElementById('expectedNext').textContent = '—';
-      }
       // All-time
       const allTime = getAllTimeStats();
       document.getElementById('totalBlocks').textContent = allTime.blocks;
       document.getElementById('totalEarnings').textContent = allTime.blocks + ' NOUS';
+      // Avg time/block (from all-time data)
+      const intervals = allTime.intervals.length > 0 ? allTime.intervals : blockIntervals;
+      if (intervals.length >= 1) {
+        const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+        document.getElementById('avgBlockTime').textContent = avg >= 60000 ? formatDuration(avg) : Math.floor(avg / 1000) + 's';
+      } else {
+        document.getElementById('avgBlockTime').textContent = '—';
+      }
     }
 
     setInterval(updateStatsUI, 1000);

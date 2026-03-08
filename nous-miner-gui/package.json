@@ -1,55 +1,33 @@
 {
   "name": "nous-miner",
   "version": "1.0.0",
-  "description": "NOUS Miner - Mine NOUS by solving 3-SAT problems",
-  "author": "NOUS Chain <dev@nouschain.org>",
+  "description": "NOUS Miner - Cogito Consensus mining client",
+  "author": "NOUS <dev@nouschain.org>",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
     "tiny-secp256k1": "^2.2.4"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.0",
-    "electron": "^28.3.3",
-    "electron-builder": "^24.9.0",
-    "vite": "^5.0.0"
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.0"
   },
   "build": {
     "appId": "org.nouschain.miner",
     "productName": "NOUS Miner",
-    "files": [
-      "src/**/*",
-      "public/**/*",
-      "backend/miner",
-      "backend/miner.exe"
-    ],
-    "asarUnpack": [
-      "backend/miner",
-      "backend/miner.exe"
-    ],
+    "files": ["src/**/*", "public/**/*", "backend/miner"],
     "mac": {
       "category": "public.app-category.finance",
-      "target": [
-        "dmg",
-        "zip"
-      ]
+      "target": ["dmg", "zip"]
     },
     "win": {
-      "target": [
-        "nsis",
-        "portable"
-      ]
+      "target": ["nsis", "portable"]
     },
     "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ]
+      "target": ["AppImage", "deb"]
     }
   }
 }
