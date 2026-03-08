@@ -13,7 +13,17 @@ let wasmReady = false;
 async function loadWasm() {
   const go = new Go();
   try {
-    const result = await WebAssembly.instantiateStreaming(fetch('miner.wasm'), go.importObject);
+    let result;
+    // Try streaming first, fallback to ArrayBuffer if it fails.
+    try {
+      const resp = fetch('miner.wasm');
+      result = await WebAssembly.instantiateStreaming(resp, go.importObject);
+    } catch(streamErr) {
+      self.postMessage({ type: 'log', msg: 'Streaming failed, using fallback loader...' });
+      const resp = await fetch('miner.wasm');
+      const bytes = await resp.arrayBuffer();
+      result = await WebAssembly.instantiate(bytes, go.importObject);
+    }
     go.run(result.instance);
     wasmReady = true;
     self.postMessage({ type: 'ready' });

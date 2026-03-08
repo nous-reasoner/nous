@@ -396,8 +396,19 @@
 
     // --- Worker message handler ---
     function initWorker() {
+      // Clean up any previous worker on page refresh.
+      if (worker) {
+        worker.terminate();
+        worker = null;
+      }
       addLog('Loading WASM reasoner...');
       worker = new Worker('worker.js');
+
+      worker.onerror = function(e) {
+        addLog('Worker error: ' + (e.message || 'unknown'), 'error');
+        document.getElementById('statusText').textContent = 'Error';
+        document.getElementById('statusDot').className = 'status-dot';
+      };
 
       worker.onmessage = function(e) {
         const msg = e.data;
@@ -471,6 +482,11 @@
 
       worker.postMessage({ action: 'load' });
     }
+
+    // Terminate worker on page unload to prevent zombie workers.
+    window.addEventListener('beforeunload', function() {
+      if (worker) { worker.terminate(); }
+    });
 
     initWorker();
   </script>
