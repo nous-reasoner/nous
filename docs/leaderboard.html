@@ -95,10 +95,10 @@
 <script>
 function timeAgo(ts) {
     const diff = Math.floor(Date.now() / 1000) - ts;
-    if (diff < 60) return '刚刚';
-    if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
-    if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
-    return Math.floor(diff / 86400) + ' 天前';
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
 }
 
 function shortAddr(addr) {
@@ -127,7 +127,7 @@ async function load() {
         const data = await res.json();
         render(data);
     } catch(e) {
-        document.getElementById('errorMsg').textContent = '加载失败: ' + e.message;
+        document.getElementById('errorMsg').textContent = 'Failed to load: ' + e.message;
         document.getElementById('errorMsg').classList.remove('hidden');
         document.getElementById('leaderboardRows').innerHTML =
             '<div class="text-red-400 text-center py-8 text-sm">' + e.message + '</div>';
@@ -144,7 +144,7 @@ function render(data) {
     document.getElementById('totalSupply').textContent = height.toLocaleString() + ' NOUS';
     document.getElementById('lastUpdated').textContent = timeAgo(data.updated_at);
     document.getElementById('refreshNote').textContent =
-        '服务端每 30 秒更新 · 页面每 30 秒自动刷新';
+        'Server updates every 30s · Auto-refreshes every 30s';
 
     // Podium top 3
     const top3 = miners.slice(0, 3);
