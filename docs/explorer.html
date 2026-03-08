@@ -72,7 +72,7 @@ async function rpc(method, params = []) {
     const res = await fetch(RPC_URL, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({method, params, id: Date.now()})
+        body: JSON.stringify({method, params, id: 1})
     });
     const json = await res.json();
     if (json.error) throw new Error(json.error.message || JSON.stringify(json.error));
@@ -227,45 +227,47 @@ async function renderHome() {
                     <div class="col-span-3 text-right text-xs text-gray-500">${diffBitsToMultiplier(b.difficulty)}x</div>
                 </a>`).join('');
 
-        // Difficulty chart — fetch last 200 blocks
-        const chartCount = Math.min(200, height + 1);
-        const chartStart = Math.max(0, height - chartCount + 1);
-        const chartPromises = [];
-        for (let h = chartStart; h <= height; h++) {
-            chartPromises.push(rpc('getblock', [h]));
-        }
-        const chartBlocks = await Promise.all(chartPromises);
-
-        const ctx = document.getElementById('diffChart');
-        if (ctx) {
-            new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: chartBlocks.map(b => b.height),
-                    datasets: [{
-                        label: 'Difficulty Bits',
-                        data: chartBlocks.map(b => parseFloat(diffBitsToMultiplier(b.difficulty))),
-                        borderColor: '#00ff88',
-                        backgroundColor: 'rgba(0,255,136,0.1)',
-                        borderWidth: 1.5,
-                        pointRadius: 0,
-                        fill: true,
-                        tension: 0.3
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        x: { display: true, ticks: { color: '#666', maxTicksLimit: 6, font: { size: 10 } }, grid: { color: '#1a1a1a' } },
-                        y: { type: 'linear', ticks: { color: '#666', font: { size: 10 }, callback: v => v.toFixed(2) + 'x' }, grid: { color: '#1a1a1a' } }
-                    },
-                    plugins: { legend: { display: false } }
-                }
-            });
-        }
+        // Difficulty chart — load async so it doesn't block the block list
+        loadDiffChart(height);
     } catch (e) {
         document.getElementById('blockList').innerHTML = `<div class="text-red-400 py-4">${e.message}</div>`;
     }
+}
+
+async function loadDiffChart(height) {
+    try {
+        const chartCount = Math.min(200, height + 1);
+        const chartStart = Math.max(0, height - chartCount + 1);
+        const promises = [];
+        for (let h = chartStart; h <= height; h++) promises.push(rpc('getblock', [h]));
+        const chartBlocks = await Promise.all(promises);
+        const ctx = document.getElementById('diffChart');
+        if (!ctx) return;
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartBlocks.map(b => b.height),
+                datasets: [{
+                    label: 'Difficulty',
+                    data: chartBlocks.map(b => parseFloat(diffBitsToMultiplier(b.difficulty))),
+                    borderColor: '#00ff88',
+                    backgroundColor: 'rgba(0,255,136,0.1)',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: { display: true, ticks: { color: '#666', maxTicksLimit: 6, font: { size: 10 } }, grid: { color: '#1a1a1a' } },
+                    y: { type: 'linear', ticks: { color: '#666', font: { size: 10 }, callback: v => v.toFixed(2) + 'x' }, grid: { color: '#1a1a1a' } }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    } catch(e) { /* chart load failed silently */ }
 }
 
 async function renderBlock(heightStr) {
