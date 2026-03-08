@@ -14,22 +14,79 @@ async function loadWasm() {
   const go = new Go();
   try {
     let result;
-    // Try streaming first, fallback to ArrayBuffer if it fails.
-    try {
-      const resp = fetch('miner.wasm');
-      result = await WebAssembly.instantiateStreaming(resp, go.importObject);
-    } catch(streamErr) {
-      self.postMessage({ type: 'log', msg: 'Streaming failed, using fallback loader...' });
+
+    // Try loading from IndexedDB cache first.
+    const cachedBytes = await getCachedWasm();
+    if (cachedBytes) {
+      self.postMessage({ type: 'log', msg: 'Loading from cache...' });
+      result = await WebAssembly.instantiate(cachedBytes, go.importObject);
+    } else {
+      // Fetch with progress tracking.
+      self.postMessage({ type: 'log', msg: 'Downloading WASM (~3MB)...' });
       const resp = await fetch('miner.wasm');
-      const bytes = await resp.arrayBuffer();
+      const reader = resp.body.getReader();
+      const contentLength = +resp.headers.get('Content-Length') || 3400000;
+      let received = 0;
+      const chunks = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        const pct = Math.min(99, Math.round(received / contentLength * 100));
+        self.postMessage({ type: 'progress', pct: pct });
+      }
+
+      const bytes = new Uint8Array(received);
+      let pos = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, pos);
+        pos += chunk.length;
+      }
+
+      self.postMessage({ type: 'progress', pct: 100 });
+      self.postMessage({ type: 'log', msg: 'Compiling WASM...' });
       result = await WebAssembly.instantiate(bytes, go.importObject);
+
+      // Cache for next time.
+      cacheWasm(bytes).catch(function() {});
     }
+
     go.run(result.instance);
     wasmReady = true;
     self.postMessage({ type: 'ready' });
   } catch(e) {
     self.postMessage({ type: 'error', msg: 'WASM load failed: ' + e.message });
   }
+}
+
+// --- IndexedDB cache ---
+function openCacheDB() {
+  return new Promise(function(resolve, reject) {
+    const req = indexedDB.open('nous-wasm-cache', 1);
+    req.onupgradeneeded = function() { req.result.createObjectStore('wasm'); };
+    req.onsuccess = function() { resolve(req.result); };
+    req.onerror = function() { reject(req.error); };
+  });
+}
+
+async function getCachedWasm() {
+  try {
+    const db = await openCacheDB();
+    return new Promise(function(resolve) {
+      const tx = db.transaction('wasm', 'readonly');
+      const req = tx.objectStore('wasm').get('miner');
+      req.onsuccess = function() { resolve(req.result || null); };
+      req.onerror = function() { resolve(null); };
+    });
+  } catch(e) { return null; }
+}
+
+async function cacheWasm(bytes) {
+  const db = await openCacheDB();
+  const tx = db.transaction('wasm', 'readwrite');
+  tx.objectStore('wasm').put(bytes, 'miner');
 }
 
 self.onmessage = function(e) {

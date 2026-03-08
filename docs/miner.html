@@ -71,6 +71,22 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.4; }
     }
+    .progress-bar {
+      width: 100%;
+      height: 4px;
+      background: #222;
+      border-radius: 2px;
+      margin-top: 10px;
+      overflow: hidden;
+      display: none;
+    }
+    .progress-bar .fill {
+      height: 100%;
+      background: #00ff88;
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.3s;
+    }
     .log {
       background: #0a0a0a;
       border: 1px solid #333;
@@ -139,6 +155,7 @@
         <span id="statusText">Loading WASM...</span>
         <span style="margin-left: auto; color: #666; font-size: 12px;" id="uptimeText"></span>
       </div>
+      <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
       <div class="stats">
         <div class="stat-card">
           <div class="stat-label">Balance</div>
@@ -414,6 +431,7 @@
         const msg = e.data;
         switch (msg.type) {
           case 'ready':
+            document.getElementById('progressBar').style.display = 'none';
             document.getElementById('startBtn').textContent = 'Start Reasoning';
             document.getElementById('startBtn').disabled = false;
             document.getElementById('statusDot').className = 'status-dot';
@@ -470,6 +488,13 @@
               document.getElementById('balance').textContent = (msg.data.balance / 100000000).toFixed(8);
               document.getElementById('immature').textContent = (msg.data.immature / 100000000).toFixed(8);
             }
+            break;
+
+          case 'progress':
+            var bar = document.getElementById('progressBar');
+            bar.style.display = 'block';
+            document.getElementById('progressFill').style.width = msg.pct + '%';
+            document.getElementById('statusText').textContent = 'Loading WASM... ' + msg.pct + '%';
             break;
 
           case 'error':
