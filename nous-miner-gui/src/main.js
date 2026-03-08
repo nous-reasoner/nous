@@ -35,7 +35,8 @@ app.on('window-all-closed', () => {
 ipcMain.handle('start-mining', async (event, config) => {
   if (minerProcess) return { error: 'Already mining' };
 
-  const minerPath = path.join(__dirname, '../backend/miner');
+  const minerExt = process.platform === 'win32' ? '.exe' : '';
+  const minerPath = path.join(__dirname, '../backend/miner' + minerExt);
   const args = [
     '--node', config.nodeUrl,
     '--address', config.address,
