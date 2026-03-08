@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
@@ -22,6 +22,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile('public/index.html');
+  Menu.setApplicationMenu(null);
 }
 
 app.whenReady().then(createWindow);
