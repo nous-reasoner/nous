@@ -36,7 +36,10 @@ ipcMain.handle('start-mining', async (event, config) => {
   if (minerProcess) return { error: 'Already mining' };
 
   const minerExt = process.platform === 'win32' ? '.exe' : '';
-  const minerPath = path.join(__dirname, '../backend/miner' + minerExt);
+  const basePath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked')
+    : path.join(__dirname, '..');
+  const minerPath = path.join(basePath, 'backend', 'miner' + minerExt);
   const args = [
     '--node', config.nodeUrl,
     '--address', config.address,

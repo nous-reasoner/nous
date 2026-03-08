@@ -28,6 +28,10 @@
       "backend/miner",
       "backend/miner.exe"
     ],
+    "asarUnpack": [
+      "backend/miner",
+      "backend/miner.exe"
+    ],
     "mac": {
       "category": "public.app-category.finance",
       "target": [
