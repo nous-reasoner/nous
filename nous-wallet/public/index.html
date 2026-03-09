@@ -258,6 +258,7 @@ function showCreate() {
                 <button class="btn btn-secondary" onclick="doCreate(12)">12 Words</button>
                 <button class="btn btn-primary" onclick="doCreate(24)">24 Words</button>
             </div>
+            <button class="btn btn-secondary mt" onclick="renderSetup()">Back</button>
             <div id="createErr" class="error"></div>
         </div>`;
 }
@@ -277,18 +278,66 @@ async function doCreate(wordCount) {
     }
 }
 
+let pendingMnemonic = '';
+let verifyIndices = [];
+
 function showMnemonic(mnemonic) {
+    pendingMnemonic = mnemonic;
     const words = mnemonic.split(' ');
+    // Pick 3 random word positions to verify later
+    const indices = [];
+    while (indices.length < 3) {
+        const r = Math.floor(Math.random() * words.length);
+        if (!indices.includes(r)) indices.push(r);
+    }
+    verifyIndices = indices.sort((a, b) => a - b);
+
     const el = document.getElementById('content');
     el.innerHTML = `
         <div class="card">
             <div class="label" style="color:#ff6b6b">Write down your recovery phrase</div>
-            <p style="font-size:12px;color:#666;margin:8px 0">Store safely. Anyone with these words can access your wallet.</p>
+            <p style="font-size:12px;color:#666;margin:8px 0">Store these words safely. Anyone with them can access your wallet.</p>
             <div class="word-grid">
                 ${words.map((w, i) => `<div class="word-cell"><span class="num">${i+1}</span>${w}</div>`).join('')}
             </div>
-            <button class="btn btn-primary mt" onclick="enterWallet()">I've saved it</button>
+            <div class="row mt">
+                <button class="btn btn-secondary" onclick="copyText('${mnemonic}')">Copy All</button>
+                <button class="btn btn-primary" onclick="showVerify()">Next</button>
+            </div>
         </div>`;
+}
+
+function showVerify() {
+    const words = pendingMnemonic.split(' ');
+    const el = document.getElementById('content');
+    el.innerHTML = `
+        <div class="card">
+            <div class="label">Verify your recovery phrase</div>
+            <p style="font-size:12px;color:#666;margin:8px 0">Enter the following words to confirm you saved them.</p>
+            ${verifyIndices.map(idx => `
+                <div class="field">
+                    <label>Word #${idx + 1}</label>
+                    <input id="verify_${idx}" placeholder="Enter word #${idx + 1}" autocomplete="off" spellcheck="false">
+                </div>
+            `).join('')}
+            <button class="btn btn-primary" onclick="doVerify()">Confirm</button>
+            <button class="btn btn-secondary mt" onclick="showMnemonic(pendingMnemonic)">Back</button>
+            <div id="verifyErr" class="error"></div>
+        </div>`;
+    document.getElementById('verify_' + verifyIndices[0])?.focus();
+}
+
+function doVerify() {
+    const words = pendingMnemonic.split(' ');
+    for (const idx of verifyIndices) {
+        const input = document.getElementById('verify_' + idx).value.trim().toLowerCase();
+        if (input !== words[idx]) {
+            document.getElementById('verifyErr').textContent = `Word #${idx + 1} is incorrect. Please go back and check.`;
+            return;
+        }
+    }
+    pendingMnemonic = '';
+    enterWallet();
 }
 
 function showImport() {
