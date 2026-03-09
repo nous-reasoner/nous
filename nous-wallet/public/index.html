@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NOUS Wallet</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'SF Pro Text', sans-serif; background: #0a0a0a; color: #e0e0e0; height: 100vh; overflow: hidden; -webkit-app-region: drag; }
+button, input, textarea, a, select { -webkit-app-region: no-drag; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+.app { display: flex; flex-direction: column; height: 100vh; padding-top: 28px; }
+.titlebar { position: fixed; top: 0; left: 0; right: 0; height: 28px; }
+
+/* Navigation */
+.nav { display: flex; border-bottom: 1px solid #222; padding: 0 16px; background: #111; flex-shrink: 0; }
+.nav button { background: none; border: none; color: #666; padding: 10px 14px; font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; letter-spacing: 0.5px; }
+.nav button.active { color: #00ff88; border-bottom-color: #00ff88; }
+.nav button:hover { color: #aaa; }
+
+/* Content */
+.content { flex: 1; overflow-y: auto; padding: 20px; }
+
+/* Common */
+.card { background: #151515; border: 1px solid #222; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+.label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+.value { font-size: 28px; font-weight: 700; color: #fff; }
+.value .unit { font-size: 14px; color: #00ff88; font-weight: 400; margin-left: 4px; }
+.sub { font-size: 12px; color: #555; margin-top: 4px; }
+
+input, textarea {
+    width: 100%; background: #111; border: 1px solid #282828; border-radius: 8px;
+    padding: 10px 12px; color: #e0e0e0; font-size: 14px; outline: none;
+    font-family: inherit; transition: border-color 0.2s;
+}
+input:focus, textarea:focus { border-color: #00ff88; }
+textarea { resize: none; min-height: 60px; }
+
+.btn {
+    width: 100%; padding: 12px; border: none; border-radius: 10px; font-size: 14px;
+    font-weight: 600; cursor: pointer; transition: all 0.2s; letter-spacing: 0.3px;
+}
+.btn-primary { background: #00ff88; color: #000; }
+.btn-primary:hover { background: #00e07a; }
+.btn-secondary { background: #1a1a1a; color: #ccc; border: 1px solid #333; }
+.btn-secondary:hover { background: #222; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-small { width: auto; padding: 6px 14px; font-size: 12px; border-radius: 6px; display: inline-block; }
+
+.row { display: flex; gap: 8px; margin-bottom: 12px; }
+.row > * { flex: 1; }
+
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
+
+.mnemonic-box {
+    background: #0d0d0d; border: 1px solid #00ff8833; border-radius: 10px;
+    padding: 16px; margin: 16px 0; font-family: 'SF Mono', monospace;
+    font-size: 15px; line-height: 2; color: #00ff88; text-align: center;
+    word-spacing: 8px; user-select: all;
+}
+
+.addr-text {
+    font-family: 'SF Mono', monospace; font-size: 12px; color: #888;
+    word-break: break-all; cursor: pointer; padding: 8px; border-radius: 6px;
+    background: #0d0d0d; border: 1px solid #1a1a1a;
+}
+.addr-text:hover { color: #00ff88; border-color: #00ff8844; }
+
+.addr-list { margin-top: 12px; }
+.addr-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 12px; border-bottom: 1px solid #1a1a1a; font-size: 12px;
+}
+.addr-item:last-child { border: none; }
+
+.tx-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px; border-bottom: 1px solid #1a1a1a;
+}
+.tx-item:last-child { border: none; }
+.tx-amount { font-weight: 600; font-size: 14px; }
+.tx-amount.positive { color: #00ff88; }
+.tx-amount.negative { color: #ff6b6b; }
+.tx-meta { font-size: 11px; color: #555; }
+
+.toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #222; color: #00ff88; padding: 8px 20px; border-radius: 20px;
+    font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 99;
+}
+.toast.show { opacity: 1; }
+
+.qr { display: flex; justify-content: center; margin: 16px 0; }
+.qr canvas { border-radius: 8px; }
+
+.error { color: #ff6b6b; font-size: 12px; margin-top: 6px; }
+.success { color: #00ff88; font-size: 12px; margin-top: 6px; }
+
+.logo { text-align: center; padding: 40px 0 20px; }
+.logo h1 { font-size: 24px; color: #fff; letter-spacing: 4px; }
+.logo .tagline { font-size: 11px; color: #444; margin-top: 4px; letter-spacing: 2px; }
+
+.hidden { display: none !important; }
+.center { text-align: center; }
+.mt { margin-top: 12px; }
+.mb { margin-bottom: 12px; }
+
+/* Setup specific */
+.setup-options { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.word-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 12px 0; }
+.word-cell { background: #151515; border: 1px solid #222; border-radius: 6px; padding: 6px 8px; font-size: 12px; text-align: center; font-family: 'SF Mono', monospace; }
+.word-cell .num { color: #444; font-size: 10px; margin-right: 4px; }
+</style>
+</head>
+<body>
+<div class="app">
+    <div class="titlebar"></div>
+
+    <!-- Nav (hidden during setup) -->
+    <div class="nav" id="nav">
+        <button data-tab="overview" class="active" onclick="switchTab('overview')">Overview</button>
+        <button data-tab="send" onclick="switchTab('send')">Send</button>
+        <button data-tab="receive" onclick="switchTab('receive')">Receive</button>
+        <button data-tab="history" onclick="switchTab('history')">History</button>
+    </div>
+
+    <div class="content" id="content"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- QR Code library (lightweight, inline) -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+
+<script>
+const { ipcRenderer } = require('electron');
+
+// --- API ---
+async function api(method, params) {
+    const resp = await ipcRenderer.invoke(method, params);
+    if (resp && resp.error) throw new Error(resp.error);
+    return resp?.result;
+}
+
+// --- State ---
+let currentTab = 'overview';
+let balanceData = { balance: 0, immature: 0 };
+let addresses = [];
+let walletPassword = '';
+
+// --- Utils ---
+function formatNOUS(nou) {
+    const whole = Math.floor(nou / 1e8);
+    const frac = Math.abs(nou % 1e8).toString().padStart(8, '0').replace(/0+$/, '');
+    return frac ? `${whole}.${frac}` : `${whole}`;
+}
+
+function timeAgo(ts) {
+    const diff = Math.floor(Date.now() / 1000) - ts;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+}
+
+function toast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+function copyText(text) {
+    navigator.clipboard.writeText(text);
+    toast('Copied');
+}
+
+// --- Router ---
+function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.nav button').forEach(b =>
+        b.classList.toggle('active', b.dataset.tab === tab));
+    renderTab();
+}
+
+async function renderTab() {
+    const el = document.getElementById('content');
+    switch (currentTab) {
+        case 'overview': await renderOverview(el); break;
+        case 'send': renderSend(el); break;
+        case 'receive': await renderReceive(el); break;
+        case 'history': await renderHistory(el); break;
+    }
+}
+
+// --- Setup / Unlock ---
+function renderSetup() {
+    document.getElementById('nav').classList.add('hidden');
+    const el = document.getElementById('content');
+    el.innerHTML = `
+        <div class="logo">
+            <h1>NOUS</h1>
+            <div class="tagline">COGITO, ERGO SUM</div>
+        </div>
+        <div class="setup-options">
+            <button class="btn btn-primary" onclick="showCreate()">Create New Wallet</button>
+            <button class="btn btn-secondary" onclick="showImport()">Import Wallet</button>
+        </div>`;
+}
+
+function renderUnlock() {
+    document.getElementById('nav').classList.add('hidden');
+    const el = document.getElementById('content');
+    el.innerHTML = `
+        <div class="logo">
+            <h1>NOUS</h1>
+            <div class="tagline">COGITO, ERGO SUM</div>
+        </div>
+        <div class="card">
+            <div class="field">
+                <label>Password</label>
+                <input type="password" id="unlockPw" placeholder="Enter password" onkeydown="if(event.key==='Enter')doUnlock()">
+            </div>
+            <button class="btn btn-primary" onclick="doUnlock()">Unlock</button>
+            <div id="unlockErr" class="error"></div>
+        </div>`;
+    setTimeout(() => document.getElementById('unlockPw')?.focus(), 100);
+}
+
+async function doUnlock() {
+    const pw = document.getElementById('unlockPw').value;
+    try {
+        await api('unlock', { password: pw });
+        walletPassword = pw;
+        enterWallet();
+    } catch(e) {
+        document.getElementById('unlockErr').textContent = e.message;
+    }
+}
+
+function showCreate() {
+    const el = document.getElementById('content');
+    el.innerHTML = `
+        <div class="logo"><h1>NOUS</h1></div>
+        <div class="card">
+            <div class="label">Set Password</div>
+            <div class="field">
+                <input type="password" id="createPw" placeholder="Password (min 6 chars)">
+            </div>
+            <div class="field">
+                <input type="password" id="createPw2" placeholder="Confirm password">
+            </div>
+            <div class="row">
+                <button class="btn btn-secondary" onclick="doCreate(12)">12 Words</button>
+                <button class="btn btn-primary" onclick="doCreate(24)">24 Words</button>
+            </div>
+            <div id="createErr" class="error"></div>
+        </div>`;
+}
+
+async function doCreate(wordCount) {
+    const pw = document.getElementById('createPw').value;
+    const pw2 = document.getElementById('createPw2').value;
+    if (pw.length < 6) { document.getElementById('createErr').textContent = 'Password too short'; return; }
+    if (pw !== pw2) { document.getElementById('createErr').textContent = 'Passwords do not match'; return; }
+
+    try {
+        const res = await api('create_wallet', { word_count: wordCount, password: pw });
+        walletPassword = pw;
+        showMnemonic(res.mnemonic);
+    } catch(e) {
+        document.getElementById('createErr').textContent = e.message;
+    }
+}
+
+function showMnemonic(mnemonic) {
+    const words = mnemonic.split(' ');
+    const el = document.getElementById('content');
+    el.innerHTML = `
+        <div class="card">
+            <div class="label" style="color:#ff6b6b">Write down your recovery phrase</div>
+            <p style="font-size:12px;color:#666;margin:8px 0">Store safely. Anyone with these words can access your wallet.</p>
+            <div class="word-grid">
+                ${words.map((w, i) => `<div class="word-cell"><span class="num">${i+1}</span>${w}</div>`).join('')}
+            </div>
+            <button class="btn btn-primary mt" onclick="enterWallet()">I've saved it</button>
+        </div>`;
+}
+
+function showImport() {
+    const el = document.getElementById('content');
+    el.innerHTML = `
+        <div class="logo"><h1>NOUS</h1></div>
+        <div class="card">
+            <div class="field">
+                <label>Recovery Phrase</label>
+                <textarea id="importMnemonic" placeholder="Enter 12 or 24 words separated by spaces" rows="3"></textarea>
+            </div>
+            <div class="field">
+                <label>Password</label>
+                <input type="password" id="importPw" placeholder="Set password">
+            </div>
+            <button class="btn btn-primary" onclick="doImport()">Import</button>
+            <button class="btn btn-secondary mt" onclick="renderSetup()">Back</button>
+            <div id="importErr" class="error"></div>
+        </div>`;
+}
+
+async function doImport() {
+    const mnemonic = document.getElementById('importMnemonic').value.trim();
+    const pw = document.getElementById('importPw').value;
+    if (pw.length < 6) { document.getElementById('importErr').textContent = 'Password too short'; return; }
+    try {
+        await api('import_wallet', { mnemonic, password: pw });
+        walletPassword = pw;
+        enterWallet();
+    } catch(e) {
+        document.getElementById('importErr').textContent = e.message;
+    }
+}
+
+async function enterWallet() {
+    document.getElementById('nav').classList.remove('hidden');
+    addresses = await api('list_addresses') || [];
+    switchTab('overview');
+    refreshBalance();
+}
+
+// --- Overview ---
+async function renderOverview(el) {
+    const addr = addresses.length > 0 ? addresses[0].address : '—';
+    el.innerHTML = `
+        <div class="card">
+            <div class="label">Balance</div>
+            <div class="value">${formatNOUS(balanceData.balance)}<span class="unit">NOUS</span></div>
+            ${balanceData.immature > 0 ? `<div class="sub">Immature: ${formatNOUS(balanceData.immature)} NOUS</div>` : ''}
+        </div>
+        <div class="card">
+            <div class="label">Primary Address</div>
+            <div class="addr-text" onclick="copyText('${addr}')">${addr}</div>
+        </div>
+        <div class="row">
+            <button class="btn btn-primary" onclick="switchTab('send')">Send</button>
+            <button class="btn btn-secondary" onclick="switchTab('receive')">Receive</button>
+        </div>`;
+}
+
+async function refreshBalance() {
+    try {
+        balanceData = await api('get_balance');
+        if (currentTab === 'overview') {
+            renderTab();
+        }
+    } catch(e) { /* node offline */ }
+}
+
+// --- Send ---
+function renderSend(el) {
+    el.innerHTML = `
+        <div class="card">
+            <div class="label">Send NOUS</div>
+            <div class="field">
+                <label>To Address</label>
+                <input id="sendTo" placeholder="nous1q..." spellcheck="false">
+            </div>
+            <div class="field">
+                <label>Amount (NOUS)</label>
+                <input id="sendAmount" type="number" step="0.00000001" placeholder="0.00">
+            </div>
+            <div class="field">
+                <label>Fee (NOUS)</label>
+                <input id="sendFee" type="number" step="0.00000001" value="0.0001">
+            </div>
+            <div class="field">
+                <label>Message (optional, stored on-chain)</label>
+                <textarea id="sendMsg" placeholder="Your message engraved on the blockchain..." maxlength="80"></textarea>
+            </div>
+            <button class="btn btn-primary" onclick="doSend()">Send</button>
+            <div id="sendResult" class="mt"></div>
+        </div>`;
+}
+
+async function doSend() {
+    const to = document.getElementById('sendTo').value.trim();
+    const amount = Math.round(parseFloat(document.getElementById('sendAmount').value || '0') * 1e8);
+    const fee = Math.round(parseFloat(document.getElementById('sendFee').value || '0') * 1e8);
+    const message = document.getElementById('sendMsg').value.trim();
+    const resultEl = document.getElementById('sendResult');
+
+    if (!to.startsWith('nous1')) { resultEl.innerHTML = '<div class="error">Invalid address</div>'; return; }
+    if (amount <= 0) { resultEl.innerHTML = '<div class="error">Invalid amount</div>'; return; }
+
+    resultEl.innerHTML = '<div class="sub">Broadcasting...</div>';
+    try {
+        const res = await api('send', { to, amount, fee, message });
+        resultEl.innerHTML = `<div class="success">Sent! TxID: ${res.txid.slice(0, 16)}...</div>`;
+        refreshBalance();
+    } catch(e) {
+        resultEl.innerHTML = `<div class="error">${e.message}</div>`;
+    }
+}
+
+// --- Receive ---
+async function renderReceive(el) {
+    addresses = await api('list_addresses') || [];
+    const primary = addresses.length > 0 ? addresses[0].address : '—';
+
+    el.innerHTML = `
+        <div class="card center">
+            <div class="label">Your Address</div>
+            <div class="qr"><canvas id="qrCanvas"></canvas></div>
+            <div class="addr-text" onclick="copyText('${primary}')">${primary}</div>
+            <button class="btn btn-small btn-secondary mt" onclick="copyText('${primary}')">Copy</button>
+        </div>
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <div class="label" style="margin:0">All Addresses</div>
+                <button class="btn btn-small btn-primary" onclick="deriveNew()">+ New</button>
+            </div>
+            <div class="addr-list">
+                ${addresses.map((a, i) => `
+                    <div class="addr-item">
+                        <span style="font-family:'SF Mono',monospace;font-size:11px;color:#888;cursor:pointer" onclick="copyText('${a.address}')">${a.address.slice(0,12)}...${a.address.slice(-6)}</span>
+                        <span style="font-size:10px;color:#444">${a.path}</span>
+                    </div>`).join('')}
+            </div>
+        </div>`;
+
+    // Render QR
+    if (primary !== '—' && typeof qrcode !== 'undefined') {
+        const qr = qrcode(0, 'M');
+        qr.addData(primary);
+        qr.make();
+        const canvas = document.getElementById('qrCanvas');
+        const size = 180;
+        const cellSize = size / qr.getModuleCount();
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#111';
+        ctx.fillRect(0, 0, size, size);
+        for (let r = 0; r < qr.getModuleCount(); r++) {
+            for (let c = 0; c < qr.getModuleCount(); c++) {
+                ctx.fillStyle = qr.isDark(r, c) ? '#00ff88' : '#111';
+                ctx.fillRect(c * cellSize, r * cellSize, cellSize + 0.5, cellSize + 0.5);
+            }
+        }
+    }
+}
+
+async function deriveNew() {
+    try {
+        await api('derive_address');
+        renderReceive(document.getElementById('content'));
+        toast('New address derived');
+    } catch(e) {
+        toast(e.message);
+    }
+}
+
+// --- History ---
+async function renderHistory(el) {
+    el.innerHTML = '<div class="card center"><div class="sub">Loading transactions...</div></div>';
+    try {
+        const history = await api('get_history') || [];
+        if (history.length === 0) {
+            el.innerHTML = '<div class="card center"><div class="sub">No transactions yet</div></div>';
+            return;
+        }
+        el.innerHTML = `<div class="card" style="padding:0">
+            ${history.map(tx => {
+                const isPositive = tx.amount > 0;
+                return `
+                <div class="tx-item">
+                    <div>
+                        <div class="tx-amount ${isPositive ? 'positive' : 'negative'}">
+                            ${isPositive ? '+' : ''}${formatNOUS(tx.amount)} NOUS
+                        </div>
+                        <div class="tx-meta">${tx.message || tx.address?.slice(0,16) + '...' || ''}</div>
+                    </div>
+                    <div style="text-align:right">
+                        <div style="font-size:12px;color:#666">#${tx.height}</div>
+                        <div class="tx-meta">${timeAgo(tx.timestamp)}</div>
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>`;
+    } catch(e) {
+        el.innerHTML = `<div class="card"><div class="error">${e.message}</div></div>`;
+    }
+}
+
+// --- Init ---
+async function init() {
+    try {
+        // Small delay for backend to start
+        await new Promise(r => setTimeout(r, 500));
+        const exists = await api('wallet_exists');
+        if (exists) {
+            renderUnlock();
+        } else {
+            renderSetup();
+        }
+    } catch(e) {
+        document.getElementById('content').innerHTML =
+            `<div class="card"><div class="error">Backend error: ${e.message}</div></div>`;
+    }
+}
+
+// Auto-refresh balance every 30s
+setInterval(() => {
+    if (currentTab === 'overview') refreshBalance();
+}, 30000);
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "name": "nous-wallet",
+  "version": "1.0.0",
+  "description": "NOUS Wallet — Cogito Consensus",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "cd backend && go build -o wallet-backend . && cd .. && electron .",
+    "build-backend": "cd backend && go build -o wallet-backend .",
+    "build": "npm run build-backend && electron-builder"
+  },
+  "build": {
+    "appId": "org.nouschain.wallet",
+    "productName": "NOUS Wallet",
+    "files": ["src/**/*", "public/**/*"],
+    "extraResources": [
+      { "from": "backend/wallet-backend", "to": "backend/wallet-backend" }
+    ],
+    "mac": {
+      "category": "public.app-category.finance",
+      "target": ["dmg"]
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}
