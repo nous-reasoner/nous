@@ -4,69 +4,275 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NOUS Explorer — Cogito Consensus</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: { nous: '#00ff88', nousdim: '#00cc6a', bg: '#0a0a0a', card: '#111111', border: '#222222' }
-                }
-            }
-        }
-    </script>
     <style>
-        body { font-family: 'Courier New', monospace; background: #0a0a0a; }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Courier New', monospace; background: #0a0a0a; color: #d1d5db; min-height: 100vh; }
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #111; }
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
         .spinner { animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Layout */
+        .max-w-6xl { max-width: 72rem; margin-left: auto; margin-right: auto; }
+        .px-4 { padding-left: 1rem; padding-right: 1rem; }
+        .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+        .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+        .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+        .py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+        .py-8 { padding-top: 2rem; padding-bottom: 2rem; }
+        .py-20 { padding-top: 5rem; padding-bottom: 5rem; }
+        .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+        .p-3 { padding: 0.75rem; }
+        .p-4 { padding: 1rem; }
+        .mb-1 { margin-bottom: 0.25rem; }
+        .mb-2 { margin-bottom: 0.5rem; }
+        .mb-3 { margin-bottom: 0.75rem; }
+        .mb-4 { margin-bottom: 1rem; }
+        .mb-6 { margin-bottom: 1.5rem; }
+        .mr-2 { margin-right: 0.5rem; }
+        .ml-2 { margin-left: 0.5rem; }
+        .ml-1 { margin-left: 0.25rem; }
+        .ml-auto { margin-left: auto; }
+        .mt-3 { margin-top: 0.75rem; }
+        .gap-1 { gap: 0.25rem; }
+        .gap-2 { gap: 0.5rem; }
+        .gap-3 { gap: 0.75rem; }
+        .gap-4 { gap: 1rem; }
+        .gap-6 { gap: 1.5rem; }
+
+        /* Flexbox & Grid */
+        .flex { display: flex; }
+        .grid { display: grid; }
+        .items-center { align-items: center; }
+        .justify-between { justify-content: space-between; }
+        .flex-wrap { flex-wrap: wrap; }
+        .flex-1 { flex: 1 1 0%; }
+        .flex-col { flex-direction: column; }
+        .space-y-1 > * + * { margin-top: 0.25rem; }
+        .space-y-2 > * + * { margin-top: 0.5rem; }
+        .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .grid-cols-12 { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+        .col-span-1 { grid-column: span 1 / span 1; }
+        .col-span-3 { grid-column: span 3 / span 3; }
+        .col-span-4 { grid-column: span 4 / span 4; }
+
+        /* Typography */
+        .text-xs { font-size: 0.75rem; line-height: 1rem; }
+        .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+        .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+        .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+        .font-bold { font-weight: 700; }
+        .font-normal { font-weight: 400; }
+        .font-mono { font-family: 'Courier New', monospace; }
+        .uppercase { text-transform: uppercase; }
+        .italic { font-style: italic; }
+        .tracking-widest { letter-spacing: 0.1em; }
+        .tracking-wider { letter-spacing: 0.05em; }
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .break-all { word-break: break-all; }
+
+        /* Colors */
+        .text-white { color: #fff; }
+        .text-nous { color: #00ff88; }
+        .text-gray-300 { color: #d1d5db; }
+        .text-gray-400 { color: #9ca3af; }
+        .text-gray-500 { color: #6b7280; }
+        .text-gray-600 { color: #4b5563; }
+        .text-red-400 { color: #f87171; }
+        .text-yellow-400 { color: #facc15; }
+        .text-yellow-500 { color: #eab308; }
+        .bg-bg { background: #0a0a0a; }
+        .bg-card { background: #111111; }
+        .border-border { border-color: #222222; }
+        .border-b { border-bottom: 1px solid; }
+        .border-t { border-top: 1px solid; }
+        .border { border: 1px solid; }
+        .border-transparent { border-color: transparent; }
+        .border-nous-dim { border-color: rgba(0,255,136,0.3); }
+        .border-yellow-dim { border-color: rgba(234,179,8,0.3); }
+        .rounded { border-radius: 0.25rem; }
+
+        /* Interactive */
+        a { color: inherit; text-decoration: none; }
+        .hover-underline:hover { text-decoration: underline; }
+        .cursor-pointer { cursor: pointer; }
+        .transition { transition: all 0.15s ease; }
+        .block { display: block; }
+        .hidden { display: none; }
+        .sticky { position: sticky; top: 0; z-index: 50; }
+
+        /* Components */
+        .card-hover:hover { border-color: rgba(0,255,136,0.3); }
+        .block-row:hover { background: #111111; border-color: #222222; }
+        .hover-underline:hover { text-decoration: underline; }
+        .btn-nous { background: rgba(0,255,136,0.1); border: 1px solid rgba(0,255,136,0.3); color: #00ff88; }
+        .btn-nous:hover { background: rgba(0,255,136,0.2); }
+        input[type="text"] { background: #0a0a0a; border: 1px solid #222; color: #d1d5db; outline: none; }
+        input[type="text"]::placeholder { color: #4b5563; }
+        input[type="text"]:focus { border-color: rgba(0,255,136,0.5); }
+        hr { border: none; border-top: 1px solid #222; }
+
+        /* Responsive */
+        @media (min-width: 640px) {
+            .sm-grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .sm-grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+            .sm-grid { display: grid; }
+            .sm-flex-row { flex-direction: row; }
+            .sm-justify-between { justify-content: space-between; }
+            .sm-items-center { align-items: center; }
+            .sm-text-left { text-align: left; }
+            .sm-w-72 { width: 18rem; }
+            .sm-gap-8 { gap: 2rem; }
+        }
+        @media (min-width: 1024px) {
+            .lg-grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .lg-col-span-2 { grid-column: span 2 / span 2; }
+        }
+
+        /* Badge styles */
+        .badge-genesis { background: linear-gradient(135deg,#ffd700,#ffed4e); color: #000; }
+        .badge-mainnet { background: #00ff88; color: #0a0a0a; }
     </style>
 </head>
-<body class="text-gray-300 min-h-screen">
+<body>
 
 <!-- Header -->
-<header class="border-b border-border bg-card/80 backdrop-blur sticky top-0 z-50">
-    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+<header class="border-b border-border bg-card sticky" style="background:rgba(17,17,17,0.8);backdrop-filter:blur(8px);">
+    <div class="max-w-6xl px-4 py-3 flex items-center justify-between">
         <div class="flex items-center gap-4">
             <a href="#home" class="text-xl font-bold text-white tracking-widest">NOUS <span class="text-nous text-sm font-normal">Explorer</span></a>
-            <a href="/leaderboard.html" class="text-sm text-gray-500 hover:text-nous transition">Leaderboard</a>
+            <a href="/leaderboard.html" class="text-sm text-gray-500 transition">Leaderboard</a>
         </div>
         <div class="flex items-center gap-2">
             <input id="searchInput" type="text" placeholder="Block height / Tx hash / Address"
-                class="bg-bg border border-border rounded px-3 py-1.5 text-sm w-48 sm:w-72 focus:outline-none focus:border-nous/50 text-gray-300 placeholder-gray-600">
-            <button onclick="handleSearch()" class="bg-nous/10 border border-nous/30 text-nous px-3 py-1.5 rounded text-sm hover:bg-nous/20 transition">Search</button>
+                class="rounded px-4 py-2 text-sm" style="width:18rem;">
+            <button onclick="handleSearch()" class="btn-nous rounded px-4 py-2 text-sm transition">Search</button>
         </div>
     </div>
 </header>
 
 <!-- Status Bar -->
-<div class="border-b border-border bg-card/50">
-    <div class="max-w-6xl mx-auto px-4 py-2 flex flex-wrap gap-4 sm:gap-8 text-xs">
+<div class="border-b border-border" style="background:rgba(17,17,17,0.5);">
+    <div class="max-w-6xl px-4 py-2 flex flex-wrap gap-4 text-xs">
         <div>Height <span id="statHeight" class="text-nous font-bold">—</span></div>
         <div>Difficulty <span id="statDifficulty" class="text-white font-bold">—</span></div>
         <div>Peers <span id="statPeers" class="text-white font-bold">—</span></div>
         <div>Target <span class="text-white font-bold">150s</span></div>
         <div class="ml-auto flex items-center gap-2">
-            <a href="#block/0" class="px-2 py-0.5 rounded text-xs font-bold cursor-pointer hover:opacity-80 transition" style="background:linear-gradient(135deg,#ffd700,#ffed4e);color:#000;">⭐ Genesis</a>
-            <span class="px-2 py-0.5 rounded text-xs font-bold" style="background:#00ff88;color:#0a0a0a;">Mainnet</span>
+            <a href="#block/0" class="badge-genesis rounded text-xs font-bold cursor-pointer transition" style="padding:2px 8px;">⭐ Genesis</a>
+            <span class="badge-mainnet rounded text-xs font-bold" style="padding:2px 8px;">Mainnet</span>
+            <button id="tzToggle" onclick="toggleTimezone()" class="text-gray-500 ml-2 cursor-pointer transition" style="background:none;border:1px solid #333;padding:1px 6px;border-radius:3px;font-family:inherit;font-size:inherit;" title="Toggle UTC / Local time">UTC</button>
             <span id="statUpdated" class="text-gray-600 ml-2">updating...</span>
         </div>
     </div>
 </div>
 
 <!-- Main Content -->
-<main id="app" class="max-w-6xl mx-auto px-4 py-6">
+<main id="app" class="max-w-6xl px-4 py-6">
     <div class="text-center text-gray-500 py-20">Loading...</div>
 </main>
 
 <footer class="border-t border-border text-center py-4 text-xs text-gray-600">
-    <a href="index.html" class="hover:text-nous transition">NOUS</a> — Cogito, ergo sum.
+    <a href="index.html" class="transition">NOUS</a> — Cogito, ergo sum.
 </footer>
 
 <script>
 const RPC_URL = window.location.origin + '/api';
+let diffChartInstance = null;
+let diffJsonCache = null;
+let diffJsonCacheTime = 0;
+const DIFF_CACHE_TTL = 60000; // cache difficulty.json for 60s
+
+// --- i18n ---
+const I18N = {
+    en: {
+        explorer: 'Explorer', leaderboard: 'Leaderboard',
+        search_placeholder: 'Block height / Tx hash / Address', search: 'Search',
+        height: 'Height', difficulty: 'Difficulty', peers: 'Peers', target: 'Target',
+        genesis_btn: 'Genesis', mainnet: 'Mainnet', updating: 'updating...',
+        latest_blocks: 'Latest Blocks', diff_chart: 'Difficulty (last 200 blocks)',
+        loading_blocks: 'Loading blocks...', loading: 'Loading...',
+        col_height: 'Height', col_miner: 'Miner', col_time: 'Time', col_txs: 'Txs', col_diff: 'Difficulty',
+        block: 'Block', hash: 'Hash', timestamp: 'Timestamp', miner: 'Miner',
+        reward: 'Reward', transactions: 'Transactions', verified: 'Verified',
+        genesis_block: 'Genesis Block', launch_date: 'Launch Date',
+        consensus: 'Consensus', block_reward: 'Block Reward',
+        constitution: 'Constitution', vision: 'Vision',
+        constitution_text: 'Any entity that can reason may participate',
+        vision_text: 'AI as native blockchain participant',
+        fair_launch: '0 NOUS (Fair Launch)', reward_forever: '1 NOUS forever, no halving',
+        cogito_consensus: 'Cogito Consensus',
+        variables: 'Variables', clauses: 'Clauses', ratio: 'Ratio', seed: 'Seed',
+        transaction: 'Transaction', txid: 'TxID', confirmations: 'Confirmations',
+        unconfirmed: 'Unconfirmed (mempool)', coinbase: 'Coinbase', coinbase_new: 'Coinbase (new coins)',
+        inputs: 'Inputs', outputs: 'Outputs',
+        address_lookup: 'Address Lookup', lookup: 'Lookup',
+        address: 'Address', available: 'Available', immature: 'Immature',
+        utxos: 'UTXOs', no_utxos: 'No spendable UTXOs',
+        block_not_found: 'Block not found', tx_not_found: 'Transaction not found',
+        loading_block: 'Loading block...', loading_tx: 'Loading transaction...',
+        genesis_label: 'Genesis',
+    },
+    zh: {
+        explorer: '浏览器', leaderboard: '排行榜',
+        search_placeholder: '区块高度 / 交易哈希 / 地址', search: '搜索',
+        height: '高度', difficulty: '难度', peers: '节点', target: '目标',
+        genesis_btn: '创世', mainnet: '主网', updating: '更新中...',
+        latest_blocks: '最新区块', diff_chart: '难度变化（最近 200 个区块）',
+        loading_blocks: '加载区块中...', loading: '加载中...',
+        col_height: '高度', col_miner: '矿工', col_time: '时间', col_txs: '交易', col_diff: '难度',
+        block: '区块', hash: '哈希', timestamp: '时间戳', miner: '矿工',
+        reward: '奖励', transactions: '交易', verified: '已验证',
+        genesis_block: '创世区块', launch_date: '启动日期',
+        consensus: '共识', block_reward: '区块奖励',
+        constitution: '宪法', vision: '愿景',
+        constitution_text: '任何能够推理的实体均可参与',
+        vision_text: 'AI 作为原生区块链参与者',
+        fair_launch: '0 NOUS（公平启动）', reward_forever: '永恒 1 NOUS，永不减半',
+        cogito_consensus: 'Cogito 共识',
+        variables: '变量', clauses: '子句', ratio: '比率', seed: '种子',
+        transaction: '交易', txid: '交易ID', confirmations: '确认数',
+        unconfirmed: '未确认（内存池）', coinbase: 'Coinbase', coinbase_new: 'Coinbase（新币）',
+        inputs: '输入', outputs: '输出',
+        address_lookup: '地址查询', lookup: '查询',
+        address: '地址', available: '可用', immature: '未成熟',
+        utxos: 'UTXOs', no_utxos: '无可花费的 UTXO',
+        block_not_found: '未找到区块', tx_not_found: '未找到交易',
+        loading_block: '加载区块中...', loading_tx: '加载交易中...',
+        genesis_label: '创世',
+    }
+};
+
+let lang = localStorage.getItem('nous_lang') || 'en';
+function t(key) { return (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key; }
+
+function toggleLang() {
+    lang = lang === 'en' ? 'zh' : 'en';
+    localStorage.setItem('nous_lang', lang);
+    updateLangButton();
+    updateHeaderText();
+    updateStatus();
+    route();
+}
+
+function updateLangButton() {
+    const btn = document.getElementById('langToggle');
+    if (btn) btn.textContent = lang === 'en' ? 'EN' : '中文';
+}
+
+function updateHeaderText() {
+    document.getElementById('headerExplorer').textContent = t('explorer');
+    document.getElementById('headerLeaderboard').textContent = t('leaderboard');
+    document.getElementById('searchInput').placeholder = t('search_placeholder');
+    document.getElementById('searchBtn').textContent = t('search');
+    document.getElementById('headerTarget').textContent = t('target');
+    document.getElementById('headerGenesisBtn').textContent = t('genesis_btn');
+    document.getElementById('headerMainnet').textContent = t('mainnet');
+}
 
 async function rpc(method, params = []) {
     const res = await fetch(RPC_URL, {
@@ -92,8 +298,36 @@ function shortHash(hash) {
     return hash.slice(0, 8) + '...' + hash.slice(-8);
 }
 
+// Timezone preference: 'utc' (default) or 'local'
+let tzPref = localStorage.getItem('nous_tz') || 'utc';
+
 function formatTime(ts) {
-    return new Date(ts * 1000).toLocaleString();
+    const d = new Date(ts * 1000);
+    if (tzPref === 'utc') {
+        return d.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+    }
+    return d.toLocaleString();
+}
+
+function formatTimeShort() {
+    const d = new Date();
+    if (tzPref === 'utc') {
+        return d.toISOString().replace('T', ' ').slice(11, 19) + ' UTC';
+    }
+    return d.toLocaleTimeString();
+}
+
+function toggleTimezone() {
+    tzPref = tzPref === 'utc' ? 'local' : 'utc';
+    localStorage.setItem('nous_tz', tzPref);
+    updateTzButton();
+    updateStatus();
+    route();
+}
+
+function updateTzButton() {
+    const btn = document.getElementById('tzToggle');
+    if (btn) btn.textContent = tzPref === 'utc' ? 'UTC' : 'Local';
 }
 
 function isCoinbaseInput(input) {
@@ -170,7 +404,7 @@ async function updateStatus() {
         document.getElementById('statHeight').textContent = mining.height.toLocaleString();
         document.getElementById('statDifficulty').textContent = diffBitsToMultiplier(mining.difficulty_bits) + 'x';
         document.getElementById('statPeers').textContent = peers.length;
-        document.getElementById('statUpdated').textContent = new Date().toLocaleTimeString();
+        document.getElementById('statUpdated').textContent = formatTimeShort();
     } catch (e) {
         document.getElementById('statUpdated').textContent = 'error';
     }
@@ -181,8 +415,8 @@ async function updateStatus() {
 async function renderHome() {
     const app = document.getElementById('app');
     app.innerHTML = `
-        <div class="grid lg:grid-cols-3 gap-6">
-            <div class="lg:col-span-2">
+        <div class="grid lg-grid-cols-3 gap-6">
+            <div class="lg-col-span-2">
                 <h2 class="text-sm text-gray-500 uppercase tracking-widest mb-3">Latest Blocks</h2>
                 <div id="blockList" class="space-y-1">
                     <div class="text-gray-600 py-8 text-center">Loading blocks...</div>
@@ -211,7 +445,7 @@ async function renderHome() {
 
         const listEl = document.getElementById('blockList');
         listEl.innerHTML = `
-            <div class="hidden sm:grid grid-cols-12 gap-2 text-xs text-gray-600 px-3 py-1 uppercase tracking-wider">
+            <div class="hidden sm-grid grid-cols-12 gap-2 text-xs text-gray-600 uppercase tracking-wider" style="padding:4px 12px;">
                 <div class="col-span-1">Height</div>
                 <div class="col-span-4">Miner</div>
                 <div class="col-span-3">Time</div>
@@ -219,7 +453,7 @@ async function renderHome() {
                 <div class="col-span-3 text-right">Difficulty</div>
             </div>` +
             blocks.map(b => `
-                <a href="#block/${b.height}" class="grid grid-cols-12 gap-2 text-sm px-3 py-2 rounded hover:bg-card border border-transparent hover:border-border transition cursor-pointer items-center">
+                <a href="#block/${b.height}" class="grid grid-cols-12 gap-2 text-sm rounded border border-transparent block-row transition cursor-pointer items-center" style="padding:8px 12px;">
                     <div class="col-span-1 text-nous font-bold">${b.height}</div>
                     <div class="col-span-4 font-mono text-xs text-gray-500 truncate">${b.miner_address ? b.miner_address.slice(0, 20) + '...' : 'Genesis'}</div>
                     <div class="col-span-3 text-xs text-gray-500">${formatTime(b.timestamp)}</div>
@@ -236,13 +470,24 @@ async function renderHome() {
 
 async function loadDiffChart() {
     try {
-        const res = await fetch('/difficulty.json?_=' + Date.now());
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
-        const pts = data.points || [];
+        // Destroy previous chart instance to prevent memory leak
+        if (diffChartInstance) {
+            diffChartInstance.destroy();
+            diffChartInstance = null;
+        }
+
+        // Cache difficulty.json to avoid redundant fetches
+        const now = Date.now();
+        if (!diffJsonCache || (now - diffJsonCacheTime) > DIFF_CACHE_TTL) {
+            const res = await fetch('/difficulty.json?_=' + now);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            diffJsonCache = await res.json();
+            diffJsonCacheTime = now;
+        }
+        const pts = diffJsonCache.points || [];
         const ctx = document.getElementById('diffChart');
         if (!ctx || !pts.length) return;
-        new Chart(ctx, {
+        diffChartInstance = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: pts.map(p => p.h),
@@ -278,8 +523,8 @@ async function renderBlock(heightStr) {
         const block = await rpc('getblock', [height]);
 
         // Navigation
-        const prevLink = height > 0 ? `<a href="#block/${height - 1}" class="text-nous hover:underline text-sm">&larr; ${height - 1}</a>` : '<span></span>';
-        const nextLink = `<a href="#block/${height + 1}" class="text-nous hover:underline text-sm">${height + 1} &rarr;</a>`;
+        const prevLink = height > 0 ? `<a href="#block/${height - 1}" class="text-nous hover-underline text-sm">&larr; ${height - 1}</a>` : '<span></span>';
+        const nextLink = `<a href="#block/${height + 1}" class="text-nous hover-underline text-sm">${height + 1} &rarr;</a>`;
 
         app.innerHTML = `
             <div class="flex items-center justify-between mb-4">
@@ -290,12 +535,12 @@ async function renderBlock(heightStr) {
 
             <!-- Block Info -->
             <div class="bg-card border border-border rounded p-4 mb-4 space-y-2 text-sm">
-                <div class="grid sm:grid-cols-2 gap-2">
+                <div class="grid sm-grid-cols-2 gap-2">
                     <div><span class="text-gray-500">Hash:</span> <span class="font-mono text-xs break-all">${block.hash}</span></div>
                     <div><span class="text-gray-500">Height:</span> <span class="text-nous font-bold">${block.height}</span></div>
                     <div><span class="text-gray-500">Timestamp:</span> ${formatTime(block.timestamp)}</div>
                     <div><span class="text-gray-500">Difficulty:</span> ${diffBitsToMultiplier(block.difficulty)}x</div>
-                    <div><span class="text-gray-500">Miner:</span> ${block.miner_address ? `<a href="#address/${block.miner_address}" class="text-nous hover:underline font-mono text-xs">${block.miner_address}</a>` : '<span class="text-gray-600">N/A</span>'}</div>
+                    <div><span class="text-gray-500">Miner:</span> ${block.miner_address ? `<a href="#address/${block.miner_address}" class="text-nous hover-underline font-mono text-xs">${block.miner_address}</a>` : '<span class="text-gray-600">N/A</span>'}</div>
                     <div><span class="text-gray-500">Reward:</span> ${height === 0 ? '0 NOUS (Genesis)' : '1 NOUS'}</div>
                     <div><span class="text-gray-500">Transactions:</span> ${block.tx_count}</div>
                 </div>
@@ -303,14 +548,14 @@ async function renderBlock(heightStr) {
 
             ${height === 0 ? `
             <!-- Genesis Block -->
-            <div class="bg-card border border-yellow-500/30 rounded p-4 mb-4">
+            <div class="bg-card border border-yellow-dim rounded p-4 mb-4">
                 <h3 class="text-yellow-400 text-sm font-bold tracking-widest uppercase mb-3">Genesis Block</h3>
                 <div class="bg-bg rounded p-4">
                     <div class="text-yellow-400 text-center italic mb-3">"The beginning of wisdom is to call things by their proper name" — Confucius</div>
                     <div class="text-nous text-center italic mb-4">"Cogito, ergo sum"</div>
                     <hr class="border-border mb-4">
-                    <div class="grid sm:grid-cols-2 gap-3 text-sm">
-                        <div><div class="text-gray-600 text-xs uppercase">Launch Date</div><div class="text-white">2026-03-07 16:30 CST</div></div>
+                    <div class="grid sm-grid-cols-2 gap-3 text-sm">
+                        <div><div class="text-gray-600 text-xs uppercase">Launch Date</div><div class="text-white">2026-03-07 08:30 UTC</div></div>
                         <div><div class="text-gray-600 text-xs uppercase">Reward</div><div class="text-white">0 NOUS (Fair Launch)</div></div>
                         <div><div class="text-gray-600 text-xs uppercase">Consensus</div><div class="text-white">Cogito Consensus (3-SAT + SHA-256)</div></div>
                         <div><div class="text-gray-600 text-xs uppercase">Block Reward</div><div class="text-white">1 NOUS forever, no halving</div></div>
@@ -321,9 +566,9 @@ async function renderBlock(heightStr) {
             </div>` : ''}
 
             <!-- 3-SAT Panel -->
-            <div class="bg-card border border-nous/30 rounded p-4 mb-4">
+            <div class="bg-card border border-nous-dim rounded p-4 mb-4">
                 <h3 class="text-nous text-sm font-bold tracking-widest uppercase mb-3">Cogito Consensus</h3>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                <div class="grid grid-cols-2 sm-grid-cols-4 gap-3 text-sm">
                     <div class="bg-bg rounded p-3 text-center">
                         <div class="text-gray-500 text-xs uppercase">Variables</div>
                         <div class="text-white text-lg font-bold">256</div>
@@ -348,7 +593,7 @@ async function renderBlock(heightStr) {
             <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2">Transactions (${block.tx_count})</h3>
             <div class="space-y-1">
                 ${block.transactions.map((txid, i) => `
-                    <a href="#tx/${txid}" class="block bg-card border border-border rounded px-4 py-2 hover:border-nous/30 transition">
+                    <a href="#tx/${txid}" class="block bg-card border border-border rounded px-4 py-2 card-hover transition">
                         <span class="text-gray-600 text-xs mr-2">#${i}</span>
                         <span class="font-mono text-xs">${shortHash(txid)}</span>
                         ${i === 0 ? '<span class="ml-2 text-xs text-yellow-500">Coinbase</span>' : ''}
@@ -375,7 +620,7 @@ async function renderTx(txid) {
 
             <div class="bg-card border border-border rounded p-4 mb-4 space-y-2 text-sm">
                 <div><span class="text-gray-500">TxID:</span> <span class="font-mono text-xs break-all">${t.txid}</span></div>
-                <div><span class="text-gray-500">Block:</span> ${t.block_height !== undefined ? `<a href="#block/${t.block_height}" class="text-nous hover:underline">#${t.block_height}</a>` : '<span class="text-yellow-400">Unconfirmed (mempool)</span>'}</div>
+                <div><span class="text-gray-500">Block:</span> ${t.block_height !== undefined ? `<a href="#block/${t.block_height}" class="text-nous hover-underline">#${t.block_height}</a>` : '<span class="text-yellow-400">Unconfirmed (mempool)</span>'}</div>
                 <div><span class="text-gray-500">Confirmations:</span> <span class="${confirmations > 0 ? 'text-nous' : 'text-yellow-400'}">${confirmations}</span></div>
             </div>
 
@@ -387,7 +632,7 @@ async function renderTx(txid) {
                         return '<div class="bg-card border border-border rounded px-4 py-2 text-sm text-yellow-500">Coinbase (new coins)</div>';
                     }
                     return `<div class="bg-card border border-border rounded px-4 py-2 text-sm">
-                        <a href="#tx/${inp.prev_txid}" class="font-mono text-xs text-nous/70 hover:text-nous">${shortHash(inp.prev_txid)}</a>
+                        <a href="#tx/${inp.prev_txid}" class="font-mono text-xs text-nous">${shortHash(inp.prev_txid)}</a>
                         <span class="text-gray-500">:${inp.prev_index}</span>
                     </div>`;
                 }).join('')}
@@ -416,8 +661,8 @@ async function renderAddress(addr) {
         <h2 class="text-lg text-white mb-4">Address Lookup</h2>
         <div class="flex gap-2 mb-6">
             <input id="addrInput" type="text" value="${addr || ''}" placeholder="nous1q..."
-                class="flex-1 bg-card border border-border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-nous/50 text-gray-300 placeholder-gray-600">
-            <button onclick="lookupAddress()" class="bg-nous/10 border border-nous/30 text-nous px-4 py-2 rounded text-sm hover:bg-nous/20 transition">Lookup</button>
+                class="flex-1 rounded p-3 text-sm font-mono">
+            <button onclick="lookupAddress()" class="btn-nous rounded px-4 py-2 text-sm transition">Lookup</button>
         </div>
         <div id="addrResult"></div>`;
 
@@ -461,9 +706,9 @@ async function lookupAddress() {
             <div class="space-y-1">
                 ${utxos.length === 0 ? '<div class="text-gray-600 py-4 text-center text-sm">No spendable UTXOs</div>' :
                 utxos.map(u => `
-                    <div class="bg-card border border-border rounded px-4 py-2 text-sm flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                    <div class="bg-card border border-border rounded px-4 py-2 text-sm flex flex-col sm-flex-row sm-justify-between sm-items-center gap-1">
                         <div>
-                            <a href="#tx/${u.txid}" class="font-mono text-xs text-nous/70 hover:text-nous">${shortHash(u.txid)}</a>
+                            <a href="#tx/${u.txid}" class="font-mono text-xs text-nous">${shortHash(u.txid)}</a>
                             <span class="text-gray-500">:${u.index}</span>
                             <span class="text-gray-600 text-xs ml-2">height ${u.height}</span>
                             ${u.is_coinbase ? '<span class="text-yellow-500 text-xs ml-1">coinbase</span>' : ''}
@@ -491,6 +736,7 @@ async function route() {
 window.addEventListener('hashchange', route);
 
 // Init
+updateTzButton();
 updateStatus();
 setInterval(updateStatus, 30000);
 route();
