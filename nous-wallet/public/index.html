@@ -6,27 +6,40 @@
 <title>NOUS Wallet</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, 'SF Pro Text', sans-serif; background: #0a0a0a; color: #e0e0e0; height: 100vh; overflow: hidden; -webkit-app-region: drag; }
+body { font-family: -apple-system, 'SF Pro Text', sans-serif; background: #0a0a0a; color: #e0e0e0; height: 100vh; overflow: hidden; }
 button, input, textarea, a, select { -webkit-app-region: no-drag; }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
 
-.app { display: flex; flex-direction: column; height: 100vh; padding-top: 28px; }
-.titlebar { position: fixed; top: 0; left: 0; right: 0; height: 28px; }
+.app { display: flex; flex-direction: column; height: 100vh; }
 
-/* Navigation */
-.nav { display: flex; border-bottom: 1px solid #222; padding: 0 16px; background: #111; flex-shrink: 0; }
-.nav button { background: none; border: none; color: #666; padding: 10px 14px; font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; letter-spacing: 0.5px; }
-.nav button.active { color: #00ff88; border-bottom-color: #00ff88; }
-.nav button:hover { color: #aaa; }
+/* Top bar */
+.topbar {
+    position: relative; height: 48px; flex-shrink: 0;
+    display: flex; align-items: center; padding: 0 16px;
+    -webkit-app-region: drag;
+}
+.topbar-left { display: flex; align-items: center; gap: 8px; margin-left: 68px; }
+.back-btn {
+    background: none; border: none; color: #666; font-size: 22px; cursor: pointer;
+    padding: 4px 8px; border-radius: 6px; transition: all 0.15s; line-height: 1;
+}
+.back-btn:hover { color: #00ff88; background: #1a1a1a; }
+.page-title { font-size: 14px; color: #888; font-weight: 500; }
+.topbar-right { margin-left: auto; }
+.settings-btn {
+    background: none; border: none; color: #555; font-size: 20px; cursor: pointer;
+    padding: 6px 8px; border-radius: 6px; transition: all 0.15s; line-height: 1;
+}
+.settings-btn:hover { color: #00ff88; background: #1a1a1a; }
 
 /* Content */
-.content { flex: 1; overflow-y: auto; padding: 20px; }
+.content { flex: 1; overflow-y: auto; padding: 0 20px 20px; }
 
 /* Common */
 .card { background: #151515; border: 1px solid #222; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
 .label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
-.value { font-size: 28px; font-weight: 700; color: #fff; }
+.value { font-size: 32px; font-weight: 700; color: #fff; }
 .value .unit { font-size: 14px; color: #00ff88; font-weight: 400; margin-left: 4px; }
 .sub { font-size: 12px; color: #555; margin-top: 4px; }
 
@@ -46,8 +59,9 @@ textarea { resize: none; min-height: 60px; }
 .btn-primary:hover { background: #00e07a; }
 .btn-secondary { background: #1a1a1a; color: #ccc; border: 1px solid #333; }
 .btn-secondary:hover { background: #222; }
+.btn-danger { background: #1a1a1a; color: #ff6b6b; border: 1px solid #333; }
+.btn-danger:hover { background: #221010; }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
 .btn-small { width: auto; padding: 6px 14px; font-size: 12px; border-radius: 6px; display: inline-block; }
 
 .row { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -56,13 +70,18 @@ textarea { resize: none; min-height: 60px; }
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
 
-.mnemonic-box {
-    background: #0d0d0d; border: 1px solid #00ff8833; border-radius: 10px;
-    padding: 16px; margin: 16px 0; font-family: 'SF Mono', monospace;
-    font-size: 15px; line-height: 2; color: #00ff88; text-align: center;
-    word-spacing: 8px; user-select: all;
+/* Home action buttons */
+.actions { display: flex; gap: 12px; margin-bottom: 16px; }
+.action-btn {
+    flex: 1; background: #151515; border: 1px solid #222; border-radius: 12px;
+    padding: 18px 12px; text-align: center; cursor: pointer; transition: all 0.2s;
 }
+.action-btn:hover { border-color: #00ff88; background: #0a1f14; }
+.action-icon { font-size: 24px; margin-bottom: 6px; }
+.action-text { font-size: 12px; color: #888; font-weight: 500; }
+.action-btn:hover .action-text { color: #00ff88; }
 
+/* Address items */
 .addr-text {
     font-family: 'SF Mono', monospace; font-size: 12px; color: #888;
     word-break: break-all; cursor: pointer; padding: 8px; border-radius: 6px;
@@ -70,13 +89,19 @@ textarea { resize: none; min-height: 60px; }
 }
 .addr-text:hover { color: #00ff88; border-color: #00ff8844; }
 
-.addr-list { margin-top: 12px; }
-.addr-item {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 10px 12px; border-bottom: 1px solid #1a1a1a; font-size: 12px;
+.addr-card {
+    background: #151515; border: 1px solid #222; border-radius: 10px;
+    padding: 14px; margin-bottom: 10px; cursor: pointer; transition: all 0.15s;
 }
-.addr-item:last-child { border: none; }
+.addr-card:hover { border-color: #00ff8866; }
+.addr-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.addr-card-tag { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+.addr-card-tag.primary { background: #00ff8822; color: #00ff88; }
+.addr-card-tag.sub { background: #ffffff11; color: #888; }
+.addr-card-path { font-size: 10px; color: #444; font-family: 'SF Mono', monospace; }
+.addr-card-addr { font-family: 'SF Mono', monospace; font-size: 11px; color: #999; word-break: break-all; line-height: 1.5; }
 
+/* Transactions */
 .tx-item {
     display: flex; justify-content: space-between; align-items: center;
     padding: 12px; border-bottom: 1px solid #1a1a1a;
@@ -87,6 +112,7 @@ textarea { resize: none; min-height: 60px; }
 .tx-amount.negative { color: #ff6b6b; }
 .tx-meta { font-size: 11px; color: #555; }
 
+/* Toast */
 .toast {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
     background: #222; color: #00ff88; padding: 8px 20px; border-radius: 20px;
@@ -94,12 +120,31 @@ textarea { resize: none; min-height: 60px; }
 }
 .toast.show { opacity: 1; }
 
+/* QR */
 .qr { display: flex; justify-content: center; margin: 16px 0; }
 .qr canvas { border-radius: 8px; }
 
 .error { color: #ff6b6b; font-size: 12px; margin-top: 6px; }
 .success { color: #00ff88; font-size: 12px; margin-top: 6px; }
 
+/* Fee selector */
+.fee-selector { display: flex; gap: 8px; }
+.fee-opt {
+    flex: 1; background: #111; border: 1px solid #282828; border-radius: 8px;
+    padding: 10px 8px; cursor: pointer; text-align: center; transition: all 0.2s;
+}
+.fee-opt:hover { border-color: #444; }
+.fee-opt.active { border-color: #00ff88; background: #0a1f14; }
+.fee-label { font-size: 13px; font-weight: 600; color: #ccc; margin-bottom: 2px; }
+.fee-opt.active .fee-label { color: #00ff88; }
+.fee-desc { font-size: 10px; color: #555; }
+
+/* Confirm dialog */
+.confirm-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; }
+.confirm-label { font-size: 12px; color: #666; flex-shrink: 0; margin-right: 12px; }
+.confirm-value { font-size: 14px; color: #e0e0e0; text-align: right; }
+
+/* Logo */
 .logo { text-align: center; padding: 40px 0 20px; }
 .logo h1 { font-size: 24px; color: #fff; letter-spacing: 4px; }
 .logo .tagline { font-size: 11px; color: #444; margin-top: 4px; letter-spacing: 2px; }
@@ -109,31 +154,79 @@ textarea { resize: none; min-height: 60px; }
 .mt { margin-top: 12px; }
 .mb { margin-bottom: 12px; }
 
-/* Setup specific */
+/* Setup */
 .setup-options { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
 .word-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 12px 0; }
 .word-cell { background: #151515; border: 1px solid #222; border-radius: 6px; padding: 6px 8px; font-size: 12px; text-align: center; font-family: 'SF Mono', monospace; }
 .word-cell .num { color: #444; font-size: 10px; margin-right: 4px; }
+
+/* Settings menu overlay */
+.settings-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6); z-index: 50; display: none;
+}
+.settings-overlay.show { display: block; }
+.settings-menu {
+    position: absolute; top: 48px; left: 16px; right: 16px;
+    background: #1a1a1a; border: 1px solid #333; border-radius: 12px;
+    overflow: hidden;
+}
+.settings-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px; cursor: pointer; transition: background 0.15s;
+    border-bottom: 1px solid #222; font-size: 14px; color: #ccc;
+}
+.settings-item:last-child { border: none; }
+.settings-item:hover { background: #222; }
+.settings-item .si-icon { font-size: 18px; width: 24px; text-align: center; opacity: 0.7; }
+.settings-item .si-label { flex: 1; }
+.settings-item .si-arrow { color: #444; font-size: 14px; }
+
+/* Private key display */
+.privkey-box {
+    background: #0d0d0d; border: 1px solid #ff6b6b33; border-radius: 8px;
+    padding: 12px; font-family: 'SF Mono', monospace; font-size: 11px;
+    color: #ff6b6b; word-break: break-all; line-height: 1.6; user-select: all;
+}
 </style>
 </head>
 <body>
 <div class="app">
-    <div class="titlebar"></div>
-
-    <!-- Nav (hidden during setup) -->
-    <div class="nav" id="nav">
-        <button data-tab="overview" class="active" onclick="switchTab('overview')">Overview</button>
-        <button data-tab="send" onclick="switchTab('send')">Send</button>
-        <button data-tab="receive" onclick="switchTab('receive')">Receive</button>
-        <button data-tab="history" onclick="switchTab('history')">History</button>
+    <div class="topbar" id="topbar">
+        <div class="topbar-left" id="topbarLeft"></div>
+        <div class="topbar-right" id="topbarRight"></div>
     </div>
-
     <div class="content" id="content"></div>
+</div>
+
+<!-- Settings overlay -->
+<div class="settings-overlay" id="settingsOverlay" onclick="closeSettings()">
+    <div class="settings-menu" onclick="event.stopPropagation()">
+        <div class="settings-item" onclick="showBackup()">
+            <span class="si-icon">&#128274;</span>
+            <span class="si-label">Backup Recovery Phrase</span>
+            <span class="si-arrow">&#8250;</span>
+        </div>
+        <div class="settings-item" onclick="showChangePassword()">
+            <span class="si-icon">&#128273;</span>
+            <span class="si-label">Change Password</span>
+            <span class="si-arrow">&#8250;</span>
+        </div>
+        <div class="settings-item" onclick="showNodeSettings()">
+            <span class="si-icon">&#9881;</span>
+            <span class="si-label">Node Settings</span>
+            <span class="si-arrow">&#8250;</span>
+        </div>
+        <div class="settings-item" onclick="doLock()" style="color:#ff6b6b">
+            <span class="si-icon">&#128275;</span>
+            <span class="si-label">Lock Wallet</span>
+            <span class="si-arrow"></span>
+        </div>
+    </div>
 </div>
 
 <div class="toast" id="toast"></div>
 
-<!-- QR Code library (lightweight, inline) -->
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 
 <script>
@@ -147,7 +240,8 @@ async function api(method, params) {
 }
 
 // --- State ---
-let currentTab = 'overview';
+let currentPage = 'home';
+let pageHistory = [];
 let balanceData = { balance: 0, immature: 0 };
 let addresses = [];
 let walletPassword = '';
@@ -179,27 +273,79 @@ function copyText(text) {
     toast('Copied');
 }
 
-// --- Router ---
-function switchTab(tab) {
-    currentTab = tab;
-    document.querySelectorAll('.nav button').forEach(b =>
-        b.classList.toggle('active', b.dataset.tab === tab));
-    renderTab();
+// --- Navigation ---
+function navigate(page) {
+    pageHistory.push(currentPage);
+    currentPage = page;
+    renderPage();
 }
 
-async function renderTab() {
+function goBack() {
+    currentPage = pageHistory.length > 0 ? pageHistory.pop() : 'home';
+    renderPage();
+}
+
+function renderTopbar(title, showBack, showSettings) {
+    const left = document.getElementById('topbarLeft');
+    const right = document.getElementById('topbarRight');
+    left.innerHTML = showBack
+        ? `<button class="back-btn" onclick="goBack()">&#8249;</button><span class="page-title">${title || ''}</span>`
+        : `<span class="page-title">${title || ''}</span>`;
+    right.innerHTML = showSettings
+        ? `<button class="settings-btn" onclick="openSettings()">&#9881;</button>`
+        : '';
+}
+
+function renderPage() {
     const el = document.getElementById('content');
-    switch (currentTab) {
-        case 'overview': await renderOverview(el); break;
-        case 'send': renderSend(el); break;
-        case 'receive': await renderReceive(el); break;
-        case 'history': await renderHistory(el); break;
+    closeSettings();
+
+    const pages = {
+        'home':            ['NOUS', false, true, renderHome],
+        'send':            ['Send', true, false, renderSend],
+        'receive':         ['Receive', true, false, renderReceive],
+        'history':         ['History', true, false, renderHistory],
+        'addresses':       ['Addresses', true, false, renderAddresses],
+        'backup':          ['Backup', true, false, renderBackup],
+        'change-password': ['Password', true, false, renderChangePassword],
+        'node-settings':   ['Node', true, false, renderNodeSettings],
+    };
+
+    // Address detail pages
+    if (currentPage.startsWith('addr-detail-')) {
+        renderTopbar('Address', true, false);
+        const idx = parseInt(currentPage.split('-')[2]);
+        renderAddrDetail(el, idx);
+        return;
     }
+
+    const p = pages[currentPage] || pages['home'];
+    renderTopbar(p[0], p[1], p[2]);
+    p[3](el);
+}
+
+// --- Settings ---
+function openSettings() { document.getElementById('settingsOverlay').classList.add('show'); }
+function closeSettings() { document.getElementById('settingsOverlay').classList.remove('show'); }
+
+function showBackup() { closeSettings(); navigate('backup'); }
+function showChangePassword() { closeSettings(); navigate('change-password'); }
+function showNodeSettings() { closeSettings(); navigate('node-settings'); }
+
+async function doLock() {
+    closeSettings();
+    try {
+        await api('lock');
+        walletPassword = '';
+        pageHistory = [];
+        currentPage = 'home';
+        renderUnlock();
+    } catch(e) { toast(e.message); }
 }
 
 // --- Setup / Unlock ---
 function renderSetup() {
-    document.getElementById('nav').classList.add('hidden');
+    renderTopbar('', false, false);
     const el = document.getElementById('content');
     el.innerHTML = `
         <div class="logo">
@@ -213,7 +359,7 @@ function renderSetup() {
 }
 
 function renderUnlock() {
-    document.getElementById('nav').classList.add('hidden');
+    renderTopbar('', false, false);
     const el = document.getElementById('content');
     el.innerHTML = `
         <div class="logo">
@@ -243,9 +389,11 @@ async function doUnlock() {
 }
 
 function showCreate() {
+    renderTopbar('Create', true, false);
+    pageHistory = ['setup'];
+    currentPage = 'create';
     const el = document.getElementById('content');
     el.innerHTML = `
-        <div class="logo"><h1>NOUS</h1></div>
         <div class="card">
             <div class="label">Set Password</div>
             <div class="field">
@@ -258,7 +406,6 @@ function showCreate() {
                 <button class="btn btn-secondary" onclick="doCreate(12)">12 Words</button>
                 <button class="btn btn-primary" onclick="doCreate(24)">24 Words</button>
             </div>
-            <button class="btn btn-secondary mt" onclick="renderSetup()">Back</button>
             <div id="createErr" class="error"></div>
         </div>`;
 }
@@ -268,7 +415,6 @@ async function doCreate(wordCount) {
     const pw2 = document.getElementById('createPw2').value;
     if (pw.length < 6) { document.getElementById('createErr').textContent = 'Password too short'; return; }
     if (pw !== pw2) { document.getElementById('createErr').textContent = 'Passwords do not match'; return; }
-
     try {
         const res = await api('create_wallet', { word_count: wordCount, password: pw });
         walletPassword = pw;
@@ -284,7 +430,6 @@ let verifyIndices = [];
 function showMnemonic(mnemonic) {
     pendingMnemonic = mnemonic;
     const words = mnemonic.split(' ');
-    // Pick 3 random word positions to verify later
     const indices = [];
     while (indices.length < 3) {
         const r = Math.floor(Math.random() * words.length);
@@ -292,6 +437,7 @@ function showMnemonic(mnemonic) {
     }
     verifyIndices = indices.sort((a, b) => a - b);
 
+    renderTopbar('Recovery Phrase', true, false);
     const el = document.getElementById('content');
     el.innerHTML = `
         <div class="card">
@@ -308,7 +454,7 @@ function showMnemonic(mnemonic) {
 }
 
 function showVerify() {
-    const words = pendingMnemonic.split(' ');
+    renderTopbar('Verify', true, false);
     const el = document.getElementById('content');
     el.innerHTML = `
         <div class="card">
@@ -321,7 +467,6 @@ function showVerify() {
                 </div>
             `).join('')}
             <button class="btn btn-primary" onclick="doVerify()">Confirm</button>
-            <button class="btn btn-secondary mt" onclick="showMnemonic(pendingMnemonic)">Back</button>
             <div id="verifyErr" class="error"></div>
         </div>`;
     document.getElementById('verify_' + verifyIndices[0])?.focus();
@@ -341,9 +486,11 @@ function doVerify() {
 }
 
 function showImport() {
+    renderTopbar('Import', true, false);
+    pageHistory = ['setup'];
+    currentPage = 'import';
     const el = document.getElementById('content');
     el.innerHTML = `
-        <div class="logo"><h1>NOUS</h1></div>
         <div class="card">
             <div class="field">
                 <label>Recovery Phrase</label>
@@ -354,7 +501,6 @@ function showImport() {
                 <input type="password" id="importPw" placeholder="Set password">
             </div>
             <button class="btn btn-primary" onclick="doImport()">Import</button>
-            <button class="btn btn-secondary mt" onclick="renderSetup()">Back</button>
             <div id="importErr" class="error"></div>
         </div>`;
 }
@@ -373,45 +519,170 @@ async function doImport() {
 }
 
 async function enterWallet() {
-    document.getElementById('nav').classList.remove('hidden');
     addresses = await api('list_addresses') || [];
-    switchTab('overview');
+    pageHistory = [];
+    currentPage = 'home';
+    renderPage();
     refreshBalance();
 }
 
-// --- Overview ---
-async function renderOverview(el) {
-    const addr = addresses.length > 0 ? addresses[0].address : '—';
+// --- Home ---
+function renderHome(el) {
+    const addr = addresses.length > 0 ? addresses[0].address : '';
     el.innerHTML = `
-        <div class="card">
-            <div class="label">Balance</div>
+        <div class="card center">
+            <div class="label">Total Balance</div>
             <div class="value">${formatNOUS(balanceData.balance)}<span class="unit">NOUS</span></div>
             ${balanceData.immature > 0 ? `<div class="sub">Immature: ${formatNOUS(balanceData.immature)} NOUS</div>` : ''}
         </div>
-        <div class="card">
-            <div class="label">Primary Address</div>
-            <div class="addr-text" onclick="copyText('${addr}')">${addr}</div>
+        ${addr ? `<div class="addr-text mb" onclick="copyText('${addr}')" style="text-align:center;font-size:11px">${addr}</div>` : ''}
+        <div class="actions">
+            <div class="action-btn" onclick="navigate('send')">
+                <div class="action-icon">&#8593;</div>
+                <div class="action-text">Send</div>
+            </div>
+            <div class="action-btn" onclick="navigate('receive')">
+                <div class="action-icon">&#8595;</div>
+                <div class="action-text">Receive</div>
+            </div>
+            <div class="action-btn" onclick="navigate('history')">
+                <div class="action-icon">&#9776;</div>
+                <div class="action-text">History</div>
+            </div>
         </div>
-        <div class="row">
-            <button class="btn btn-primary" onclick="switchTab('send')">Send</button>
-            <button class="btn btn-secondary" onclick="switchTab('receive')">Receive</button>
+        <div class="card" onclick="navigate('addresses')" style="cursor:pointer">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+                <div>
+                    <div class="label" style="margin:0">Addresses</div>
+                    <div style="font-size:13px;color:#888;margin-top:4px">${addresses.length} address${addresses.length !== 1 ? 'es' : ''}</div>
+                </div>
+                <span style="color:#444;font-size:20px">&#8250;</span>
+            </div>
         </div>`;
 }
 
 async function refreshBalance() {
     try {
         balanceData = await api('get_balance');
-        if (currentTab === 'overview') {
-            renderTab();
-        }
+        if (currentPage === 'home') renderHome(document.getElementById('content'));
     } catch(e) { /* node offline */ }
 }
 
+// --- Addresses ---
+async function renderAddresses(el) {
+    addresses = await api('list_addresses') || [];
+    el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div style="font-size:13px;color:#888">${addresses.length} address${addresses.length !== 1 ? 'es' : ''}</div>
+            <button class="btn btn-small btn-primary" onclick="deriveNewAddr()">+ New Address</button>
+        </div>
+        ${addresses.map((a, i) => `
+            <div class="addr-card" onclick="navigate('addr-detail-${a.index}')">
+                <div class="addr-card-head">
+                    <span class="addr-card-tag ${i === 0 ? 'primary' : 'sub'}">${i === 0 ? 'Primary' : 'Sub #' + a.index}</span>
+                    <span class="addr-card-path">${a.path}</span>
+                </div>
+                <div class="addr-card-addr">${a.address}</div>
+            </div>
+        `).join('')}`;
+}
+
+async function deriveNewAddr() {
+    try {
+        await api('derive_address');
+        toast('New address created');
+        renderAddresses(document.getElementById('content'));
+    } catch(e) { toast(e.message); }
+}
+
+// --- Address Detail ---
+async function renderAddrDetail(el, index) {
+    const addr = addresses.find(a => a.index === index);
+    if (!addr) { el.innerHTML = '<div class="card"><div class="error">Address not found</div></div>'; return; }
+
+    const isPrimary = index === 0;
+
+    el.innerHTML = `
+        <div class="card center">
+            <div class="label">${isPrimary ? 'Primary Address' : 'Sub Address #' + index}</div>
+            <div class="qr"><canvas id="qrCanvas"></canvas></div>
+            <div class="addr-text" onclick="copyText('${addr.address}')">${addr.address}</div>
+            <div style="margin-top:8px">
+                <button class="btn btn-small btn-secondary" onclick="copyText('${addr.address}')">Copy Address</button>
+            </div>
+            <div class="sub">${addr.path}</div>
+        </div>
+        <div class="card">
+            ${isPrimary
+                ? `<button class="btn btn-secondary" onclick="exportMnemonic()">Export Recovery Phrase</button>`
+                : `<button class="btn btn-danger" onclick="exportPrivateKey('${addr.address}')">Export Private Key</button>`
+            }
+            <div id="exportResult" class="mt"></div>
+        </div>`;
+
+    // Render QR
+    if (typeof qrcode !== 'undefined') {
+        const qr = qrcode(0, 'M');
+        qr.addData(addr.address);
+        qr.make();
+        const canvas = document.getElementById('qrCanvas');
+        const size = 180, cellSize = size / qr.getModuleCount();
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#111';
+        ctx.fillRect(0, 0, size, size);
+        for (let r = 0; r < qr.getModuleCount(); r++)
+            for (let c = 0; c < qr.getModuleCount(); c++) {
+                ctx.fillStyle = qr.isDark(r, c) ? '#00ff88' : '#111';
+                ctx.fillRect(c * cellSize, r * cellSize, cellSize + 0.5, cellSize + 0.5);
+            }
+    }
+}
+
+async function exportMnemonic() {
+    const resultEl = document.getElementById('exportResult');
+    try {
+        const res = await api('get_mnemonic');
+        const words = res.mnemonic.split(' ');
+        resultEl.innerHTML = `
+            <div style="margin-top:8px">
+                <div class="label" style="color:#ff6b6b">Recovery Phrase — Keep Secret!</div>
+                <div class="word-grid">
+                    ${words.map((w, i) => `<div class="word-cell"><span class="num">${i+1}</span>${w}</div>`).join('')}
+                </div>
+                <button class="btn btn-small btn-secondary mt" onclick="copyText('${res.mnemonic}')">Copy All</button>
+            </div>`;
+    } catch(e) {
+        resultEl.innerHTML = `<div class="error">${e.message}</div>`;
+    }
+}
+
+async function exportPrivateKey(address) {
+    const resultEl = document.getElementById('exportResult');
+    try {
+        const res = await api('get_private_key', { address });
+        resultEl.innerHTML = `
+            <div style="margin-top:8px">
+                <div class="label" style="color:#ff6b6b">Private Key — Keep Secret!</div>
+                <div class="privkey-box">${res.private_key}</div>
+                <button class="btn btn-small btn-secondary mt" onclick="copyText('${res.private_key}')">Copy</button>
+            </div>`;
+    } catch(e) {
+        resultEl.innerHTML = `<div class="error">${e.message}</div>`;
+    }
+}
+
 // --- Send ---
+const FEE_LEVELS = {
+    slow:   { nou: 1000,    label: 'Slow',   desc: '0.00001 NOUS' },
+    normal: { nou: 10000,   label: 'Normal', desc: '0.0001 NOUS' },
+    fast:   { nou: 100000,  label: 'Fast',   desc: '0.001 NOUS' }
+};
+let selectedFee = 'normal';
+
 function renderSend(el) {
     el.innerHTML = `
         <div class="card">
-            <div class="label">Send NOUS</div>
             <div class="field">
                 <label>To Address</label>
                 <input id="sendTo" placeholder="nous1q..." spellcheck="false">
@@ -421,33 +692,73 @@ function renderSend(el) {
                 <input id="sendAmount" type="number" step="0.00000001" placeholder="0.00">
             </div>
             <div class="field">
-                <label>Fee (NOUS)</label>
-                <input id="sendFee" type="number" step="0.00000001" value="0.0001">
+                <label>Network Fee</label>
+                <div class="fee-selector">
+                    ${Object.entries(FEE_LEVELS).map(([key, v]) => `
+                        <button class="fee-opt ${key === selectedFee ? 'active' : ''}" onclick="selectFee('${key}')">
+                            <div class="fee-label">${v.label}</div>
+                            <div class="fee-desc">${v.desc}</div>
+                        </button>`).join('')}
+                </div>
             </div>
             <div class="field">
-                <label>Message (optional, stored on-chain)</label>
-                <textarea id="sendMsg" placeholder="Your message engraved on the blockchain..." maxlength="80"></textarea>
+                <label>Message (optional, engraved on-chain forever)</label>
+                <textarea id="sendMsg" placeholder="Your message on the blockchain..." maxlength="80"></textarea>
+                <div class="sub" style="text-align:right"><span id="msgCount">0</span>/80</div>
             </div>
-            <button class="btn btn-primary" onclick="doSend()">Send</button>
+            <button class="btn btn-primary" onclick="confirmSend()">Review & Send</button>
             <div id="sendResult" class="mt"></div>
         </div>`;
+    document.getElementById('sendMsg')?.addEventListener('input', e => {
+        document.getElementById('msgCount').textContent = e.target.value.length;
+    });
 }
 
-async function doSend() {
+function selectFee(level) {
+    selectedFee = level;
+    document.querySelectorAll('.fee-opt').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.fee-opt:nth-child(${Object.keys(FEE_LEVELS).indexOf(level) + 1})`)?.classList.add('active');
+}
+
+function confirmSend() {
     const to = document.getElementById('sendTo').value.trim();
-    const amount = Math.round(parseFloat(document.getElementById('sendAmount').value || '0') * 1e8);
-    const fee = Math.round(parseFloat(document.getElementById('sendFee').value || '0') * 1e8);
+    const amountNous = document.getElementById('sendAmount').value || '0';
+    const amount = Math.round(parseFloat(amountNous) * 1e8);
+    const fee = FEE_LEVELS[selectedFee].nou;
     const message = document.getElementById('sendMsg').value.trim();
     const resultEl = document.getElementById('sendResult');
 
     if (!to.startsWith('nous1')) { resultEl.innerHTML = '<div class="error">Invalid address</div>'; return; }
     if (amount <= 0) { resultEl.innerHTML = '<div class="error">Invalid amount</div>'; return; }
 
+    pageHistory.push('send');
+    currentPage = 'send-confirm';
+    renderTopbar('Confirm', true, false);
+    const el = document.getElementById('content');
+    el.innerHTML = `
+        <div class="card">
+            <div class="label">Confirm Transaction</div>
+            <div class="confirm-row"><span class="confirm-label">To</span><span class="confirm-value" style="font-size:11px;word-break:break-all">${to}</span></div>
+            <div class="confirm-row"><span class="confirm-label">Amount</span><span class="confirm-value">${formatNOUS(amount)} NOUS</span></div>
+            <div class="confirm-row"><span class="confirm-label">Fee</span><span class="confirm-value">${FEE_LEVELS[selectedFee].desc} (${FEE_LEVELS[selectedFee].label})</span></div>
+            ${message ? `<div class="confirm-row"><span class="confirm-label">Message</span><span class="confirm-value" style="font-size:12px">"${message}"</span></div>` : ''}
+            <div class="confirm-row" style="border-top:1px solid #333;padding-top:12px;margin-top:8px">
+                <span class="confirm-label" style="color:#fff">Total</span>
+                <span class="confirm-value" style="color:#00ff88;font-size:18px">${formatNOUS(amount + fee)} NOUS</span>
+            </div>
+            <button class="btn btn-primary mt" onclick="doSend('${to}', ${amount}, ${fee}, '${message.replace(/'/g, "\\'")}')">Confirm & Send</button>
+            <div id="sendResult" class="mt"></div>
+        </div>`;
+}
+
+async function doSend(to, amount, fee, message) {
+    const resultEl = document.getElementById('sendResult');
     resultEl.innerHTML = '<div class="sub">Broadcasting...</div>';
     try {
         const res = await api('send', { to, amount, fee, message });
         resultEl.innerHTML = `<div class="success">Sent! TxID: ${res.txid.slice(0, 16)}...</div>`;
         refreshBalance();
+        setTimeout(() => { pageHistory = []; currentPage = 'home'; renderPage(); }, 3000);
     } catch(e) {
         resultEl.innerHTML = `<div class="error">${e.message}</div>`;
     }
@@ -456,58 +767,31 @@ async function doSend() {
 // --- Receive ---
 async function renderReceive(el) {
     addresses = await api('list_addresses') || [];
-    const primary = addresses.length > 0 ? addresses[0].address : '—';
+    const primary = addresses.length > 0 ? addresses[0].address : '';
 
     el.innerHTML = `
         <div class="card center">
             <div class="label">Your Address</div>
             <div class="qr"><canvas id="qrCanvas"></canvas></div>
-            <div class="addr-text" onclick="copyText('${primary}')">${primary}</div>
+            <div class="addr-text" onclick="copyText('${primary}')">${primary || 'No address'}</div>
             <button class="btn btn-small btn-secondary mt" onclick="copyText('${primary}')">Copy</button>
-        </div>
-        <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                <div class="label" style="margin:0">All Addresses</div>
-                <button class="btn btn-small btn-primary" onclick="deriveNew()">+ New</button>
-            </div>
-            <div class="addr-list">
-                ${addresses.map((a, i) => `
-                    <div class="addr-item">
-                        <span style="font-family:'SF Mono',monospace;font-size:11px;color:#888;cursor:pointer" onclick="copyText('${a.address}')">${a.address.slice(0,12)}...${a.address.slice(-6)}</span>
-                        <span style="font-size:10px;color:#444">${a.path}</span>
-                    </div>`).join('')}
-            </div>
         </div>`;
 
-    // Render QR
-    if (primary !== '—' && typeof qrcode !== 'undefined') {
+    if (primary && typeof qrcode !== 'undefined') {
         const qr = qrcode(0, 'M');
         qr.addData(primary);
         qr.make();
         const canvas = document.getElementById('qrCanvas');
-        const size = 180;
-        const cellSize = size / qr.getModuleCount();
-        canvas.width = size;
-        canvas.height = size;
+        const size = 180, cellSize = size / qr.getModuleCount();
+        canvas.width = size; canvas.height = size;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = '#111';
         ctx.fillRect(0, 0, size, size);
-        for (let r = 0; r < qr.getModuleCount(); r++) {
+        for (let r = 0; r < qr.getModuleCount(); r++)
             for (let c = 0; c < qr.getModuleCount(); c++) {
                 ctx.fillStyle = qr.isDark(r, c) ? '#00ff88' : '#111';
                 ctx.fillRect(c * cellSize, r * cellSize, cellSize + 0.5, cellSize + 0.5);
             }
-        }
-    }
-}
-
-async function deriveNew() {
-    try {
-        await api('derive_address');
-        renderReceive(document.getElementById('content'));
-        toast('New address derived');
-    } catch(e) {
-        toast(e.message);
     }
 }
 
@@ -543,10 +827,93 @@ async function renderHistory(el) {
     }
 }
 
+// --- Settings Pages ---
+async function renderBackup(el) {
+    el.innerHTML = '<div class="card center"><div class="sub">Loading...</div></div>';
+    try {
+        const res = await api('get_mnemonic');
+        const words = res.mnemonic.split(' ');
+        el.innerHTML = `
+            <div class="card">
+                <div class="label" style="color:#ff6b6b">Recovery Phrase</div>
+                <p style="font-size:12px;color:#666;margin:8px 0">Keep these words safe. Never share them with anyone.</p>
+                <div class="word-grid">
+                    ${words.map((w, i) => `<div class="word-cell"><span class="num">${i+1}</span>${w}</div>`).join('')}
+                </div>
+                <button class="btn btn-secondary mt" onclick="copyText('${res.mnemonic}')">Copy All</button>
+            </div>`;
+    } catch(e) {
+        el.innerHTML = `<div class="card"><div class="error">${e.message}</div></div>`;
+    }
+}
+
+function renderChangePassword(el) {
+    el.innerHTML = `
+        <div class="card">
+            <div class="label">Change Wallet Password</div>
+            <div class="field">
+                <label>Current Password</label>
+                <input type="password" id="oldPw" placeholder="Current password">
+            </div>
+            <div class="field">
+                <label>New Password</label>
+                <input type="password" id="newPw" placeholder="New password (min 6 chars)">
+            </div>
+            <div class="field">
+                <label>Confirm New Password</label>
+                <input type="password" id="newPw2" placeholder="Confirm new password">
+            </div>
+            <button class="btn btn-primary" onclick="doChangePassword()">Change Password</button>
+            <div id="changePwResult" class="mt"></div>
+        </div>`;
+}
+
+async function doChangePassword() {
+    const oldPw = document.getElementById('oldPw').value;
+    const newPw = document.getElementById('newPw').value;
+    const newPw2 = document.getElementById('newPw2').value;
+    const resultEl = document.getElementById('changePwResult');
+
+    if (oldPw !== walletPassword) { resultEl.innerHTML = '<div class="error">Current password is incorrect</div>'; return; }
+    if (newPw.length < 6) { resultEl.innerHTML = '<div class="error">New password too short</div>'; return; }
+    if (newPw !== newPw2) { resultEl.innerHTML = '<div class="error">Passwords do not match</div>'; return; }
+
+    try {
+        const res = await api('get_mnemonic');
+        await api('import_wallet', { mnemonic: res.mnemonic, password: newPw });
+        walletPassword = newPw;
+        resultEl.innerHTML = '<div class="success">Password changed successfully</div>';
+    } catch(e) {
+        resultEl.innerHTML = `<div class="error">${e.message}</div>`;
+    }
+}
+
+function renderNodeSettings(el) {
+    el.innerHTML = `
+        <div class="card">
+            <div class="label">Node RPC URL</div>
+            <div class="field">
+                <input id="nodeUrl" placeholder="http://80.78.26.7:8332/rpc" value="http://80.78.26.7:8332/rpc">
+            </div>
+            <button class="btn btn-primary" onclick="doSetNode()">Save</button>
+            <div id="nodeResult" class="mt"></div>
+        </div>`;
+}
+
+async function doSetNode() {
+    const url = document.getElementById('nodeUrl').value.trim();
+    try {
+        await api('set_node', { url });
+        document.getElementById('nodeResult').innerHTML = '<div class="success">Node updated</div>';
+        refreshBalance();
+    } catch(e) {
+        document.getElementById('nodeResult').innerHTML = `<div class="error">${e.message}</div>`;
+    }
+}
+
 // --- Init ---
 async function init() {
     try {
-        // Small delay for backend to start
         await new Promise(r => setTimeout(r, 500));
         const exists = await api('wallet_exists');
         if (exists) {
@@ -560,10 +927,13 @@ async function init() {
     }
 }
 
-// Auto-refresh balance every 30s
 setInterval(() => {
-    if (currentTab === 'overview') refreshBalance();
+    if (currentPage === 'home') refreshBalance();
 }, 30000);
+
+window.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeSettings();
+});
 
 init();
 </script>

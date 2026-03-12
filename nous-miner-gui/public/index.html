@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src *;">
   <title>NOUS Reasoner</title>
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
   <style>
@@ -122,7 +123,7 @@
 
 <!-- Tab Bar -->
 <div class="tab-bar">
-  <div class="tab-btn active" onclick="switchTab('mining')">Mining</div>
+  <div class="tab-btn active" onclick="switchTab('mining')">Reasoning</div>
   <div class="tab-btn" onclick="switchTab('wallet')">Wallet</div>
 </div>
 
@@ -157,7 +158,7 @@
       <div id="aiConfig" style="display:none;">
         <div class="solver-config">
           <div class="form-group"><label>AI Provider</label>
-            <select id="aiProvider"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option></select>
+            <select id="aiProvider"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="openai">Other (OpenAI Compatible)</option></select>
           </div>
           <div class="form-group"><label>API Base URL (optional)</label>
             <input type="text" id="baseUrl" placeholder="https://api.anthropic.com" />
@@ -229,7 +230,8 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const { ipcRenderer } = require('electron');
+// HTML escape to prevent XSS
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 // ============================================
 // TAB SWITCHING
@@ -312,7 +314,7 @@ function updateSolverUI() {
 
 async function useWalletAddress() {
   try {
-    const resp = await ipcRenderer.invoke('wallet-list_addresses');
+    const resp = await window.api.invoke('wallet-list_addresses');
     if (resp && resp.error) throw new Error(resp.error);
     const addrs = resp?.result;
     if (addrs && addrs.length > 0) {
@@ -341,7 +343,7 @@ async function startMining() {
   };
   if (!config.address) { addMinerLog('Error: Reasoning address required'); return; }
 
-  const result = await ipcRenderer.invoke('start-mining', config);
+  const result = await window.api.invoke('start-mining', config);
   if (result.error) { addMinerLog('Error: ' + result.error); return; }
 
   isMining = true;
@@ -354,7 +356,7 @@ async function startMining() {
 }
 
 async function stopMining() {
-  await ipcRenderer.invoke('stop-mining');
+  await window.api.invoke('stop-mining');
   isMining = false;
   sessionStart = null;
   updateMiningUI();
@@ -388,7 +390,7 @@ function flushMinerLog() {
   }
 }
 
-ipcRenderer.on('miner-log', (event, data) => {
+window.api.on('miner-log', (data) => {
   for (const msg of data.split('\n')) {
     const line = msg.trim();
     if (!line) continue;
@@ -437,14 +439,14 @@ async function fetchMinerBalance() {
   const nodeUrl = document.getElementById('nodeUrl').value;
   if (address && nodeUrl) {
     try {
-      const result = await ipcRenderer.invoke('get-miner-balance', { nodeUrl, address });
+      const result = await window.api.invoke('get-miner-balance', { nodeUrl, address });
       document.getElementById('balance').textContent = (result.balance / 100000000).toFixed(8);
       document.getElementById('immature').textContent = (result.immature / 100000000).toFixed(8);
     } catch (e) {}
   }
 }
 
-ipcRenderer.on('miner-stopped', () => {
+window.api.on('miner-stopped', () => {
   isMining = false;
   sessionStart = null;
   updateMiningUI();
@@ -459,18 +461,17 @@ let wPage = 'home';
 let wPageHistory = [];
 let wBalanceData = { balance: 0, immature: 0 };
 let wAddresses = [];
-let wPassword = '';
 let wUnlocked = false;
 let wActiveAddrIndex = 0; // index of address used for mining
 
 async function wApi(method, params) {
-  const resp = await ipcRenderer.invoke('wallet-' + method, params);
+  const resp = await window.api.invoke('wallet-' + method, params);
   if (resp && resp.error) throw new Error(resp.error);
   return resp?.result;
 }
 
 function formatNOUS(nou) {
-  const whole = Math.floor(nou / 1e8);
+  const whole = Math.trunc(nou / 1e8);
   const frac = Math.abs(nou % 1e8).toString().padStart(8, '0').replace(/0+$/, '');
   return frac ? `${whole}.${frac}` : `${whole}`;
 }
@@ -537,7 +538,7 @@ async function walletInit() {
       wRenderSetup(el);
     }
   } catch(e) {
-    el.innerHTML = `<div class="card"><div class="error">Wallet backend error: ${e.message}</div></div>`;
+    el.innerHTML = `<div class="card"><div class="error">Wallet backend error: ${esc(e.message)}</div></div>`;
   }
 }
 
@@ -567,7 +568,7 @@ async function wDoUnlock() {
   const pw = document.getElementById('wUnlockPw').value;
   try {
     await wApi('unlock', { password: pw });
-    wPassword = pw;
+
     wEnterWallet();
   } catch(e) { document.getElementById('wUnlockErr').textContent = e.message; }
 }
@@ -595,7 +596,7 @@ async function wDoCreate(wordCount) {
   if (pw !== pw2) { document.getElementById('wCreateErr').textContent = 'Passwords do not match'; return; }
   try {
     const res = await wApi('create_wallet', { word_count: wordCount, password: pw });
-    wPassword = pw;
+
     wShowMnemonic(res.mnemonic);
   } catch(e) { document.getElementById('wCreateErr').textContent = e.message; }
 }
@@ -668,7 +669,7 @@ async function wDoImport() {
   if (pw.length < 6) { document.getElementById('wImportErr').textContent = 'Password too short'; return; }
   try {
     await wApi('import_wallet', { mnemonic, password: pw });
-    wPassword = pw;
+
     wEnterWallet();
   } catch(e) { document.getElementById('wImportErr').textContent = e.message; }
 }
@@ -695,7 +696,7 @@ function wRenderHome(el) {
   const addr = wGetActiveAddr();
   el.innerHTML = `
     <div class="card center">
-      <div class="w-label">Total Balance</div>
+      <div class="w-label">Balance</div>
       <div class="w-value">${formatNOUS(wBalanceData.balance)}<span class="unit">NOUS</span></div>
       ${wBalanceData.immature > 0 ? `<div class="w-sub">Immature: ${formatNOUS(wBalanceData.immature)} NOUS</div>` : ''}
     </div>
@@ -721,7 +722,11 @@ function wRenderHome(el) {
 async function wRefreshBalance() {
   if (!wUnlocked) return;
   try {
-    wBalanceData = await wApi('get_balance');
+    const addr = wGetActiveAddr();
+    if (!addr) return;
+    const nodeUrl = document.getElementById('nodeUrl').value || 'http://rpc.nouschain.org/api';
+    const result = await window.api.invoke('get-miner-balance', { nodeUrl, address: addr });
+    wBalanceData = { balance: result?.balance || 0, immature: result?.immature || 0 };
     if (wPage === 'home' && wUnlocked) wRenderPage();
   } catch(e) {}
 }
@@ -729,7 +734,6 @@ async function wRefreshBalance() {
 async function wDoLock() {
   try {
     await wApi('lock');
-    wPassword = '';
     wPageHistory = [];
     wPage = 'home';
     wUnlocked = false;
@@ -747,6 +751,8 @@ function wSetActiveAddr(index) {
     document.getElementById('address').value = addr.address;
     toast('Active address switched');
   }
+  wBalanceData = { balance: 0, immature: 0 };
+  wRefreshBalance();
   wRenderAddresses(document.getElementById('walletApp'));
 }
 
@@ -872,7 +878,7 @@ async function wExportMnemonic() {
     el.innerHTML = `<div class="mt"><div class="w-label" style="color:#ff6b6b">Recovery Phrase</div>
       <div class="word-grid">${words.map((w, i) => `<div class="word-cell"><span class="num">${i+1}</span>${w}</div>`).join('')}</div>
       <button class="w-btn w-btn-small w-btn-secondary mt" onclick="copyText('${res.mnemonic}')">Copy All</button></div>`;
-  } catch(e) { el.innerHTML = `<div class="error">${e.message}</div>`; }
+  } catch(e) { el.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
 
 async function wExportPrivateKey(address) {
@@ -882,7 +888,7 @@ async function wExportPrivateKey(address) {
     el.innerHTML = `<div class="mt"><div class="w-label" style="color:#ff6b6b">Private Key</div>
       <div class="privkey-box">${res.private_key}</div>
       <button class="w-btn w-btn-small w-btn-secondary mt" onclick="copyText('${res.private_key}')">Copy</button></div>`;
-  } catch(e) { el.innerHTML = `<div class="error">${e.message}</div>`; }
+  } catch(e) { el.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
 
 // --- Send ---
@@ -958,17 +964,18 @@ async function wDoSend(to, amount, fee, message) {
   const resultEl = document.getElementById('wSendResult');
   resultEl.innerHTML = '<div class="w-sub">Broadcasting...</div>';
   try {
-    const res = await wApi('send', { to, amount, fee, message });
-    resultEl.innerHTML = `<div class="success">Sent! TxID: ${res.txid.slice(0, 16)}...</div>`;
+    const from = wGetActiveAddr();
+    const res = await wApi('send', { from, to, amount, fee, message });
+    resultEl.innerHTML = `<div class="success">Sent! TxID: ${esc(res.txid.slice(0, 16))}...</div>`;
     wRefreshBalance();
     setTimeout(() => { wPageHistory = []; wPage = 'home'; wRenderPage(); }, 3000);
-  } catch(e) { resultEl.innerHTML = `<div class="error">${e.message}</div>`; }
+  } catch(e) { resultEl.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
 
 // --- Receive ---
 async function wRenderReceive(el) {
   wAddresses = await wApi('list_addresses') || [];
-  const primary = wAddresses.length > 0 ? wAddresses[0].address : '';
+  const primary = wGetActiveAddr();
   el.innerHTML = `
     <button class="w-back" onclick="wGoBack()">&#8249; Back</button>
     <div class="card center">
@@ -1000,26 +1007,35 @@ async function wRenderReceive(el) {
 async function wRenderHistory(el) {
   el.innerHTML = '<button class="w-back" onclick="wGoBack()">&#8249; Back</button><div class="card center"><div class="w-sub">Loading transactions...</div></div>';
   try {
-    const history = await wApi('get_history') || [];
+    const allHistory = await wApi('get_history') || [];
+    const activeAddr = wGetActiveAddr();
+    const history = allHistory.filter(t => t.from === activeAddr || t.to === activeAddr);
     if (history.length === 0) {
       el.innerHTML = '<button class="w-back" onclick="wGoBack()">&#8249; Back</button><div class="card center"><div class="w-sub">No transactions yet</div></div>';
       return;
     }
     el.innerHTML = `<button class="w-back" onclick="wGoBack()">&#8249; Back</button>
       <div class="card" style="padding:0">
-        ${history.map(t => `
+        ${history.map(t => {
+          const isSend = t.from === activeAddr;
+          const displayAmount = isSend ? t.amount : Math.abs(t.amount);
+          const counterparty = isSend ? t.to : t.from;
+          return `
           <div class="tx-item">
-            <div>
-              <div class="tx-amount ${t.amount > 0 ? 'positive' : 'negative'}">${t.amount > 0 ? '+' : ''}${formatNOUS(t.amount)} NOUS</div>
-              <div class="tx-meta">${t.message || t.address?.slice(0,16) + '...' || ''}</div>
+            <div style="min-width:0;flex:1">
+              <div class="tx-amount ${isSend ? 'negative' : 'positive'}">${isSend ? '-' : '+'}${formatNOUS(Math.abs(displayAmount))} NOUS</div>
+              <div class="tx-meta">${esc(t.message) || (counterparty ? esc(counterparty.slice(0,20)) + '...' : 'Transaction')}</div>
+              <div class="tx-meta" style="cursor:pointer;margin-top:2px" onclick="copyText('${t.txid}')">${t.txid.slice(0,16)}... <span style="font-size:10px;color:#444">copy</span></div>
             </div>
-            <div style="text-align:right">
-              <div style="font-size:12px;color:#666">#${t.height}</div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-size:11px;color:#666">${isSend ? 'Sent' : 'Received'}</div>
               <div class="tx-meta">${timeAgo(t.timestamp)}</div>
+              ${isSend && t.fee ? '<div class="tx-meta">fee: ' + formatNOUS(t.fee) + '</div>' : ''}
             </div>
-          </div>`).join('')}
+          </div>`;
+        }).join('')}
       </div>`;
-  } catch(e) { el.innerHTML = `<button class="w-back" onclick="wGoBack()">&#8249; Back</button><div class="card"><div class="error">${e.message}</div></div>`; }
+  } catch(e) { el.innerHTML = `<button class="w-back" onclick="wGoBack()">&#8249; Back</button><div class="card"><div class="error">${esc(e.message)}</div></div>`; }
 }
 
 // --- Settings pages ---
@@ -1035,7 +1051,7 @@ async function wRenderBackup(el) {
         <div class="word-grid">${words.map((w, i) => `<div class="word-cell"><span class="num">${i+1}</span>${w}</div>`).join('')}</div>
         <button class="w-btn w-btn-secondary mt" onclick="copyText('${res.mnemonic}')">Copy All</button>
       </div>`;
-  } catch(e) { el.innerHTML = `<button class="w-back" onclick="wGoBack()">&#8249; Back</button><div class="card"><div class="error">${e.message}</div></div>`; }
+  } catch(e) { el.innerHTML = `<button class="w-back" onclick="wGoBack()">&#8249; Back</button><div class="card"><div class="error">${esc(e.message)}</div></div>`; }
 }
 
 function wRenderNodeSettings(el) {
@@ -1053,9 +1069,10 @@ async function wDoSetNode() {
   const url = document.getElementById('wNodeUrl').value.trim();
   try {
     await wApi('set_node', { url });
+    document.getElementById('nodeUrl').value = url;
     document.getElementById('wNodeResult').innerHTML = '<div class="success">Node updated</div>';
     wRefreshBalance();
-  } catch(e) { document.getElementById('wNodeResult').innerHTML = `<div class="error">${e.message}</div>`; }
+  } catch(e) { document.getElementById('wNodeResult').innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
 
 // --- Wallet auto-refresh ---

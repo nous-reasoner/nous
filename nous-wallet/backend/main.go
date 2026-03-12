@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"nous/crypto"
 	"nous/tx"
@@ -168,11 +169,12 @@ func handle(req Request) Response {
 		return handleGetBalance(req.ID)
 
 	case "send":
+		from := getString("from")
 		to := getString("to")
 		amount := getInt("amount")
 		fee := getInt("fee")
 		msg := getString("message")
-		return handleSend(req.ID, to, amount, fee, msg)
+		return handleSend(req.ID, from, to, amount, fee, msg)
 
 	case "get_history":
 		return handleGetHistory(req.ID)
@@ -268,7 +270,7 @@ func handleGetBalance(id int) Response {
 
 // --- Send Transaction ---
 
-func handleSend(id int, toAddr string, amount, fee int64, message string) Response {
+func handleSend(id int, fromAddr, toAddr string, amount, fee int64, message string) Response {
 	if !wallet.IsUnlocked() {
 		return errResp(id, fmt.Errorf("wallet locked"))
 	}
@@ -278,37 +280,42 @@ func handleSend(id int, toAddr string, amount, fee int64, message string) Respon
 	if err != nil {
 		return errResp(id, fmt.Errorf("invalid address: %v", err))
 	}
-	_ = toPKH
 
-	// Collect UTXOs from all addresses
+	// Use active address as sender if not specified
+	if fromAddr == "" {
+		addr, err := wallet.GetActiveAddress()
+		if err != nil {
+			return errResp(id, err)
+		}
+		fromAddr = addr
+	}
+
+	// Collect UTXOs only from the sender address
 	type utxoInfo struct {
 		TxID      string `json:"txid"`
 		Index     uint32 `json:"index"`
 		Value     int64  `json:"value"`
 		Height    uint64 `json:"height"`
-		Address   string // which wallet address owns this
+		Address   string
 	}
 
 	var allUTXOs []utxoInfo
-	addrs := wallet.AllAddresses()
-	for _, addr := range addrs {
-		raw, err := nodeRPC("listunspent", addr)
-		if err != nil {
-			continue
-		}
-		var utxos []struct {
-			TxID   string `json:"txid"`
-			Index  uint32 `json:"index"`
-			Value  int64  `json:"value"`
-			Height uint64 `json:"height"`
-		}
-		json.Unmarshal(raw, &utxos)
-		for _, u := range utxos {
-			allUTXOs = append(allUTXOs, utxoInfo{
-				TxID: u.TxID, Index: u.Index, Value: u.Value,
-				Height: u.Height, Address: addr,
-			})
-		}
+	raw, err := nodeRPC("listunspent", fromAddr)
+	if err != nil {
+		return errResp(id, fmt.Errorf("cannot fetch UTXOs: %v", err))
+	}
+	var utxos []struct {
+		TxID   string `json:"txid"`
+		Index  uint32 `json:"index"`
+		Value  int64  `json:"value"`
+		Height uint64 `json:"height"`
+	}
+	json.Unmarshal(raw, &utxos)
+	for _, u := range utxos {
+		allUTXOs = append(allUTXOs, utxoInfo{
+			TxID: u.TxID, Index: u.Index, Value: u.Value,
+			Height: u.Height, Address: fromAddr,
+		})
 	}
 
 	// Coin selection (largest first)
@@ -338,10 +345,6 @@ func handleSend(id int, toAddr string, amount, fee int64, message string) Respon
 	}
 
 	// Build transaction
-	_, toPKHBytes, _ := crypto.Bech32mAddressToPubKeyHash(toAddr)
-	toPKH = toPKHBytes
-
-
 	var inputs []tx.TxIn
 	for _, u := range selected {
 		txidBytes, _ := hex.DecodeString(u.TxID)
@@ -369,10 +372,10 @@ func handleSend(id int, toAddr string, amount, fee int64, message string) Respon
 		})
 	}
 
-	// Change output
+	// Change output — send back to sender
 	change := inputSum - amount - fee
 	if change > 546 { // dust limit
-		changePKH, _ := wallet.GetPubKeyHashForAddress(addrs[0])
+		changePKH, _ := wallet.GetPubKeyHashForAddress(fromAddr)
 		outputs = append(outputs, tx.TxOut{
 			Amount:   change,
 			PkScript: tx.CreateP2PKHLockScript(changePKH),
@@ -418,6 +421,17 @@ func handleSend(id int, toAddr string, amount, fee int64, message string) Respon
 	var txid string
 	json.Unmarshal(result, &txid)
 
+	// Store transaction record locally
+	wallet.AddTxRecord(TxRecord{
+		TxID:      txid,
+		To:        toAddr,
+		From:      selected[0].Address,
+		Amount:    -amount,
+		Fee:       fee,
+		Message:   message,
+		Timestamp: time.Now().Unix(),
+	}, password)
+
 	return Response{Result: map[string]string{
 		"txid":   txid,
 		"status": "sent",
@@ -427,115 +441,10 @@ func handleSend(id int, toAddr string, amount, fee int64, message string) Respon
 // --- Transaction History ---
 
 func handleGetHistory(id int) Response {
-	addrs := wallet.AllAddresses()
-	if len(addrs) == 0 {
-		return errResp(id, fmt.Errorf("wallet locked or empty"))
-	}
-
-	// Get current height
-	raw, err := nodeRPC("getblockcount")
+	records, err := wallet.GetTxHistory()
 	if err != nil {
 		return errResp(id, err)
 	}
-	var height int
-	json.Unmarshal(raw, &height)
-
-	// Scan last 200 blocks for transactions involving our addresses
-	addrSet := map[string]bool{}
-	for _, a := range addrs {
-		addrSet[a] = true
-	}
-
-	type historyEntry struct {
-		TxID      string `json:"txid"`
-		Height    int    `json:"height"`
-		Timestamp int64  `json:"timestamp"`
-		Amount    int64  `json:"amount"` // positive = received, negative = sent
-		Address   string `json:"address"`
-		Message   string `json:"message,omitempty"`
-	}
-
-	var history []historyEntry
-	scanFrom := height - 200
-	if scanFrom < 0 {
-		scanFrom = 0
-	}
-
-	for h := height; h >= scanFrom && len(history) < 50; h-- {
-		blockRaw, err := nodeRPC("getblock", h)
-		if err != nil {
-			continue
-		}
-		var block struct {
-			Height       int      `json:"height"`
-			Timestamp    int64    `json:"timestamp"`
-			Transactions []string `json:"transactions"`
-			MinerAddress string   `json:"miner_address"`
-		}
-		json.Unmarshal(blockRaw, &block)
-
-		// Check if coinbase went to our address
-		if addrSet[block.MinerAddress] {
-			history = append(history, historyEntry{
-				TxID:      block.Transactions[0],
-				Height:    block.Height,
-				Timestamp: block.Timestamp,
-				Amount:    100_000_000, // 1 NOUS
-				Address:   block.MinerAddress,
-				Message:   "Block reward",
-			})
-		}
-
-		// Check other transactions
-		for _, txid := range block.Transactions[1:] {
-			txRaw, err := nodeRPC("gettx", txid)
-			if err != nil {
-				continue
-			}
-			var t struct {
-				Outputs []struct {
-					Value  int64  `json:"value"`
-					Script string `json:"script"`
-				} `json:"outputs"`
-			}
-			json.Unmarshal(txRaw, &t)
-
-			for _, out := range t.Outputs {
-				// Check OP_RETURN for message
-				if len(out.Script) > 4 && out.Script[:2] == "6a" {
-					// OP_RETURN detected
-					continue
-				}
-				// Check P2PKH
-				pkh := scriptToPKH(out.Script)
-				if pkh == "" {
-					continue
-				}
-				addr := crypto.PubKeyHashToBech32mAddress(hexToBytes(pkh))
-				if addrSet[addr] {
-					history = append(history, historyEntry{
-						TxID:      txid,
-						Height:    block.Height,
-						Timestamp: block.Timestamp,
-						Amount:    out.Value,
-						Address:   addr,
-					})
-				}
-			}
-		}
-	}
-
-	return Response{Result: history, ID: id}
+	return Response{Result: records, ID: id}
 }
 
-func scriptToPKH(script string) string {
-	if len(script) == 50 && strings.HasPrefix(script, "76a914") && strings.HasSuffix(script, "88ac") {
-		return script[6:46]
-	}
-	return ""
-}
-
-func hexToBytes(s string) []byte {
-	b, _ := hex.DecodeString(s)
-	return b
-}

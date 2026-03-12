@@ -53,11 +53,11 @@ type rpcErr struct{ msg string }
 func (e *rpcErr) Error() string { return e.msg }
 
 type minerStat struct {
-	Address    string `json:"address"`
-	Blocks     int    `json:"blocks"`
-	TotalNous  int    `json:"total_nous"`
-	LastTs     int64  `json:"last_ts"`
-	LastHeight int    `json:"last_height"`
+	Address    string  `json:"address"`
+	Blocks     int     `json:"blocks"`
+	TotalNous  float64 `json:"total_nous"`
+	LastTs     int64   `json:"last_ts"`
+	LastHeight int     `json:"last_height"`
 }
 
 type leaderboardData struct {
@@ -145,7 +145,6 @@ func scanNewBlocks(height int) error {
 				minerMap[b.MinerAddress] = s
 			}
 			s.Blocks++
-			s.TotalNous = s.Blocks
 			if b.Timestamp > s.LastTs {
 				s.LastTs = b.Timestamp
 				s.LastHeight = b.Height
@@ -160,14 +159,35 @@ func scanNewBlocks(height int) error {
 
 func buildJSON(height int) leaderboardData {
 	mu.Lock()
-	defer mu.Unlock()
-
 	miners := make([]minerStat, 0, len(minerMap))
 	for _, s := range minerMap {
 		miners = append(miners, *s)
 	}
+	mu.Unlock()
+
+	// Fetch actual balance for each miner
+	var wg sync.WaitGroup
+	for i := range miners {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			raw, err := rpc("getbalance", miners[i].Address)
+			if err != nil {
+				return
+			}
+			var bal struct {
+				Balance  int64 `json:"balance"`
+				Immature int64 `json:"immature"`
+			}
+			if json.Unmarshal(raw, &bal) == nil {
+				miners[i].TotalNous = float64(bal.Balance+bal.Immature) / 1e8
+			}
+		}(i)
+	}
+	wg.Wait()
+
 	sort.Slice(miners, func(i, j int) bool {
-		return miners[i].Blocks > miners[j].Blocks
+		return miners[i].TotalNous > miners[j].TotalNous
 	})
 	return leaderboardData{
 		UpdatedAt:   time.Now().Unix(),

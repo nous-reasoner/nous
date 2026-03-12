@@ -153,15 +153,16 @@ function render(data) {
     document.getElementById('podium').innerHTML = order.map((m, i) => {
         if (!m) return '<div></div>';
         const rank = ranks[i];
-        const share = ((m.blocks / height) * 100).toFixed(1);
+        const totalNous = miners.reduce((s, x) => s + x.total_nous, 0);
+        const share = totalNous > 0 ? ((m.total_nous / totalNous) * 100).toFixed(1) : '0.0';
         return `
         <a href="/explorer.html#address/${m.address}"
            class="bg-card border border-border rounded p-4 text-center hover:border-nous/40 transition block">
             <div class="text-3xl mb-2">${rankSymbol(rank)}</div>
             <div class="${rankColor(rank)} font-bold text-lg mb-1">#${rank}</div>
             <div class="font-mono text-xs text-gray-400 mb-2 truncate">${shortAddr(m.address)}</div>
-            <div class="text-nous font-bold text-xl">${m.blocks.toLocaleString()}</div>
-            <div class="text-gray-500 text-xs">blocks · ${share}%</div>
+            <div class="text-nous font-bold text-xl">${m.total_nous.toLocaleString(undefined, {maximumFractionDigits: 2})}</div>
+            <div class="text-gray-500 text-xs">${m.blocks} blocks · ${share}%</div>
             <div class="text-gray-600 text-xs mt-1">${timeAgo(m.last_ts)}</div>
         </a>`;
     }).join('');
@@ -169,8 +170,9 @@ function render(data) {
     // Full table
     document.getElementById('leaderboardRows').innerHTML = miners.map((m, i) => {
         const rank = i + 1;
-        const share = ((m.blocks / height) * 100).toFixed(2);
-        const barWidth = Math.max(2, Math.round(m.blocks / miners[0].blocks * 100));
+        const totalNous = miners.reduce((s, x) => s + x.total_nous, 0);
+        const share = totalNous > 0 ? ((m.total_nous / totalNous) * 100).toFixed(2) : '0.00';
+        const barWidth = Math.max(2, Math.round(m.total_nous / (miners[0].total_nous || 1) * 100));
         return `
         <a href="/explorer.html#address/${m.address}"
            class="grid grid-cols-12 gap-2 px-4 py-3 hover:bg-bg transition items-center group">
@@ -185,7 +187,7 @@ function render(data) {
                 <span class="text-white font-bold">${m.blocks.toLocaleString()}</span>
                 <span class="text-gray-600 text-xs ml-1">blks</span>
             </div>
-            <div class="col-span-2 text-right text-nous font-bold text-sm">${m.blocks.toLocaleString()}</div>
+            <div class="col-span-2 text-right text-nous font-bold text-sm">${m.total_nous.toLocaleString(undefined, {maximumFractionDigits: 2})} NOUS</div>
             <div class="col-span-2 text-right">
                 <div class="text-gray-400 text-sm">${share}%</div>
                 <div class="text-gray-600 text-xs">${timeAgo(m.last_ts)}</div>

@@ -70,7 +70,8 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 480,
         height: 720,
-        titleBarStyle: 'hiddenInset',
+        titleBarStyle: 'hidden',
+        trafficLightPosition: { x: 12, y: 12 },
         backgroundColor: '#0a0a0a',
         webPreferences: {
             nodeIntegration: true,
@@ -94,7 +95,8 @@ app.on('window-all-closed', () => {
 const methods = [
     'wallet_exists', 'create_wallet', 'import_wallet',
     'unlock', 'lock', 'get_mnemonic', 'derive_address',
-    'list_addresses', 'get_balance', 'send', 'get_history', 'set_node'
+    'list_addresses', 'get_balance', 'send', 'get_history',
+    'get_private_key', 'set_node'
 ];
 
 methods.forEach(method => {

@@ -4,6 +4,10 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 
+// Prevent EPIPE crashes when piped stdout/stderr is closed
+process.stdout?.on('error', () => {});
+process.stderr?.on('error', () => {});
+
 let mainWindow;
 let minerProcess;
 
@@ -80,8 +84,9 @@ function createWindow() {
     width: 900,
     height: 750,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
     }
   });
 

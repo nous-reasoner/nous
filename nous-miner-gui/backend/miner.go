@@ -11,7 +11,9 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/nous-reasoner/nous-miner-gui/backend/sat"
@@ -136,74 +138,128 @@ func mineBlock(config Config, solv solver.Solver) error {
 	copy(prevHash[:], prevHashBytes)
 
 	target := compactToTarget(work.DiffBits)
-	// Extract timestamp from header template (offset 68, uint32 LE).
 	headerTimestamp := binary.LittleEndian.Uint32(headerTemplate[68:72])
-	satSolved := 0
+
+	numThreads := runtime.NumCPU()
 	startTime := time.Now()
+	var totalSolved atomic.Int64
+	var seedCounter atomic.Uint64
 
-	for seed := uint64(0); seed < 10000; seed++ {
-		// Generate SAT formula locally.
-		satSeed := sat.MakeSATSeed(prevHash, seed)
-		formula := sat.GenerateFormula(satSeed, sat.SATVariables, sat.SATClausesRatio)
+	type blockResult struct {
+		seed       uint64
+		solution   string
+		height     uint64
+		blockHash  string
+	}
+	found := make(chan blockResult, 1)
+	done := make(chan struct{})
 
-		// Solve with configured solver.
-		solution, err := solv.Solve(formula, sat.SATVariables)
-		if err != nil {
-			continue
-		}
+	for t := 0; t < numThreads; t++ {
+		go func() {
+			// Each goroutine gets its own solver instance
+			localSolv, _ := solver.Get(config.SolverName)
+			configureSolver(localSolv, config)
 
-		if !sat.Verify(formula, solution) {
-			continue
-		}
-		satSolved++
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
 
-		// Compute solution hash.
-		solBytes := sat.SerializeAssignment(solution)
-		solHash := sha256.Sum256(solBytes)
+				seed := seedCounter.Add(1) - 1
+				if seed >= 10000 {
+					return
+				}
 
-		// Build header and check PoW.
-		header := make([]byte, 148)
-		copy(header, headerTemplate)
-		binary.LittleEndian.PutUint64(header[76:84], seed)
-		copy(header[84:116], solHash[:])
+				// Generate SAT formula locally (all local data, no sharing).
+				satSeed := sat.MakeSATSeed(prevHash, seed)
+				formula := sat.GenerateFormula(satSeed, sat.SATVariables, sat.SATClausesRatio)
 
-		blockHash := doubleSha256(header)
-		if !meetsTarget(blockHash, target) {
-			if satSolved%20 == 0 {
-				elapsed := time.Since(startTime).Seconds()
-				rate := float64(satSolved) / elapsed
-				log.Printf("Progress: %d SAT solved (%.1f/s), seed=%d, no PoW match yet", satSolved, rate, seed)
+				solution, err := localSolv.Solve(formula, sat.SATVariables)
+				if err != nil {
+					continue
+				}
+
+				if !sat.Verify(formula, solution) {
+					continue
+				}
+				totalSolved.Add(1)
+				solved := totalSolved.Load()
+
+				// Compute solution hash.
+				solBytes := sat.SerializeAssignment(solution)
+				solHash := sha256.Sum256(solBytes)
+
+				// Build header and check PoW (all local copies).
+				header := make([]byte, 148)
+				copy(header, headerTemplate)
+				binary.LittleEndian.PutUint64(header[76:84], seed)
+				copy(header[84:116], solHash[:])
+
+				blockHash := doubleSha256(header)
+				if !meetsTarget(blockHash, target) {
+					if solved%50 == 0 {
+						elapsed := time.Since(startTime).Seconds()
+						rate := float64(solved) / elapsed
+						log.Printf("Progress: %d SAT solved (%.1f/s), seed=%d, no PoW match yet", solved, rate, seed)
+					}
+					continue
+				}
+
+				// PoW met — serialize solution string before sending.
+				solutionStr := assignmentToString(solution)
+				log.Printf("Seed %d: SAT solved + PoW met! Submitting...", seed)
+
+				result, err := rpcCall(config.NodeURL, "submitwork", []interface{}{
+					config.Address,
+					seed,
+					solutionStr,
+					headerTimestamp,
+				})
+				if err != nil {
+					log.Printf("Seed %d: submit error: %v", seed, err)
+					continue
+				}
+
+				var submitRes struct {
+					Height    uint64 `json:"height"`
+					BlockHash string `json:"block_hash"`
+				}
+				json.Unmarshal(result, &submitRes)
+
+				select {
+				case found <- blockResult{seed, solutionStr, submitRes.Height, submitRes.BlockHash}:
+				default:
+				}
+				return
 			}
-			continue
-		}
-
-		// PoW met — submit.
-		solutionStr := assignmentToString(solution)
-		log.Printf("Seed %d: SAT solved + PoW met! Submitting...", seed)
-
-		result, err := rpcCall(config.NodeURL, "submitwork", []interface{}{
-			config.Address,
-			seed,
-			solutionStr,
-			headerTimestamp,
-		})
-		if err != nil {
-			log.Printf("Seed %d: submit error: %v", seed, err)
-			continue
-		}
-
-		var submitResult struct {
-			Height    uint64 `json:"height"`
-			BlockHash string `json:"block_hash"`
-		}
-		json.Unmarshal(result, &submitResult)
-		log.Printf("Block found! Height: %d, Hash: %s", submitResult.Height, submitResult.BlockHash)
-		return nil
+		}()
 	}
 
-	elapsed := time.Since(startTime).Seconds()
-	log.Printf("Round: %d SAT solved in %.1fs (%.1f/s), no block", satSolved, elapsed, float64(satSolved)/elapsed)
-	return nil
+	// Wait for either a block found or all goroutines finishing
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case res := <-found:
+			close(done)
+			solved := totalSolved.Load()
+			elapsed := time.Since(startTime).Seconds()
+			rate := float64(solved) / elapsed
+			log.Printf("Block found! Height: %d, Hash: %s (%.1fs, %d SAT solved, %.1f/s)", res.height, res.blockHash, elapsed, solved, rate)
+			return nil
+		case <-ticker.C:
+			if seedCounter.Load() >= 10000 {
+				close(done)
+				solved := totalSolved.Load()
+				elapsed := time.Since(startTime).Seconds()
+				log.Printf("Round: %d SAT solved in %.1fs (%.1f/s), no block", solved, elapsed, float64(solved)/elapsed)
+				return nil
+			}
+		}
+	}
 }
 
 func compactToTarget(bits uint32) *big.Int {

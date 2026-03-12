@@ -26,6 +26,7 @@ type WalletState struct {
 	nextIndex    uint32
 	keys         []DerivedKey
 	importedKeys []ImportedKey
+	txHistory    []TxRecord
 	nodeURL      string
 }
 
@@ -44,11 +45,23 @@ type ImportedKey struct {
 	Label      string `json:"label,omitempty"`
 }
 
+// TxRecord is a locally stored transaction record.
+type TxRecord struct {
+	TxID      string `json:"txid"`
+	To        string `json:"to"`
+	From      string `json:"from"`
+	Amount    int64  `json:"amount"`
+	Fee       int64  `json:"fee"`
+	Message   string `json:"message,omitempty"`
+	Timestamp int64  `json:"timestamp"`
+}
+
 // walletFile is the on-disk format.
 type walletFile struct {
 	NextIndex    uint32        `json:"next_index"`
 	Keys         []DerivedKey  `json:"keys"`
 	ImportedKeys []ImportedKey `json:"imported_keys,omitempty"`
+	TxHistory    []TxRecord   `json:"tx_history,omitempty"`
 }
 
 // scrypt params
@@ -91,6 +104,7 @@ func (w *WalletState) Create(mnemonic, password string) error {
 	w.nextIndex = 0
 	w.keys = nil
 	w.importedKeys = nil
+	w.txHistory = nil
 	w.unlocked = true
 
 	// Derive first address
@@ -161,6 +175,7 @@ func (w *WalletState) Unlock(password string) error {
 	w.nextIndex = stored.File.NextIndex
 	w.keys = stored.File.Keys
 	w.importedKeys = stored.File.ImportedKeys
+	w.txHistory = stored.File.TxHistory
 	w.unlocked = true
 
 	return nil
@@ -171,6 +186,10 @@ func (w *WalletState) Lock() {
 	defer w.mu.Unlock()
 	w.mnemonic = ""
 	w.master = nil
+	w.keys = nil
+	w.importedKeys = nil
+	w.txHistory = nil
+	w.nextIndex = 0
 	w.unlocked = false
 }
 
@@ -347,6 +366,32 @@ func (w *WalletState) AllAddresses() []string {
 	return addrs
 }
 
+// AddTxRecord stores a transaction record and persists to disk.
+func (w *WalletState) AddTxRecord(rec TxRecord, password string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.unlocked {
+		return errors.New("wallet locked")
+	}
+	w.txHistory = append([]TxRecord{rec}, w.txHistory...) // prepend (newest first)
+	if len(w.txHistory) > 100 {
+		w.txHistory = w.txHistory[:100]
+	}
+	return w.saveLocked(password)
+}
+
+// GetTxHistory returns locally stored transaction records.
+func (w *WalletState) GetTxHistory() ([]TxRecord, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.unlocked {
+		return nil, errors.New("wallet locked")
+	}
+	out := make([]TxRecord, len(w.txHistory))
+	copy(out, w.txHistory)
+	return out, nil
+}
+
 // GetPubKeyHashForAddress returns the 20-byte pubkey hash for signing.
 func (w *WalletState) GetPubKeyHashForAddress(addr string) ([]byte, error) {
 	key, err := w.GetKeyForAddress(addr)
@@ -366,6 +411,7 @@ func (w *WalletState) saveLocked(password string) error {
 			NextIndex:    w.nextIndex,
 			Keys:         w.keys,
 			ImportedKeys: w.importedKeys,
+			TxHistory:    w.txHistory,
 		},
 	}
 	plaintext, _ := json.Marshal(stored)
@@ -405,5 +451,10 @@ func (w *WalletState) saveLocked(password string) error {
 	dir := filepath.Dir(w.filePath)
 	os.MkdirAll(dir, 0700)
 
-	return os.WriteFile(w.filePath, out, 0600)
+	// Atomic write: write to temp file then rename
+	tmp := w.filePath + ".tmp"
+	if err := os.WriteFile(tmp, out, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, w.filePath)
 }
