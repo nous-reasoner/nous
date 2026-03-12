@@ -75,10 +75,16 @@ func main() {
 
 	log.Printf("Starting miner: node=%s, solver=%s", config.NodeURL, solv.Name())
 
+	retryDelay := time.Second
 	for {
 		if err := mineBlock(config, solv); err != nil {
 			log.Printf("Mining error: %v", err)
-			time.Sleep(10 * time.Second)
+			time.Sleep(retryDelay)
+			if retryDelay < 10*time.Second {
+				retryDelay *= 2
+			}
+		} else {
+			retryDelay = time.Second
 		}
 	}
 }
@@ -299,6 +305,15 @@ func assignmentToString(a sat.Assignment) string {
 	return b.String()
 }
 
+var rpcClient = &http.Client{
+	Timeout: 15 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:        5,
+		MaxIdleConnsPerHost: 5,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
+
 func rpcCall(url, method string, params []interface{}) (json.RawMessage, error) {
 	reqBody, _ := json.Marshal(RPCRequest{
 		JSONRPC: "2.0",
@@ -312,16 +327,27 @@ func rpcCall(url, method string, params []interface{}) (json.RawMessage, error) 
 		rpcURL = url + "/rpc"
 	}
 
-	resp, err := http.Post(rpcURL, "application/json", strings.NewReader(string(reqBody)))
+	resp, err := rpcClient.Post(rpcURL, "application/json", strings.NewReader(string(reqBody)))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		snippet := string(body)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet)
+	}
 	var rpcResp RPCResponse
 	if err := json.Unmarshal(body, &rpcResp); err != nil {
-		return nil, fmt.Errorf("RPC parse error: %s", string(body))
+		snippet := string(body)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return nil, fmt.Errorf("RPC parse error: %s", snippet)
 	}
 
 	if rpcResp.Error != nil {
