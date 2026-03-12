@@ -145,6 +145,43 @@ func (k *HDKey) DeriveNOUSKey(index uint32) (*HDKey, error) {
 	return k.DerivePath(path)
 }
 
+// HDKeyFromPrivateKeyHex creates an HDKey from a hex-encoded private key.
+func HDKeyFromPrivateKeyHex(hexKey string) (*HDKey, error) {
+	b, err := hexDecode(hexKey)
+	if err != nil || len(b) != 32 {
+		return nil, errors.New("invalid private key hex")
+	}
+	var k HDKey
+	copy(k.key[:], b)
+	return &k, nil
+}
+
+func hexDecode(s string) ([]byte, error) {
+	b := make([]byte, len(s)/2)
+	for i := 0; i < len(s); i += 2 {
+		hi := hexVal(s[i])
+		lo := hexVal(s[i+1])
+		if hi < 0 || lo < 0 {
+			return nil, errors.New("invalid hex")
+		}
+		b[i/2] = byte(hi<<4 | lo)
+	}
+	return b, nil
+}
+
+func hexVal(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'f':
+		return int(c - 'a' + 10)
+	case c >= 'A' && c <= 'F':
+		return int(c - 'A' + 10)
+	default:
+		return -1
+	}
+}
+
 // PrivateKey returns the crypto.PrivateKey for this HD key.
 func (k *HDKey) PrivateKey() *crypto.PrivateKey {
 	priv, _ := crypto.PrivateKeyFromBytes(k.key[:])

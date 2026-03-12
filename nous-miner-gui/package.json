@@ -1,25 +1,23 @@
 {
   "name": "nous-miner",
   "version": "1.1.0",
-  "description": "NOUS Miner - Cogito Consensus mining client",
+  "description": "NOUS Reasoner - Cogito Consensus reasoning client",
   "author": "NOUS <dev@nouschain.org>",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder"
   },
-  "dependencies": {
-    "tiny-secp256k1": "^2.2.4"
-  },
+  "dependencies": {},
   "devDependencies": {
     "electron": "^28.0.0",
     "electron-builder": "^24.9.0"
   },
   "build": {
-    "appId": "org.nouschain.miner",
-    "productName": "NOUS Miner",
-    "files": ["src/**/*", "public/**/*", "backend/miner", "backend/miner.exe"],
-    "asarUnpack": ["backend/miner", "backend/miner.exe"],
+    "appId": "org.nouschain.reasoner",
+    "productName": "NOUS Reasoner",
+    "files": ["src/**/*", "public/**/*", "backend/miner", "backend/miner.exe", "backend/wallet-backend", "backend/wallet-backend.exe"],
+    "asarUnpack": ["backend/miner", "backend/miner.exe", "backend/wallet-backend", "backend/wallet-backend.exe"],
     "mac": {
       "category": "public.app-category.finance",
       "target": ["dmg", "zip"]

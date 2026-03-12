@@ -11,10 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"nous/crypto"
 	"nous/tx"
 )
+
+var stdoutMu sync.Mutex
 
 // JSON-RPC types
 type Request struct {
@@ -37,7 +40,7 @@ var (
 func main() {
 	homeDir, _ := os.UserHomeDir()
 	walletDir := filepath.Join(homeDir, ".nous-wallet")
-	nodeURL := "http://localhost:8332/rpc"
+	nodeURL := "http://rpc.nouschain.org/api"
 
 	// Check CLI args for node URL
 	for i, arg := range os.Args {
@@ -64,9 +67,13 @@ func main() {
 		if err := json.Unmarshal(line, &req); err != nil {
 			continue
 		}
-		resp := handle(req)
-		out, _ := json.Marshal(resp)
-		fmt.Fprintf(os.Stdout, "%s\n", out)
+		go func(r Request) {
+			resp := handle(r)
+			stdoutMu.Lock()
+			out, _ := json.Marshal(resp)
+			fmt.Fprintf(os.Stdout, "%s\n", out)
+			stdoutMu.Unlock()
+		}(req)
 	}
 }
 
@@ -169,6 +176,23 @@ func handle(req Request) Response {
 
 	case "get_history":
 		return handleGetHistory(req.ID)
+
+	case "get_private_key":
+		addr := getString("address")
+		hdKey, err := wallet.GetKeyForAddress(addr)
+		if err != nil {
+			return errResp(req.ID, err)
+		}
+		privKeyHex := hex.EncodeToString(hdKey.PrivateKey().Bytes())
+		return Response{Result: map[string]string{"private_key": privKeyHex}, ID: req.ID}
+
+	case "import_private_key":
+		privKey := getString("private_key")
+		dk, err := wallet.ImportPrivateKey(privKey, password)
+		if err != nil {
+			return errResp(req.ID, err)
+		}
+		return Response{Result: dk, ID: req.ID}
 
 	case "set_node":
 		wallet.nodeURL = getString("url")

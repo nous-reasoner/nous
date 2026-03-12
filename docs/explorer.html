@@ -398,12 +398,26 @@ document.getElementById('searchInput').addEventListener('keydown', e => {
 
 // --- Status Bar ---
 
+let recentCache = null;
+let recentCacheTime = 0;
+const RECENT_CACHE_TTL = 15000; // 15s
+
+async function fetchRecent() {
+    const now = Date.now();
+    if (recentCache && (now - recentCacheTime) < RECENT_CACHE_TTL) return recentCache;
+    const res = await fetch('/recentblocks.json?_=' + now);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    recentCache = await res.json();
+    recentCacheTime = now;
+    return recentCache;
+}
+
 async function updateStatus() {
     try {
-        const [mining, peers] = await Promise.all([rpc('getmininginfo'), rpc('getpeerinfo')]);
-        document.getElementById('statHeight').textContent = mining.height.toLocaleString();
-        document.getElementById('statDifficulty').textContent = diffBitsToMultiplier(mining.difficulty_bits) + 'x';
-        document.getElementById('statPeers').textContent = peers.length;
+        const data = await fetchRecent();
+        document.getElementById('statHeight').textContent = data.height.toLocaleString();
+        document.getElementById('statDifficulty').textContent = diffBitsToMultiplier(data.difficulty_bits) + 'x';
+        document.getElementById('statPeers').textContent = data.peers;
         document.getElementById('statUpdated').textContent = formatTimeShort();
     } catch (e) {
         document.getElementById('statUpdated').textContent = 'error';
@@ -431,17 +445,8 @@ async function renderHome() {
         </div>`;
 
     try {
-        const info = await rpc('getmininginfo');
-        const height = info.height;
-        const count = 20;
-        const start = Math.max(0, height - count + 1);
-
-        // Fetch blocks in parallel
-        const promises = [];
-        for (let h = height; h >= start; h--) {
-            promises.push(rpc('getblock', [h]));
-        }
-        const blocks = await Promise.all(promises);
+        const data = await fetchRecent();
+        const blocks = data.blocks || [];
 
         const listEl = document.getElementById('blockList');
         listEl.innerHTML = `

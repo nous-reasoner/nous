@@ -189,6 +189,96 @@ func writeJSON(path string, v any) error {
 	return os.Rename(tmp, path)
 }
 
+type recentBlock struct {
+	Height       int    `json:"height"`
+	Hash         string `json:"hash"`
+	Timestamp    int64  `json:"timestamp"`
+	Difficulty   int64  `json:"difficulty"`
+	Seed         uint64 `json:"seed"`
+	TxCount      int    `json:"tx_count"`
+	MinerAddress string `json:"miner_address"`
+	Transactions []string `json:"transactions,omitempty"`
+}
+
+type recentBlocksData struct {
+	UpdatedAt      int64         `json:"updated_at"`
+	Height         int           `json:"height"`
+	DifficultyBits int64         `json:"difficulty_bits"`
+	Peers          int           `json:"peers"`
+	Blocks         []recentBlock `json:"blocks"`
+}
+
+func fetchRecentBlocks(height int) recentBlocksData {
+	count := 20
+	start := height
+	if start < 0 {
+		start = 0
+	}
+	end := start - count + 1
+	if end < 0 {
+		end = 0
+	}
+
+	type result struct {
+		idx   int
+		block recentBlock
+		err   error
+	}
+
+	results := make([]result, start-end+1)
+	var wg sync.WaitGroup
+	for h := start; h >= end; h-- {
+		wg.Add(1)
+		go func(h, i int) {
+			defer wg.Done()
+			raw, err := rpc("getblock", h)
+			if err != nil {
+				results[i] = result{idx: i, err: err}
+				return
+			}
+			var b recentBlock
+			json.Unmarshal(raw, &b)
+			results[i] = result{idx: i, block: b}
+		}(h, start-h)
+		wg.Wait()
+	}
+
+	blocks := make([]recentBlock, 0, len(results))
+	for _, r := range results {
+		if r.err == nil {
+			blocks = append(blocks, r.block)
+		}
+	}
+
+	// Fetch peer count
+	peers := 0
+	if raw, err := rpc("getpeerinfo"); err == nil {
+		var peerList []json.RawMessage
+		if json.Unmarshal(raw, &peerList) == nil {
+			peers = len(peerList)
+		}
+	}
+
+	// Get current difficulty from mining info
+	var diffBits int64
+	if raw, err := rpc("getmininginfo"); err == nil {
+		var info struct {
+			DifficultyBits int64 `json:"difficulty_bits"`
+		}
+		if json.Unmarshal(raw, &info) == nil {
+			diffBits = info.DifficultyBits
+		}
+	}
+
+	return recentBlocksData{
+		UpdatedAt:      time.Now().Unix(),
+		Height:         height,
+		DifficultyBits: diffBits,
+		Peers:          peers,
+		Blocks:         blocks,
+	}
+}
+
 func update(outFile string) {
 	raw, err := rpc("getblockcount")
 	if err != nil {
@@ -221,9 +311,17 @@ func update(outFile string) {
 	diffData := diffChartData{UpdatedAt: time.Now().Unix(), Points: pts}
 	mu.Unlock()
 
-	diffFile := outFile[:len(outFile)-len("leaderboard.json")] + "difficulty.json"
+	baseDir := outFile[:len(outFile)-len("leaderboard.json")]
+	diffFile := baseDir + "difficulty.json"
 	if err := writeJSON(diffFile, diffData); err != nil {
 		log.Printf("leaderboard: write %s: %v", diffFile, err)
+	}
+
+	// Write recent blocks JSON for explorer homepage
+	recentData := fetchRecentBlocks(height)
+	recentFile := baseDir + "recentblocks.json"
+	if err := writeJSON(recentFile, recentData); err != nil {
+		log.Printf("leaderboard: write %s: %v", recentFile, err)
 	}
 
 	log.Printf("leaderboard: updated height=%d miners=%d", height, data.TotalMiners)

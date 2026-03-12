@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -17,14 +18,15 @@ import (
 
 // WalletState holds the in-memory wallet state.
 type WalletState struct {
-	mu        sync.Mutex
-	filePath  string
-	unlocked  bool
-	mnemonic  string
-	master    *HDKey
-	nextIndex uint32
-	keys      []DerivedKey
-	nodeURL   string
+	mu           sync.Mutex
+	filePath     string
+	unlocked     bool
+	mnemonic     string
+	master       *HDKey
+	nextIndex    uint32
+	keys         []DerivedKey
+	importedKeys []ImportedKey
+	nodeURL      string
 }
 
 // DerivedKey holds metadata about a derived address.
@@ -35,10 +37,18 @@ type DerivedKey struct {
 	Label   string `json:"label,omitempty"`
 }
 
+// ImportedKey holds an externally imported private key.
+type ImportedKey struct {
+	PrivKeyHex string `json:"private_key"`
+	Address    string `json:"address"`
+	Label      string `json:"label,omitempty"`
+}
+
 // walletFile is the on-disk format.
 type walletFile struct {
-	NextIndex uint32       `json:"next_index"`
-	Keys      []DerivedKey `json:"keys"`
+	NextIndex    uint32        `json:"next_index"`
+	Keys         []DerivedKey  `json:"keys"`
+	ImportedKeys []ImportedKey `json:"imported_keys,omitempty"`
 }
 
 // scrypt params
@@ -80,6 +90,7 @@ func (w *WalletState) Create(mnemonic, password string) error {
 	w.master = master
 	w.nextIndex = 0
 	w.keys = nil
+	w.importedKeys = nil
 	w.unlocked = true
 
 	// Derive first address
@@ -149,6 +160,7 @@ func (w *WalletState) Unlock(password string) error {
 	w.master = master
 	w.nextIndex = stored.File.NextIndex
 	w.keys = stored.File.Keys
+	w.importedKeys = stored.File.ImportedKeys
 	w.unlocked = true
 
 	return nil
@@ -233,7 +245,62 @@ func (w *WalletState) ListAddresses() ([]DerivedKey, error) {
 	}
 	out := make([]DerivedKey, len(w.keys))
 	copy(out, w.keys)
+	// Append imported keys as DerivedKey with special path
+	for i, ik := range w.importedKeys {
+		out = append(out, DerivedKey{
+			Index:   uint32(10000 + i), // high index to avoid collision
+			Path:    "imported",
+			Address: ik.Address,
+			Label:   ik.Label,
+		})
+	}
 	return out, nil
+}
+
+// ImportPrivateKey adds an external private key to the wallet.
+func (w *WalletState) ImportPrivateKey(privKeyHex, password string) (DerivedKey, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.unlocked {
+		return DerivedKey{}, errors.New("wallet locked")
+	}
+
+	privKeyBytes, err := hex.DecodeString(privKeyHex)
+	if err != nil || len(privKeyBytes) != 32 {
+		return DerivedKey{}, errors.New("invalid private key (expected 64 hex chars)")
+	}
+
+	priv, _ := crypto.PrivateKeyFromBytes(privKeyBytes)
+	pub := priv.PubKey()
+	addr := crypto.PubKeyToBech32mAddress(pub)
+
+	// Check for duplicates
+	for _, ik := range w.importedKeys {
+		if ik.Address == addr {
+			return DerivedKey{}, errors.New("address already imported")
+		}
+	}
+	for _, dk := range w.keys {
+		if dk.Address == addr {
+			return DerivedKey{}, errors.New("address already exists as HD key")
+		}
+	}
+
+	ik := ImportedKey{
+		PrivKeyHex: privKeyHex,
+		Address:    addr,
+	}
+	w.importedKeys = append(w.importedKeys, ik)
+
+	if err := w.saveLocked(password); err != nil {
+		return DerivedKey{}, err
+	}
+
+	return DerivedKey{
+		Index:   uint32(10000 + len(w.importedKeys) - 1),
+		Path:    "imported",
+		Address: addr,
+	}, nil
 }
 
 func (w *WalletState) GetActiveAddress() (string, error) {
@@ -257,16 +324,25 @@ func (w *WalletState) GetKeyForAddress(addr string) (*HDKey, error) {
 			return w.master.DeriveNOUSKey(dk.Index)
 		}
 	}
+	// Check imported keys
+	for _, ik := range w.importedKeys {
+		if ik.Address == addr {
+			return HDKeyFromPrivateKeyHex(ik.PrivKeyHex)
+		}
+	}
 	return nil, errors.New("address not found in wallet")
 }
 
-// AllAddresses returns all derived addresses.
+// AllAddresses returns all derived and imported addresses.
 func (w *WalletState) AllAddresses() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	var addrs []string
 	for _, dk := range w.keys {
 		addrs = append(addrs, dk.Address)
+	}
+	for _, ik := range w.importedKeys {
+		addrs = append(addrs, ik.Address)
 	}
 	return addrs
 }
@@ -287,8 +363,9 @@ func (w *WalletState) saveLocked(password string) error {
 	}{
 		Mnemonic: w.mnemonic,
 		File: walletFile{
-			NextIndex: w.nextIndex,
-			Keys:      w.keys,
+			NextIndex:    w.nextIndex,
+			Keys:         w.keys,
+			ImportedKeys: w.importedKeys,
 		},
 	}
 	plaintext, _ := json.Marshal(stored)

@@ -2,114 +2,133 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>NOUS Miner</title>
+  <title>NOUS Reasoner</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #0a0a0a;
-      color: #e0e0e0;
-      padding: 20px;
-    }
-    .container { max-width: 700px; margin: 0 auto; }
-    h1 { color: #00ff88; margin-bottom: 30px; }
-    .section {
-      background: #1a1a1a;
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 20px;
-      margin-bottom: 20px;
-    }
-    .section h2 {
-      color: #00ff88;
-      font-size: 18px;
-      margin-bottom: 15px;
-    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+    /* Tabs */
+    .tab-bar { display: flex; border-bottom: 1px solid #222; background: #111; }
+    .tab-btn { flex: 1; padding: 14px; text-align: center; font-size: 14px; font-weight: 600; color: #666; cursor: pointer; border: none; background: none; transition: all 0.2s; border-bottom: 2px solid transparent; }
+    .tab-btn:hover { color: #aaa; }
+    .tab-btn.active { color: #00ff88; border-bottom-color: #00ff88; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Mining tab */
+    .container { max-width: 700px; margin: 0 auto; padding: 20px; }
+    .section { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    .section h2 { color: #00ff88; font-size: 18px; margin-bottom: 15px; }
     .form-group { margin-bottom: 15px; }
-    label {
-      display: block;
-      color: #999;
-      font-size: 12px;
-      margin-bottom: 5px;
-    }
-    input, select {
-      width: 100%;
-      padding: 10px;
-      background: #0a0a0a;
-      border: 1px solid #333;
-      border-radius: 4px;
-      color: #e0e0e0;
-      font-size: 14px;
-    }
-    input:focus, select:focus { outline: none; border-color: #00ff88; }
-    button {
-      padding: 12px 24px;
-      background: #00ff88;
-      color: #0a0a0a;
-      border: none;
-      border-radius: 4px;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 14px;
-    }
+    label { display: block; color: #999; font-size: 12px; margin-bottom: 5px; }
+    input, select, textarea { width: 100%; padding: 10px; background: #0a0a0a; border: 1px solid #333; border-radius: 4px; color: #e0e0e0; font-size: 14px; font-family: inherit; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #00ff88; }
+    textarea { resize: none; }
+    button { padding: 12px 24px; background: #00ff88; color: #0a0a0a; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; font-size: 14px; }
     button:hover { background: #00dd77; }
     button:disabled { background: #333; color: #666; cursor: not-allowed; }
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 15px;
-      background: #0a0a0a;
-      border-radius: 4px;
-      margin-bottom: 15px;
-    }
+    .status { display: flex; align-items: center; gap: 10px; padding: 15px; background: #0a0a0a; border-radius: 4px; margin-bottom: 15px; }
     .status-dot { width: 12px; height: 12px; border-radius: 50%; background: #666; }
     .status-dot.active { background: #00ff88; }
-    .log {
-      background: #0a0a0a;
-      border: 1px solid #333;
-      border-radius: 4px;
-      padding: 15px;
-      height: 250px;
-      overflow-y: auto;
-      font-family: 'Courier New', monospace;
-      font-size: 12px;
-      color: #999;
-    }
+    .log { background: #0a0a0a; border: 1px solid #333; border-radius: 4px; padding: 15px; height: 200px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; color: #999; }
     .stats { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; }
     .stat-card { background: #0a0a0a; padding: 12px; border-radius: 4px; }
     .stat-label { color: #666; font-size: 11px; margin-bottom: 4px; }
     .stat-value { color: #00ff88; font-size: 20px; font-weight: 600; }
-    .solver-desc {
-      color: #666;
-      font-size: 11px;
-      margin-top: 5px;
-      font-style: italic;
-    }
-    .solver-config {
-      margin-top: 10px;
-      padding: 12px;
-      background: #0a0a0a;
-      border-radius: 4px;
-      border: 1px solid #222;
-    }
+    .solver-desc { color: #666; font-size: 11px; margin-top: 5px; font-style: italic; }
+    .solver-config { margin-top: 10px; padding: 12px; background: #0a0a0a; border-radius: 4px; border: 1px solid #222; }
     .solver-config .form-group { margin-bottom: 10px; }
     .solver-config .form-group:last-child { margin-bottom: 0; }
-    .checkbox-label {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: #999;
-      font-size: 13px;
-      cursor: pointer;
-    }
+    .checkbox-label { display: flex; align-items: center; gap: 8px; color: #999; font-size: 13px; cursor: pointer; }
     .checkbox-label input[type="checkbox"] { width: auto; }
+
+    /* Wallet tab */
+    .w-content { max-width: 500px; margin: 0 auto; padding: 20px; }
+    .card { background: #151515; border: 1px solid #222; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+    .w-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .w-value { font-size: 32px; font-weight: 700; color: #fff; }
+    .w-value .unit { font-size: 14px; color: #00ff88; font-weight: 400; margin-left: 4px; }
+    .w-sub { font-size: 12px; color: #555; margin-top: 4px; }
+    .w-btn { width: 100%; padding: 12px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; letter-spacing: 0.3px; }
+    .w-btn-primary { background: #00ff88; color: #000; }
+    .w-btn-primary:hover { background: #00e07a; }
+    .w-btn-secondary { background: #1a1a1a; color: #ccc; border: 1px solid #333; }
+    .w-btn-secondary:hover { background: #222; }
+    .w-btn-danger { background: #1a1a1a; color: #ff6b6b; border: 1px solid #333; }
+    .w-btn-danger:hover { background: #221010; }
+    .w-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .w-btn-small { width: auto; padding: 6px 14px; font-size: 12px; border-radius: 6px; display: inline-block; }
+    .w-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .w-row > * { flex: 1; }
+    .w-field { margin-bottom: 14px; }
+    .w-field label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
+    .actions { display: flex; gap: 12px; margin-bottom: 16px; }
+    .action-btn { flex: 1; background: #151515; border: 1px solid #222; border-radius: 12px; padding: 18px 12px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .action-btn:hover { border-color: #00ff88; background: #0a1f14; }
+    .action-icon { font-size: 24px; margin-bottom: 6px; }
+    .action-text { font-size: 12px; color: #888; font-weight: 500; }
+    .action-btn:hover .action-text { color: #00ff88; }
+    .addr-text { font-family: 'SF Mono', 'Courier New', monospace; font-size: 12px; color: #888; word-break: break-all; cursor: pointer; padding: 8px; border-radius: 6px; background: #0d0d0d; border: 1px solid #1a1a1a; }
+    .addr-text:hover { color: #00ff88; border-color: #00ff8844; }
+    .addr-card { background: #151515; border: 1px solid #222; border-radius: 10px; padding: 14px; margin-bottom: 10px; cursor: pointer; transition: all 0.15s; }
+    .addr-card:hover { border-color: #00ff8866; }
+    .addr-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .addr-card-tag { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+    .addr-card-tag.primary { background: #00ff8822; color: #00ff88; }
+    .addr-card-tag.sub { background: #ffffff11; color: #888; }
+    .addr-card-path { font-size: 10px; color: #444; font-family: 'SF Mono', monospace; }
+    .addr-card-addr { font-family: 'SF Mono', monospace; font-size: 11px; color: #999; word-break: break-all; line-height: 1.5; }
+    .tx-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #1a1a1a; }
+    .tx-item:last-child { border: none; }
+    .tx-amount { font-weight: 600; font-size: 14px; }
+    .tx-amount.positive { color: #00ff88; }
+    .tx-amount.negative { color: #ff6b6b; }
+    .tx-meta { font-size: 11px; color: #555; }
+    .fee-selector { display: flex; gap: 8px; }
+    .fee-opt { flex: 1; background: #111; border: 1px solid #282828; border-radius: 8px; padding: 10px 8px; cursor: pointer; text-align: center; transition: all 0.2s; }
+    .fee-opt:hover { border-color: #444; }
+    .fee-opt.active { border-color: #00ff88; background: #0a1f14; }
+    .fee-label { font-size: 13px; font-weight: 600; color: #ccc; margin-bottom: 2px; }
+    .fee-opt.active .fee-label { color: #00ff88; }
+    .fee-desc { font-size: 10px; color: #555; }
+    .confirm-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; }
+    .confirm-label { font-size: 12px; color: #666; flex-shrink: 0; margin-right: 12px; }
+    .confirm-value { font-size: 14px; color: #e0e0e0; text-align: right; }
+    .word-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 12px 0; }
+    .word-cell { background: #151515; border: 1px solid #222; border-radius: 6px; padding: 6px 8px; font-size: 12px; text-align: center; font-family: 'SF Mono', monospace; }
+    .word-cell .num { color: #444; font-size: 10px; margin-right: 4px; }
+    .privkey-box { background: #0d0d0d; border: 1px solid #ff6b6b33; border-radius: 8px; padding: 12px; font-family: 'SF Mono', monospace; font-size: 11px; color: #ff6b6b; word-break: break-all; line-height: 1.6; user-select: all; }
+    .qr { display: flex; justify-content: center; margin: 16px 0; }
+    .qr canvas { border-radius: 8px; }
+    .error { color: #ff6b6b; font-size: 12px; margin-top: 6px; }
+    .success { color: #00ff88; font-size: 12px; margin-top: 6px; }
+    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #222; color: #00ff88; padding: 8px 20px; border-radius: 20px; font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 99; }
+    .toast.show { opacity: 1; }
+    .w-back { display: inline-flex; align-items: center; gap: 6px; color: #666; font-size: 13px; cursor: pointer; margin-bottom: 12px; border: none; background: none; padding: 4px 0; }
+    .w-back:hover { color: #00ff88; }
+    .logo { text-align: center; padding: 40px 0 20px; }
+    .logo h1 { font-size: 28px; color: #fff; letter-spacing: 4px; }
+    .logo .tagline { font-size: 11px; color: #444; margin-top: 4px; letter-spacing: 2px; }
+    .hidden { display: none !important; }
+    .center { text-align: center; }
+    .mt { margin-top: 12px; }
+    .mb { margin-bottom: 12px; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>NOUS Miner</h1>
 
+<!-- Tab Bar -->
+<div class="tab-bar">
+  <div class="tab-btn active" onclick="switchTab('mining')">Mining</div>
+  <div class="tab-btn" onclick="switchTab('wallet')">Wallet</div>
+</div>
+
+<!-- Mining Tab -->
+<div class="tab-content active" id="tab-mining">
+  <div class="container">
     <div class="section">
       <h2>Configuration</h2>
       <div class="form-group">
@@ -117,13 +136,12 @@
         <input type="text" id="nodeUrl" value="http://rpc.nouschain.org/api" placeholder="http://your-node:8332/rpc" />
       </div>
       <div class="form-group">
-        <label>Mining Address</label>
+        <label>Reasoning Address</label>
         <div style="display: flex; gap: 8px;">
           <input type="text" id="address" placeholder="nous1q..." readonly style="flex: 1;" />
-          <button onclick="createWallet()" style="width: auto; padding: 10px 16px;">New Wallet</button>
-          <button onclick="exportPrivateKey()" style="width: auto; padding: 10px 16px; background: #ff9500;">Export Key</button>
+          <button onclick="useWalletAddress()" style="width: auto; padding: 10px 16px; font-size: 12px;">Use Wallet</button>
         </div>
-        <div style="color: #666; font-size: 11px; margin-top: 5px;">Wallet saved to ~/.nous-miner/wallet.json</div>
+        <div style="color: #666; font-size: 11px; margin-top: 5px;">Click "Use Wallet" to load address from your HD wallet, or switch to the Wallet tab to create one.</div>
       </div>
       <div class="form-group">
         <label>Solver</label>
@@ -136,92 +154,56 @@
         <div class="solver-desc" id="solverDesc">Fast stochastic local search — CPU-only, ~10 solves/sec</div>
       </div>
 
-      <!-- AI Config (for ai-guided and pure-ai) -->
       <div id="aiConfig" style="display:none;">
         <div class="solver-config">
-          <div class="form-group">
-            <label>AI Provider</label>
-            <select id="aiProvider">
-              <option value="anthropic">Anthropic</option>
-              <option value="openai">OpenAI</option>
-            </select>
+          <div class="form-group"><label>AI Provider</label>
+            <select id="aiProvider"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option></select>
           </div>
-          <div class="form-group">
-            <label>API Base URL (optional, for proxies)</label>
+          <div class="form-group"><label>API Base URL (optional)</label>
             <input type="text" id="baseUrl" placeholder="https://api.anthropic.com" />
           </div>
-          <div class="form-group">
-            <label>API Key</label>
+          <div class="form-group"><label>API Key</label>
             <input type="password" id="apiKey" placeholder="sk-..." />
           </div>
-          <div class="form-group">
-            <label>Model</label>
+          <div class="form-group"><label>Model</label>
             <input type="text" id="aiModel" value="claude-sonnet-4-6" />
           </div>
           <div id="fallbackOption" class="form-group">
-            <label class="checkbox-label">
-              <input type="checkbox" id="useFallback" checked />
-              Fallback to ProbSAT if AI fails
-            </label>
+            <label class="checkbox-label"><input type="checkbox" id="useFallback" checked /> Fallback to ProbSAT if AI fails</label>
           </div>
         </div>
       </div>
 
-      <!-- Custom Solver Config -->
       <div id="customConfig" style="display:none;">
         <div class="solver-config">
-          <div class="form-group">
-            <label>Solver Script Path</label>
+          <div class="form-group"><label>Solver Script Path</label>
             <input type="text" id="scriptPath" placeholder="/path/to/solver.py" />
           </div>
-          <div style="color:#666; font-size:11px;">
-            Script reads DIMACS CNF from stdin, outputs 256 binary digits to stdout
-          </div>
+          <div style="color:#666; font-size:11px;">Script reads DIMACS CNF from stdin, outputs 256 binary digits to stdout</div>
         </div>
       </div>
     </div>
 
     <div class="section">
-      <h2>Mining Statistics</h2>
+      <h2>Reasoning Statistics</h2>
       <div class="status">
         <div class="status-dot" id="statusDot"></div>
         <span id="statusText">Idle</span>
         <span style="margin-left: auto; color: #666; font-size: 12px;" id="uptimeText"></span>
       </div>
       <div class="stats">
-        <div class="stat-card">
-          <div class="stat-label">Balance</div>
-          <div class="stat-value" id="balance" style="font-size:16px;">0.00</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Immature</div>
-          <div class="stat-value" id="immature" style="color:#ffaa00;font-size:16px;">0.00</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Solve Rate</div>
-          <div class="stat-value" id="solveRate" style="color:#88aaff;font-size:16px;">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Blocks Found</div>
-          <div class="stat-value" id="blocksFound">0</div>
-        </div>
+        <div class="stat-card"><div class="stat-label">Balance</div><div class="stat-value" id="balance" style="font-size:16px;">0.00</div></div>
+        <div class="stat-card"><div class="stat-label">Immature</div><div class="stat-value" id="immature" style="color:#ffaa00;font-size:16px;">0.00</div></div>
+        <div class="stat-card"><div class="stat-label">Solve Rate</div><div class="stat-value" id="solveRate" style="color:#88aaff;font-size:16px;">—</div></div>
+        <div class="stat-card"><div class="stat-label">Blocks Found</div><div class="stat-value" id="blocksFound">0</div></div>
       </div>
       <div class="stats" style="margin-top: 10px; grid-template-columns: 1fr 1fr 1fr;">
-        <div class="stat-card">
-          <div class="stat-label">Avg Time/Block</div>
-          <div class="stat-value" id="avgBlockTime" style="font-size:16px;">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Total Blocks</div>
-          <div class="stat-value" id="totalBlocks" style="font-size:16px;">0</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Total Earnings</div>
-          <div class="stat-value" id="totalEarnings" style="font-size:16px;">0</div>
-        </div>
+        <div class="stat-card"><div class="stat-label">Avg Time/Block</div><div class="stat-value" id="avgBlockTime" style="font-size:16px;">—</div></div>
+        <div class="stat-card"><div class="stat-label">Total Blocks</div><div class="stat-value" id="totalBlocks" style="font-size:16px;">0</div></div>
+        <div class="stat-card"><div class="stat-label">Total Earnings</div><div class="stat-value" id="totalEarnings" style="font-size:16px;">0</div></div>
       </div>
       <div style="margin-top: 15px;">
-        <button id="startBtn" onclick="startMining()">Start Mining</button>
+        <button id="startBtn" onclick="startMining()">Start Reasoning</button>
         <button id="stopBtn" onclick="stopMining()" disabled style="margin-left: 10px;">Stop</button>
       </div>
     </div>
@@ -231,275 +213,855 @@
       <div class="log" id="log"></div>
     </div>
   </div>
+</div>
 
-  <script>
-    const { ipcRenderer } = require('electron');
-    let isMining = false;
-    let blocksFound = 0;
+<!-- Wallet Tab -->
+<div class="tab-content" id="tab-wallet">
+  <div class="w-content" id="walletApp">
+    <div class="logo">
+      <h1>NOUS</h1>
+      <div class="tagline">COGITO, ERGO SUM</div>
+    </div>
+    <div class="card center"><div class="w-sub">Loading wallet...</div></div>
+  </div>
+</div>
 
-    // Mining statistics
-    let sessionStart = null;
-    let sessionBlocks = 0;
-    let lastBlockTime = null;
-    let blockIntervals = [];
+<div class="toast" id="toast"></div>
 
-    function getAllTimeStats() {
-      return JSON.parse(localStorage.getItem('nousAllTime') || '{"blocks":0,"intervals":[]}');
+<script>
+const { ipcRenderer } = require('electron');
+
+// ============================================
+// TAB SWITCHING
+// ============================================
+let activeTab = 'mining';
+let walletInitialized = false;
+
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelector(`.tab-btn:nth-child(${tab === 'mining' ? 1 : 2})`).classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+  if (tab === 'wallet' && !walletInitialized) {
+    walletInitialized = true;
+    walletInit();
+  }
+}
+
+// ============================================
+// MINING TAB
+// ============================================
+let isMining = false;
+let blocksFound = 0;
+let sessionStart = null;
+let sessionBlocks = 0;
+let lastBlockTime = null;
+let blockIntervals = [];
+
+function getAllTimeStats() {
+  return JSON.parse(localStorage.getItem('nousAllTime') || '{"blocks":0,"intervals":[]}');
+}
+function saveAllTimeBlock(interval) {
+  const s = getAllTimeStats();
+  s.blocks++;
+  if (interval > 0) s.intervals.push(interval);
+  if (s.intervals.length > 100) s.intervals = s.intervals.slice(-100);
+  localStorage.setItem('nousAllTime', JSON.stringify(s));
+}
+
+function formatDuration(ms) {
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return min + 'm';
+  return Math.floor(min / 60) + 'h ' + (min % 60) + 'm';
+}
+
+function updateStatsUI() {
+  if (sessionStart) {
+    document.getElementById('uptimeText').textContent = 'Uptime: ' + formatDuration(Date.now() - sessionStart);
+  } else {
+    document.getElementById('uptimeText').textContent = '';
+  }
+  document.getElementById('blocksFound').textContent = sessionBlocks;
+  const allTime = getAllTimeStats();
+  document.getElementById('totalBlocks').textContent = allTime.blocks;
+  document.getElementById('totalEarnings').textContent = allTime.blocks + ' NOUS';
+  const intervals = allTime.intervals.length > 0 ? allTime.intervals : blockIntervals;
+  if (intervals.length >= 1) {
+    const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+    document.getElementById('avgBlockTime').textContent = avg >= 60000 ? formatDuration(avg) : Math.floor(avg / 1000) + 's';
+  }
+}
+
+setInterval(updateStatsUI, 1000);
+
+const solverDescs = {
+  'probsat': 'Fast stochastic local search — CPU-only, ~10 solves/sec',
+  'ai-guided': 'AI suggests initial assignment, ProbSAT refines — requires API key',
+  'pure-ai': 'AI attempts direct solve — very slow, nearly 0% success rate',
+  'custom': 'Run your own solver script — reads DIMACS from stdin'
+};
+
+function updateSolverUI() {
+  const solver = document.getElementById('solver').value;
+  document.getElementById('solverDesc').textContent = solverDescs[solver] || '';
+  document.getElementById('aiConfig').style.display = (solver === 'ai-guided' || solver === 'pure-ai') ? 'block' : 'none';
+  document.getElementById('customConfig').style.display = solver === 'custom' ? 'block' : 'none';
+  document.getElementById('fallbackOption').style.display = solver === 'ai-guided' ? 'block' : 'none';
+}
+
+async function useWalletAddress() {
+  try {
+    const resp = await ipcRenderer.invoke('wallet-list_addresses');
+    if (resp && resp.error) throw new Error(resp.error);
+    const addrs = resp?.result;
+    if (addrs && addrs.length > 0) {
+      wAddresses = addrs;
+      const active = addrs.find(a => a.index === wActiveAddrIndex) || addrs[0];
+      document.getElementById('address').value = active.address;
+      addMinerLog('Loaded address from wallet: ' + active.address);
+    } else {
+      addMinerLog('No wallet address found. Switch to Wallet tab to create one.');
     }
-    function saveAllTimeBlock(interval) {
-      const s = getAllTimeStats();
-      s.blocks++;
-      if (interval > 0) s.intervals.push(interval);
-      if (s.intervals.length > 100) s.intervals = s.intervals.slice(-100);
-      localStorage.setItem('nousAllTime', JSON.stringify(s));
-    }
+  } catch (e) {
+    addMinerLog('Wallet not available: ' + e.message + '. Switch to Wallet tab first.');
+  }
+}
 
-    function formatDuration(ms) {
-      const min = Math.floor(ms / 60000);
-      if (min < 60) return min + 'm';
-      return Math.floor(min / 60) + 'h ' + (min % 60) + 'm';
-    }
+async function startMining() {
+  const config = {
+    nodeUrl: document.getElementById('nodeUrl').value,
+    address: document.getElementById('address').value,
+    solver: document.getElementById('solver').value,
+    aiProvider: document.getElementById('aiProvider').value,
+    baseUrl: document.getElementById('baseUrl').value,
+    apiKey: document.getElementById('apiKey').value,
+    model: document.getElementById('aiModel').value,
+    scriptPath: document.getElementById('scriptPath').value
+  };
+  if (!config.address) { addMinerLog('Error: Reasoning address required'); return; }
 
-    function updateStatsUI() {
-      // Uptime
-      if (sessionStart) {
-        document.getElementById('uptimeText').textContent = 'Uptime: ' + formatDuration(Date.now() - sessionStart);
-      } else {
-        document.getElementById('uptimeText').textContent = '';
+  const result = await ipcRenderer.invoke('start-mining', config);
+  if (result.error) { addMinerLog('Error: ' + result.error); return; }
+
+  isMining = true;
+  sessionStart = Date.now();
+  sessionBlocks = 0;
+  lastBlockTime = Date.now();
+  blockIntervals = [];
+  updateMiningUI();
+  addMinerLog('Reasoning started with ' + config.solver + ' solver...');
+}
+
+async function stopMining() {
+  await ipcRenderer.invoke('stop-mining');
+  isMining = false;
+  sessionStart = null;
+  updateMiningUI();
+  addMinerLog('Reasoning stopped');
+}
+
+function updateMiningUI() {
+  document.getElementById('startBtn').disabled = isMining;
+  document.getElementById('stopBtn').disabled = !isMining;
+  document.getElementById('statusDot').className = 'status-dot' + (isMining ? ' active' : '');
+  document.getElementById('statusText').textContent = isMining ? 'Reasoning...' : 'Idle';
+}
+
+function addMinerLog(text, isError) {
+  const log = document.getElementById('log');
+  const time = new Date().toLocaleTimeString();
+  const color = isError ? 'color:#ff4444;' : '';
+  log.innerHTML += '<span style="' + color + '">[' + time + '] ' + text + '</span>\n';
+  log.scrollTop = log.scrollHeight;
+}
+
+let minerStats = { sat: 0, seeds: 0, lastSeed: 0, rate: '' };
+let logTimer = null;
+
+function flushMinerLog() {
+  if (minerStats.seeds > 0) {
+    const rateStr = minerStats.rate ? ' (' + minerStats.rate + ')' : '';
+    addMinerLog('Checked ' + minerStats.seeds + ' seeds, SAT solved: ' + minerStats.sat + rateStr);
+    document.getElementById('solveRate').textContent = minerStats.rate || '—';
+    minerStats = { sat: 0, seeds: 0, lastSeed: 0, rate: '' };
+  }
+}
+
+ipcRenderer.on('miner-log', (event, data) => {
+  for (const msg of data.split('\n')) {
+    const line = msg.trim();
+    if (!line) continue;
+    const stripped = line.replace(/^\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\s+/, '');
+
+    if (/PoW met|Submitting|Block found|accepted/i.test(stripped)) {
+      flushMinerLog();
+      addMinerLog(stripped);
+      const rateMatch = stripped.match(/([\d.]+)\/s\)/);
+      if (rateMatch) document.getElementById('solveRate').textContent = rateMatch[1] + '/s';
+      if (/block found|accepted/i.test(stripped)) {
+        const now = Date.now();
+        if (lastBlockTime) { const interval = now - lastBlockTime; blockIntervals.push(interval); saveAllTimeBlock(interval); } else { saveAllTimeBlock(0); }
+        sessionBlocks++;
+        blocksFound++;
+        lastBlockTime = now;
+        document.getElementById('blocksFound').textContent = sessionBlocks;
+        updateStatsUI();
+        fetchMinerBalance();
       }
-      // Blocks found (session)
-      document.getElementById('blocksFound').textContent = sessionBlocks;
-      // All-time
-      const allTime = getAllTimeStats();
-      document.getElementById('totalBlocks').textContent = allTime.blocks;
-      document.getElementById('totalEarnings').textContent = allTime.blocks + ' NOUS';
-      // Avg time/block (from all-time data)
-      const intervals = allTime.intervals.length > 0 ? allTime.intervals : blockIntervals;
-      if (intervals.length >= 1) {
-        const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-        document.getElementById('avgBlockTime').textContent = avg >= 60000 ? formatDuration(avg) : Math.floor(avg / 1000) + 's';
-      } else {
-        document.getElementById('avgBlockTime').textContent = '—';
-      }
+      continue;
     }
+    if (/Starting reasoner|Reasoning block/i.test(stripped)) { addMinerLog(stripped); continue; }
+    if (/AI guess|AI failed|calling AI|fallback/i.test(stripped)) { addMinerLog(stripped); continue; }
+    if (/error|fail|fatal/i.test(stripped) && !/no PoW match/i.test(stripped)) { addMinerLog(stripped, true); continue; }
 
-    setInterval(updateStatsUI, 1000);
-
-    const solverDescs = {
-      'probsat': 'Fast stochastic local search — CPU-only, ~10 solves/sec',
-      'ai-guided': 'AI suggests initial assignment, ProbSAT refines — requires API key',
-      'pure-ai': 'AI attempts direct solve — very slow, nearly 0% success rate',
-      'custom': 'Run your own solver script — reads DIMACS from stdin'
-    };
-
-    function updateSolverUI() {
-      const solver = document.getElementById('solver').value;
-      document.getElementById('solverDesc').textContent = solverDescs[solver] || '';
-      document.getElementById('aiConfig').style.display =
-        (solver === 'ai-guided' || solver === 'pure-ai') ? 'block' : 'none';
-      document.getElementById('customConfig').style.display =
-        solver === 'custom' ? 'block' : 'none';
-      document.getElementById('fallbackOption').style.display =
-        solver === 'ai-guided' ? 'block' : 'none';
-    }
-
-    async function startMining() {
-      const solver = document.getElementById('solver').value;
-      const config = {
-        nodeUrl: document.getElementById('nodeUrl').value,
-        address: document.getElementById('address').value,
-        solver: solver,
-        aiProvider: document.getElementById('aiProvider').value,
-        baseUrl: document.getElementById('baseUrl').value,
-        apiKey: document.getElementById('apiKey').value,
-        model: document.getElementById('aiModel').value,
-        scriptPath: document.getElementById('scriptPath').value
-      };
-
-      if (!config.address) {
-        addLog('Error: Mining address required');
-        return;
-      }
-
-      const result = await ipcRenderer.invoke('start-mining', config);
-      if (result.error) {
-        addLog('Error: ' + result.error);
-        return;
-      }
-
-      isMining = true;
-      sessionStart = Date.now();
-      sessionBlocks = 0;
-      lastBlockTime = Date.now();
-      blockIntervals = [];
-      updateUI();
-      addLog('Mining started with ' + solver + ' solver...');
-    }
-
-    async function stopMining() {
-      await ipcRenderer.invoke('stop-mining');
-      isMining = false;
-      sessionStart = null;
-      updateUI();
-      addLog('Mining stopped');
-    }
-
-    function updateUI() {
-      document.getElementById('startBtn').disabled = isMining;
-      document.getElementById('stopBtn').disabled = !isMining;
-      document.getElementById('statusDot').className = 'status-dot' + (isMining ? ' active' : '');
-      document.getElementById('statusText').textContent = isMining ? 'Mining...' : 'Idle';
-    }
-
-    function addLog(text, isError) {
-      const log = document.getElementById('log');
-      const time = new Date().toLocaleTimeString();
-      const color = isError ? 'color:#ff4444;' : '';
-      log.innerHTML += '<span style="' + color + '">[' + time + '] ' + text + '</span>\n';
-      log.scrollTop = log.scrollHeight;
-    }
-
-    // Batch miner logs: accumulate stats, flush every 5s
-    let minerStats = { sat: 0, seeds: 0, lastSeed: 0, rate: '' };
-    let logTimer = null;
-
-    function flushMinerLog() {
-      if (minerStats.seeds > 0) {
-        const rateStr = minerStats.rate ? ' (' + minerStats.rate + ')' : '';
-        addLog('Checked ' + minerStats.seeds + ' seeds, SAT solved: ' + minerStats.sat + rateStr);
-        document.getElementById('solveRate').textContent = minerStats.rate || '—';
+    const progressMatch = stripped.match(/(\d+) SAT solved \(([^)]+)\), seed=(\d+)/) || stripped.match(/(\d+) SAT solved in [^(]+\(([^)]+)\)/);
+    if (progressMatch) {
+      minerStats.sat = parseInt(progressMatch[1]);
+      minerStats.rate = progressMatch[2];
+      minerStats.seeds = parseInt(progressMatch[3]);
+      document.getElementById('solveRate').textContent = minerStats.rate;
+      const rateNum = parseFloat(minerStats.rate);
+      if (rateNum < 10) {
+        addMinerLog('Checked ' + minerStats.seeds + ' seeds, SAT solved: ' + minerStats.sat + ' (' + minerStats.rate + ')');
         minerStats = { sat: 0, seeds: 0, lastSeed: 0, rate: '' };
+      } else if (!logTimer) {
+        logTimer = setInterval(flushMinerLog, 5000);
       }
     }
+  }
+});
 
-    ipcRenderer.on('miner-log', (event, data) => {
-      for (const msg of data.split('\n')) {
-        const line = msg.trim();
-        if (!line) continue;
+async function fetchMinerBalance() {
+  const address = document.getElementById('address').value;
+  const nodeUrl = document.getElementById('nodeUrl').value;
+  if (address && nodeUrl) {
+    try {
+      const result = await ipcRenderer.invoke('get-miner-balance', { nodeUrl, address });
+      document.getElementById('balance').textContent = (result.balance / 100000000).toFixed(8);
+      document.getElementById('immature').textContent = (result.immature / 100000000).toFixed(8);
+    } catch (e) {}
+  }
+}
 
-        // Strip timestamp prefix: "2026/03/07 17:38:24 " -> actual message
-        const stripped = line.replace(/^\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\s+/, '');
+ipcRenderer.on('miner-stopped', () => {
+  isMining = false;
+  sessionStart = null;
+  updateMiningUI();
+});
 
-        // Immediate: block found, submitted, PoW met
-        if (/PoW met|Submitting|Block found|accepted/i.test(stripped)) {
-          flushMinerLog();
-          addLog(stripped);
-          if (/block found|accepted/i.test(stripped)) {
-            const now = Date.now();
-            if (lastBlockTime) {
-              const interval = now - lastBlockTime;
-              blockIntervals.push(interval);
-              saveAllTimeBlock(interval);
-            } else {
-              saveAllTimeBlock(0);
-            }
-            sessionBlocks++;
-            blocksFound++;
-            lastBlockTime = now;
-            document.getElementById('blocksFound').textContent = sessionBlocks;
-            updateStatsUI();
-            fetchBalance();
-          }
-          continue;
-        }
+setInterval(fetchMinerBalance, 30000);
 
-        // Immediate: starting, new block round
-        if (/Starting miner|Mining block/i.test(stripped)) {
-          addLog(stripped);
-          continue;
-        }
+// ============================================
+// WALLET TAB
+// ============================================
+let wPage = 'home';
+let wPageHistory = [];
+let wBalanceData = { balance: 0, immature: 0 };
+let wAddresses = [];
+let wPassword = '';
+let wUnlocked = false;
+let wActiveAddrIndex = 0; // index of address used for mining
 
-        // Immediate: AI-related messages
-        if (/AI guess|AI failed|calling AI|fallback/i.test(stripped)) {
-          addLog(stripped);
-          continue;
-        }
+async function wApi(method, params) {
+  const resp = await ipcRenderer.invoke('wallet-' + method, params);
+  if (resp && resp.error) throw new Error(resp.error);
+  return resp?.result;
+}
 
-        // Immediate: real errors (not "no PoW match")
-        if (/error|fail|fatal/i.test(stripped) && !/no PoW match/i.test(stripped)) {
-          addLog(stripped, true);
-          continue;
-        }
+function formatNOUS(nou) {
+  const whole = Math.floor(nou / 1e8);
+  const frac = Math.abs(nou % 1e8).toString().padStart(8, '0').replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : `${whole}`;
+}
 
-        // Accumulate progress lines — show immediately if rate is slow
-        const progressMatch = stripped.match(/(\d+) SAT solved \(([^)]+)\), seed=(\d+)/);
-        if (progressMatch) {
-          minerStats.sat = parseInt(progressMatch[1]);
-          minerStats.rate = progressMatch[2];
-          minerStats.seeds = parseInt(progressMatch[3]);
-          document.getElementById('solveRate').textContent = minerStats.rate;
+function timeAgo(ts) {
+  const diff = Math.floor(Date.now() / 1000) - ts;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
 
-          // Parse rate: if < 10/s, show every progress line immediately
-          const rateNum = parseFloat(minerStats.rate);
-          if (rateNum < 10) {
-            addLog('Checked ' + minerStats.seeds + ' seeds, SAT solved: ' + minerStats.sat + ' (' + minerStats.rate + ')');
-            minerStats = { sat: 0, seeds: 0, lastSeed: 0, rate: '' };
-          } else if (!logTimer) {
-            logTimer = setInterval(flushMinerLog, 5000);
-          }
-        }
-      }
-    });
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2000);
+}
 
-    async function fetchBalance() {
-      const address = document.getElementById('address').value;
-      const nodeUrl = document.getElementById('nodeUrl').value;
-      if (address && nodeUrl) {
-        try {
-          const result = await ipcRenderer.invoke('get-balance', { nodeUrl, address });
-          document.getElementById('balance').textContent = (result.balance / 100000000).toFixed(8);
-          document.getElementById('immature').textContent = (result.immature / 100000000).toFixed(8);
-        } catch (e) {}
-      }
+function copyText(text) { navigator.clipboard.writeText(text); toast('Copied'); }
+
+function wNavigate(page) { wPageHistory.push(wPage); wPage = page; wRenderPage(); }
+function wGoBack() { wPage = wPageHistory.length > 0 ? wPageHistory.pop() : 'home'; wRenderPage(); }
+
+function wRenderPage() {
+  const el = document.getElementById('walletApp');
+
+  // Guard: if not unlocked, always show unlock/setup
+  if (!wUnlocked) {
+    walletInit();
+    return;
+  }
+
+  if (wPage.startsWith('addr-detail-')) {
+    const idx = parseInt(wPage.split('-')[2]);
+    wRenderAddrDetail(el, idx);
+    return;
+  }
+  if (wPage === 'send-confirm') return; // handled inline
+
+  const pages = {
+    'home': wRenderHome,
+    'send': wRenderSend,
+    'receive': wRenderReceive,
+    'history': wRenderHistory,
+    'addresses': wRenderAddresses,
+    'import-key': wRenderImportKey,
+    'backup': wRenderBackup,
+    'node-settings': wRenderNodeSettings,
+  };
+
+  (pages[wPage] || pages['home'])(el);
+}
+
+// --- Setup / Unlock ---
+async function walletInit() {
+  const el = document.getElementById('walletApp');
+  try {
+    await new Promise(r => setTimeout(r, 300));
+    const exists = await wApi('wallet_exists');
+    if (exists) {
+      wRenderUnlock(el);
+    } else {
+      wRenderSetup(el);
     }
+  } catch(e) {
+    el.innerHTML = `<div class="card"><div class="error">Wallet backend error: ${e.message}</div></div>`;
+  }
+}
 
-    ipcRenderer.on('miner-stopped', () => {
-      isMining = false;
-      sessionStart = null;
-      updateUI();
-    });
+function wRenderSetup(el) {
+  el.innerHTML = `
+    <div class="logo"><h1>NOUS</h1><div class="tagline">COGITO, ERGO SUM</div></div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="w-btn w-btn-primary" onclick="wShowCreate()">Create New Wallet</button>
+      <button class="w-btn w-btn-secondary" onclick="wShowImport()">Import Wallet</button>
+    </div>`;
+}
 
-    setInterval(fetchBalance, 30000);
+function wRenderUnlock(el) {
+  el.innerHTML = `
+    <div class="logo"><h1>NOUS</h1><div class="tagline">COGITO, ERGO SUM</div></div>
+    <div class="card">
+      <div class="w-field"><label>Password</label>
+        <input type="password" id="wUnlockPw" placeholder="Enter password" onkeydown="if(event.key==='Enter')wDoUnlock()">
+      </div>
+      <button class="w-btn w-btn-primary" onclick="wDoUnlock()">Unlock</button>
+      <div id="wUnlockErr" class="error"></div>
+    </div>`;
+  setTimeout(() => document.getElementById('wUnlockPw')?.focus(), 100);
+}
 
-    // --- Wallet management ---
+async function wDoUnlock() {
+  const pw = document.getElementById('wUnlockPw').value;
+  try {
+    await wApi('unlock', { password: pw });
+    wPassword = pw;
+    wEnterWallet();
+  } catch(e) { document.getElementById('wUnlockErr').textContent = e.message; }
+}
 
-    async function createWallet() {
-      if (document.getElementById('address').value) {
-        if (!confirm('A wallet already exists. Create a new one? The old wallet will be overwritten.')) return;
+function wShowCreate() {
+  const el = document.getElementById('walletApp');
+  el.innerHTML = `
+    <button class="w-back" onclick="walletInit()">&#8249; Back</button>
+    <div class="card">
+      <div class="w-label">Set Password</div>
+      <div class="w-field"><input type="password" id="wCreatePw" placeholder="Password (min 6 chars)"></div>
+      <div class="w-field"><input type="password" id="wCreatePw2" placeholder="Confirm password"></div>
+      <div class="w-row">
+        <button class="w-btn w-btn-secondary" onclick="wDoCreate(12)">12 Words</button>
+        <button class="w-btn w-btn-primary" onclick="wDoCreate(24)">24 Words</button>
+      </div>
+      <div id="wCreateErr" class="error"></div>
+    </div>`;
+}
+
+async function wDoCreate(wordCount) {
+  const pw = document.getElementById('wCreatePw').value;
+  const pw2 = document.getElementById('wCreatePw2').value;
+  if (pw.length < 6) { document.getElementById('wCreateErr').textContent = 'Password too short'; return; }
+  if (pw !== pw2) { document.getElementById('wCreateErr').textContent = 'Passwords do not match'; return; }
+  try {
+    const res = await wApi('create_wallet', { word_count: wordCount, password: pw });
+    wPassword = pw;
+    wShowMnemonic(res.mnemonic);
+  } catch(e) { document.getElementById('wCreateErr').textContent = e.message; }
+}
+
+let wPendingMnemonic = '';
+let wVerifyIndices = [];
+
+function wShowMnemonic(mnemonic) {
+  wPendingMnemonic = mnemonic;
+  const words = mnemonic.split(' ');
+  const indices = [];
+  while (indices.length < 3) { const r = Math.floor(Math.random() * words.length); if (!indices.includes(r)) indices.push(r); }
+  wVerifyIndices = indices.sort((a, b) => a - b);
+
+  const el = document.getElementById('walletApp');
+  el.innerHTML = `
+    <div class="card">
+      <div class="w-label" style="color:#ff6b6b">Write down your recovery phrase</div>
+      <p style="font-size:12px;color:#666;margin:8px 0">Store these words safely. Anyone with them can access your wallet.</p>
+      <div class="word-grid">${words.map((w, i) => `<div class="word-cell"><span class="num">${i+1}</span>${w}</div>`).join('')}</div>
+      <div class="w-row mt">
+        <button class="w-btn w-btn-secondary" onclick="copyText('${mnemonic}')">Copy All</button>
+        <button class="w-btn w-btn-primary" onclick="wShowVerify()">Next</button>
+      </div>
+    </div>`;
+}
+
+function wShowVerify() {
+  const el = document.getElementById('walletApp');
+  el.innerHTML = `
+    <div class="card">
+      <div class="w-label">Verify your recovery phrase</div>
+      <p style="font-size:12px;color:#666;margin:8px 0">Enter the following words to confirm.</p>
+      ${wVerifyIndices.map(idx => `<div class="w-field"><label>Word #${idx + 1}</label><input id="wVerify_${idx}" placeholder="Enter word #${idx + 1}" autocomplete="off" spellcheck="false"></div>`).join('')}
+      <button class="w-btn w-btn-primary" onclick="wDoVerify()">Confirm</button>
+      <div id="wVerifyErr" class="error"></div>
+    </div>`;
+  document.getElementById('wVerify_' + wVerifyIndices[0])?.focus();
+}
+
+function wDoVerify() {
+  const words = wPendingMnemonic.split(' ');
+  for (const idx of wVerifyIndices) {
+    const input = document.getElementById('wVerify_' + idx).value.trim().toLowerCase();
+    if (input !== words[idx]) { document.getElementById('wVerifyErr').textContent = `Word #${idx + 1} is incorrect.`; return; }
+  }
+  wPendingMnemonic = '';
+  wEnterWallet();
+}
+
+function wShowImport() {
+  const el = document.getElementById('walletApp');
+  el.innerHTML = `
+    <button class="w-back" onclick="walletInit()">&#8249; Back</button>
+    <div class="card">
+      <div class="w-field"><label>Recovery Phrase</label>
+        <textarea id="wImportMnemonic" placeholder="Enter 12 or 24 words" rows="3"></textarea>
+      </div>
+      <div class="w-field"><label>Password</label>
+        <input type="password" id="wImportPw" placeholder="Set password">
+      </div>
+      <button class="w-btn w-btn-primary" onclick="wDoImport()">Import</button>
+      <div id="wImportErr" class="error"></div>
+    </div>`;
+}
+
+async function wDoImport() {
+  const mnemonic = document.getElementById('wImportMnemonic').value.trim();
+  const pw = document.getElementById('wImportPw').value;
+  if (pw.length < 6) { document.getElementById('wImportErr').textContent = 'Password too short'; return; }
+  try {
+    await wApi('import_wallet', { mnemonic, password: pw });
+    wPassword = pw;
+    wEnterWallet();
+  } catch(e) { document.getElementById('wImportErr').textContent = e.message; }
+}
+
+async function wEnterWallet() {
+  wUnlocked = true;
+  wAddresses = await wApi('list_addresses') || [];
+  wPageHistory = [];
+  wPage = 'home';
+  // Auto-sync active address to mining tab
+  const active = wAddresses.find(a => a.index === wActiveAddrIndex) || wAddresses[0];
+  if (active) document.getElementById('address').value = active.address;
+  wRenderPage();
+  wRefreshBalance();
+}
+
+// --- Wallet Home ---
+function wGetActiveAddr() {
+  const a = wAddresses.find(a => a.index === wActiveAddrIndex);
+  return a ? a.address : (wAddresses.length > 0 ? wAddresses[0].address : '');
+}
+
+function wRenderHome(el) {
+  const addr = wGetActiveAddr();
+  el.innerHTML = `
+    <div class="card center">
+      <div class="w-label">Total Balance</div>
+      <div class="w-value">${formatNOUS(wBalanceData.balance)}<span class="unit">NOUS</span></div>
+      ${wBalanceData.immature > 0 ? `<div class="w-sub">Immature: ${formatNOUS(wBalanceData.immature)} NOUS</div>` : ''}
+    </div>
+    ${addr ? `<div class="addr-text mb center" onclick="copyText('${addr}')" style="font-size:11px">${addr}</div>` : ''}
+    <div class="actions">
+      <div class="action-btn" onclick="wNavigate('send')"><div class="action-icon">&#8593;</div><div class="action-text">Send</div></div>
+      <div class="action-btn" onclick="wNavigate('receive')"><div class="action-icon">&#8595;</div><div class="action-text">Receive</div></div>
+      <div class="action-btn" onclick="wNavigate('history')"><div class="action-icon">&#9776;</div><div class="action-text">History</div></div>
+    </div>
+    <div class="card" onclick="wNavigate('addresses')" style="cursor:pointer">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="w-label" style="margin:0">Addresses</div><div style="font-size:13px;color:#888;margin-top:4px">${wAddresses.length} address${wAddresses.length !== 1 ? 'es' : ''}</div></div>
+        <span style="color:#444;font-size:20px">&#8250;</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button class="w-btn w-btn-secondary" onclick="wNavigate('backup')" style="flex:1">Backup</button>
+      <button class="w-btn w-btn-secondary" onclick="wNavigate('node-settings')" style="flex:1">Node</button>
+      <button class="w-btn w-btn-danger" onclick="wDoLock()" style="flex:1">Lock</button>
+    </div>`;
+}
+
+async function wRefreshBalance() {
+  if (!wUnlocked) return;
+  try {
+    wBalanceData = await wApi('get_balance');
+    if (wPage === 'home' && wUnlocked) wRenderPage();
+  } catch(e) {}
+}
+
+async function wDoLock() {
+  try {
+    await wApi('lock');
+    wPassword = '';
+    wPageHistory = [];
+    wPage = 'home';
+    wUnlocked = false;
+    wAddresses = [];
+    wBalanceData = { balance: 0, immature: 0 };
+    wRenderUnlock(document.getElementById('walletApp'));
+  } catch(e) { toast(e.message); }
+}
+
+// --- Addresses ---
+function wSetActiveAddr(index) {
+  wActiveAddrIndex = index;
+  const addr = wAddresses.find(a => a.index === index);
+  if (addr) {
+    document.getElementById('address').value = addr.address;
+    toast('Active address switched');
+  }
+  wRenderAddresses(document.getElementById('walletApp'));
+}
+
+async function wRenderAddresses(el) {
+  wAddresses = await wApi('list_addresses') || [];
+  el.innerHTML = `
+    <button class="w-back" onclick="wGoBack()">&#8249; Back</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:13px;color:#888">${wAddresses.length} address${wAddresses.length !== 1 ? 'es' : ''}</div>
+      <div style="display:flex;gap:6px;">
+        <button class="w-btn w-btn-small w-btn-secondary" onclick="wNavigate('import-key')">Import Key</button>
+        <button class="w-btn w-btn-small w-btn-primary" onclick="wDeriveAddr()">+ New Address</button>
+      </div>
+    </div>
+    ${wAddresses.map((a, i) => {
+      const isActive = a.index === wActiveAddrIndex;
+      return `
+      <div class="addr-card" style="${isActive ? 'border-color:#00ff88;' : ''}">
+        <div class="addr-card-head">
+          <span class="addr-card-tag ${isActive ? 'primary' : 'sub'}">${isActive ? 'Active' : (a.path === 'imported' ? 'Imported' : (i === 0 ? 'Primary' : 'Sub #' + a.index))}</span>
+          <div style="display:flex;gap:6px;align-items:center;">
+            ${!isActive ? `<button class="w-btn w-btn-small w-btn-primary" onclick="event.stopPropagation();wSetActiveAddr(${a.index})" style="padding:3px 10px;font-size:10px;">Use</button>` : '<span style="font-size:10px;color:#00ff88;">In Use</span>'}
+            <span class="addr-card-path" onclick="wNavigate('addr-detail-${a.index}')" style="cursor:pointer">${a.path} &#8250;</span>
+          </div>
+        </div>
+        <div class="addr-card-addr" onclick="copyText('${a.address}')">${a.address}</div>
+      </div>`;
+    }).join('')}`;
+}
+
+async function wDeriveAddr() {
+  try { await wApi('derive_address'); toast('New address created'); wRenderAddresses(document.getElementById('walletApp')); } catch(e) { toast(e.message); }
+}
+
+// --- Import Private Key ---
+function wRenderImportKey(el) {
+  el.innerHTML = `
+    <button class="w-back" onclick="wGoBack()">&#8249; Back</button>
+    <div class="card">
+      <div class="w-label">Import Private Key</div>
+      <p style="font-size:12px;color:#666;margin:8px 0 14px">Enter a 64-character hex private key to import an external address into your wallet.</p>
+      <div class="w-field">
+        <label>Private Key (hex)</label>
+        <input type="text" id="wImportKeyInput" placeholder="64 hex characters..." style="font-family:'SF Mono',monospace;font-size:12px;" maxlength="64" />
+      </div>
+      <div id="wImportKeyError"></div>
+      <button class="w-btn w-btn-primary" onclick="wDoImportKey()" id="wImportKeyBtn">Import</button>
+    </div>
+    <div class="card" style="border-color:#ff6b6b33;">
+      <div style="font-size:11px;color:#ff6b6b;">Warning: Imported keys are NOT covered by your recovery phrase. Back up the private key separately.</div>
+    </div>`;
+}
+
+async function wDoImportKey() {
+  const input = document.getElementById('wImportKeyInput');
+  const errEl = document.getElementById('wImportKeyError');
+  const btn = document.getElementById('wImportKeyBtn');
+  const key = input.value.trim();
+  if (!/^[0-9a-fA-F]{64}$/.test(key)) {
+    errEl.innerHTML = '<div class="error">Invalid key: must be exactly 64 hex characters</div>';
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  errEl.innerHTML = '';
+  try {
+    const result = await wApi('import_private_key', { private_key: key });
+    toast('Key imported: ' + result.address);
+    wNavigate('addresses');
+  } catch(e) {
+    errEl.innerHTML = '<div class="error">' + e.message + '</div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Import';
+  }
+}
+
+// --- Address Detail ---
+async function wRenderAddrDetail(el, index) {
+  const addr = wAddresses.find(a => a.index === index);
+  if (!addr) { el.innerHTML = '<div class="card"><div class="error">Address not found</div></div>'; return; }
+  const isPrimary = index === 0;
+
+  el.innerHTML = `
+    <button class="w-back" onclick="wGoBack()">&#8249; Back</button>
+    <div class="card center">
+      <div class="w-label">${isPrimary ? 'Primary Address' : 'Sub Address #' + index}</div>
+      <div class="qr"><canvas id="wQrCanvas"></canvas></div>
+      <div class="addr-text" onclick="copyText('${addr.address}')">${addr.address}</div>
+      <div class="mt"><button class="w-btn w-btn-small w-btn-secondary" onclick="copyText('${addr.address}')">Copy Address</button></div>
+      <div class="w-sub">${addr.path}</div>
+    </div>
+    <div class="card">
+      ${isPrimary
+        ? `<button class="w-btn w-btn-secondary" onclick="wExportMnemonic()">Export Recovery Phrase</button>`
+        : `<button class="w-btn w-btn-danger" onclick="wExportPrivateKey('${addr.address}')">Export Private Key</button>`}
+      <div id="wExportResult" class="mt"></div>
+    </div>`;
+
+  if (typeof qrcode !== 'undefined') {
+    const qr = qrcode(0, 'M');
+    qr.addData(addr.address);
+    qr.make();
+    const canvas = document.getElementById('wQrCanvas');
+    const size = 180, cellSize = size / qr.getModuleCount();
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, size, size);
+    for (let r = 0; r < qr.getModuleCount(); r++)
+      for (let c = 0; c < qr.getModuleCount(); c++) {
+        ctx.fillStyle = qr.isDark(r, c) ? '#00ff88' : '#111';
+        ctx.fillRect(c * cellSize, r * cellSize, cellSize + 0.5, cellSize + 0.5);
       }
-      try {
-        addLog('Creating wallet...');
-        const wallet = await ipcRenderer.invoke('create-wallet');
-        document.getElementById('address').value = wallet.address;
-        addLog('Wallet created: ' + wallet.address);
-        alert('Wallet created!\n\nAddress: ' + wallet.address + '\n\nSaved to: ~/.nous-miner/wallet.json\n\nClick "Export Key" to backup your private key.');
-      } catch (e) {
-        addLog('Error: ' + e.message);
+  }
+}
+
+async function wExportMnemonic() {
+  const el = document.getElementById('wExportResult');
+  try {
+    const res = await wApi('get_mnemonic');
+    const words = res.mnemonic.split(' ');
+    el.innerHTML = `<div class="mt"><div class="w-label" style="color:#ff6b6b">Recovery Phrase</div>
+      <div class="word-grid">${words.map((w, i) => `<div class="word-cell"><span class="num">${i+1}</span>${w}</div>`).join('')}</div>
+      <button class="w-btn w-btn-small w-btn-secondary mt" onclick="copyText('${res.mnemonic}')">Copy All</button></div>`;
+  } catch(e) { el.innerHTML = `<div class="error">${e.message}</div>`; }
+}
+
+async function wExportPrivateKey(address) {
+  const el = document.getElementById('wExportResult');
+  try {
+    const res = await wApi('get_private_key', { address });
+    el.innerHTML = `<div class="mt"><div class="w-label" style="color:#ff6b6b">Private Key</div>
+      <div class="privkey-box">${res.private_key}</div>
+      <button class="w-btn w-btn-small w-btn-secondary mt" onclick="copyText('${res.private_key}')">Copy</button></div>`;
+  } catch(e) { el.innerHTML = `<div class="error">${e.message}</div>`; }
+}
+
+// --- Send ---
+const FEE_LEVELS = {
+  slow:   { nou: 1000,   label: 'Slow',   desc: '0.00001 NOUS' },
+  normal: { nou: 10000,  label: 'Normal', desc: '0.0001 NOUS' },
+  fast:   { nou: 100000, label: 'Fast',   desc: '0.001 NOUS' }
+};
+let selectedFee = 'normal';
+
+function wRenderSend(el) {
+  el.innerHTML = `
+    <button class="w-back" onclick="wGoBack()">&#8249; Back</button>
+    <div class="card">
+      <div class="w-field"><label>To Address</label><input id="wSendTo" placeholder="nous1q..." spellcheck="false"></div>
+      <div class="w-field"><label>Amount (NOUS)</label><input id="wSendAmount" type="number" step="0.00000001" placeholder="0.00"></div>
+      <div class="w-field"><label>Network Fee</label>
+        <div class="fee-selector">
+          ${Object.entries(FEE_LEVELS).map(([key, v]) => `
+            <button class="fee-opt ${key === selectedFee ? 'active' : ''}" onclick="wSelectFee('${key}')">
+              <div class="fee-label">${v.label}</div><div class="fee-desc">${v.desc}</div>
+            </button>`).join('')}
+        </div>
+      </div>
+      <div class="w-field"><label>Message (optional, on-chain forever)</label>
+        <textarea id="wSendMsg" placeholder="Your message..." maxlength="80"></textarea>
+        <div class="w-sub" style="text-align:right"><span id="wMsgCount">0</span>/80</div>
+      </div>
+      <button class="w-btn w-btn-primary" onclick="wConfirmSend()">Review & Send</button>
+      <div id="wSendResult" class="mt"></div>
+    </div>`;
+  document.getElementById('wSendMsg')?.addEventListener('input', e => {
+    document.getElementById('wMsgCount').textContent = e.target.value.length;
+  });
+}
+
+function wSelectFee(level) {
+  selectedFee = level;
+  document.querySelectorAll('.fee-opt').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.fee-opt:nth-child(${Object.keys(FEE_LEVELS).indexOf(level) + 1})`)?.classList.add('active');
+}
+
+function wConfirmSend() {
+  const to = document.getElementById('wSendTo').value.trim();
+  const amountNous = document.getElementById('wSendAmount').value || '0';
+  const amount = Math.round(parseFloat(amountNous) * 1e8);
+  const fee = FEE_LEVELS[selectedFee].nou;
+  const message = document.getElementById('wSendMsg').value.trim();
+  const resultEl = document.getElementById('wSendResult');
+
+  if (!to.startsWith('nous1')) { resultEl.innerHTML = '<div class="error">Invalid address</div>'; return; }
+  if (amount <= 0) { resultEl.innerHTML = '<div class="error">Invalid amount</div>'; return; }
+
+  const el = document.getElementById('walletApp');
+  el.innerHTML = `
+    <button class="w-back" onclick="wRenderSend(document.getElementById('walletApp'))">&#8249; Back</button>
+    <div class="card">
+      <div class="w-label">Confirm Transaction</div>
+      <div class="confirm-row"><span class="confirm-label">To</span><span class="confirm-value" style="font-size:11px;word-break:break-all">${to}</span></div>
+      <div class="confirm-row"><span class="confirm-label">Amount</span><span class="confirm-value">${formatNOUS(amount)} NOUS</span></div>
+      <div class="confirm-row"><span class="confirm-label">Fee</span><span class="confirm-value">${FEE_LEVELS[selectedFee].desc}</span></div>
+      ${message ? `<div class="confirm-row"><span class="confirm-label">Message</span><span class="confirm-value" style="font-size:12px">"${message}"</span></div>` : ''}
+      <div class="confirm-row" style="border-top:1px solid #333;padding-top:12px;margin-top:8px">
+        <span class="confirm-label" style="color:#fff">Total</span>
+        <span class="confirm-value" style="color:#00ff88;font-size:18px">${formatNOUS(amount + fee)} NOUS</span>
+      </div>
+      <button class="w-btn w-btn-primary mt" onclick="wDoSend('${to}', ${amount}, ${fee}, '${message.replace(/'/g, "\\'")}')">Confirm & Send</button>
+      <div id="wSendResult" class="mt"></div>
+    </div>`;
+}
+
+async function wDoSend(to, amount, fee, message) {
+  const resultEl = document.getElementById('wSendResult');
+  resultEl.innerHTML = '<div class="w-sub">Broadcasting...</div>';
+  try {
+    const res = await wApi('send', { to, amount, fee, message });
+    resultEl.innerHTML = `<div class="success">Sent! TxID: ${res.txid.slice(0, 16)}...</div>`;
+    wRefreshBalance();
+    setTimeout(() => { wPageHistory = []; wPage = 'home'; wRenderPage(); }, 3000);
+  } catch(e) { resultEl.innerHTML = `<div class="error">${e.message}</div>`; }
+}
+
+// --- Receive ---
+async function wRenderReceive(el) {
+  wAddresses = await wApi('list_addresses') || [];
+  const primary = wAddresses.length > 0 ? wAddresses[0].address : '';
+  el.innerHTML = `
+    <button class="w-back" onclick="wGoBack()">&#8249; Back</button>
+    <div class="card center">
+      <div class="w-label">Your Address</div>
+      <div class="qr"><canvas id="wQrCanvas"></canvas></div>
+      <div class="addr-text" onclick="copyText('${primary}')">${primary || 'No address'}</div>
+      <button class="w-btn w-btn-small w-btn-secondary mt" onclick="copyText('${primary}')">Copy</button>
+    </div>`;
+
+  if (primary && typeof qrcode !== 'undefined') {
+    const qr = qrcode(0, 'M');
+    qr.addData(primary);
+    qr.make();
+    const canvas = document.getElementById('wQrCanvas');
+    const size = 180, cellSize = size / qr.getModuleCount();
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, size, size);
+    for (let r = 0; r < qr.getModuleCount(); r++)
+      for (let c = 0; c < qr.getModuleCount(); c++) {
+        ctx.fillStyle = qr.isDark(r, c) ? '#00ff88' : '#111';
+        ctx.fillRect(c * cellSize, r * cellSize, cellSize + 0.5, cellSize + 0.5);
       }
+  }
+}
+
+// --- History ---
+async function wRenderHistory(el) {
+  el.innerHTML = '<button class="w-back" onclick="wGoBack()">&#8249; Back</button><div class="card center"><div class="w-sub">Loading transactions...</div></div>';
+  try {
+    const history = await wApi('get_history') || [];
+    if (history.length === 0) {
+      el.innerHTML = '<button class="w-back" onclick="wGoBack()">&#8249; Back</button><div class="card center"><div class="w-sub">No transactions yet</div></div>';
+      return;
     }
+    el.innerHTML = `<button class="w-back" onclick="wGoBack()">&#8249; Back</button>
+      <div class="card" style="padding:0">
+        ${history.map(t => `
+          <div class="tx-item">
+            <div>
+              <div class="tx-amount ${t.amount > 0 ? 'positive' : 'negative'}">${t.amount > 0 ? '+' : ''}${formatNOUS(t.amount)} NOUS</div>
+              <div class="tx-meta">${t.message || t.address?.slice(0,16) + '...' || ''}</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:12px;color:#666">#${t.height}</div>
+              <div class="tx-meta">${timeAgo(t.timestamp)}</div>
+            </div>
+          </div>`).join('')}
+      </div>`;
+  } catch(e) { el.innerHTML = `<button class="w-back" onclick="wGoBack()">&#8249; Back</button><div class="card"><div class="error">${e.message}</div></div>`; }
+}
 
-    async function exportPrivateKey() {
-      try {
-        const result = await ipcRenderer.invoke('export-private-key');
-        if (result.canceled) return;
-        addLog('Wallet exported to: ' + result.path);
-        alert('Wallet exported!\n\nFile: ' + result.path + '\nAddress: ' + result.address + '\n\nKeep this file safe!');
-      } catch (e) {
-        addLog('Error: ' + e.message);
-        alert('No wallet found. Create one first.');
-      }
-    }
+// --- Settings pages ---
+async function wRenderBackup(el) {
+  el.innerHTML = '<button class="w-back" onclick="wGoBack()">&#8249; Back</button><div class="card center"><div class="w-sub">Loading...</div></div>';
+  try {
+    const res = await wApi('get_mnemonic');
+    const words = res.mnemonic.split(' ');
+    el.innerHTML = `<button class="w-back" onclick="wGoBack()">&#8249; Back</button>
+      <div class="card">
+        <div class="w-label" style="color:#ff6b6b">Recovery Phrase</div>
+        <p style="font-size:12px;color:#666;margin:8px 0">Keep these words safe. Never share them.</p>
+        <div class="word-grid">${words.map((w, i) => `<div class="word-cell"><span class="num">${i+1}</span>${w}</div>`).join('')}</div>
+        <button class="w-btn w-btn-secondary mt" onclick="copyText('${res.mnemonic}')">Copy All</button>
+      </div>`;
+  } catch(e) { el.innerHTML = `<button class="w-back" onclick="wGoBack()">&#8249; Back</button><div class="card"><div class="error">${e.message}</div></div>`; }
+}
 
-    // Load wallet on startup
-    (async () => {
-      try {
-        const wallet = await ipcRenderer.invoke('load-wallet');
-        if (wallet && wallet.address) {
-          document.getElementById('address').value = wallet.address;
-          addLog('Wallet loaded: ' + wallet.address);
-        }
-      } catch (e) {}
-    })();
-  </script>
+function wRenderNodeSettings(el) {
+  el.innerHTML = `
+    <button class="w-back" onclick="wGoBack()">&#8249; Back</button>
+    <div class="card">
+      <div class="w-label">Node RPC URL</div>
+      <div class="w-field"><input id="wNodeUrl" placeholder="http://rpc.nouschain.org/api" value="http://rpc.nouschain.org/api"></div>
+      <button class="w-btn w-btn-primary" onclick="wDoSetNode()">Save</button>
+      <div id="wNodeResult" class="mt"></div>
+    </div>`;
+}
+
+async function wDoSetNode() {
+  const url = document.getElementById('wNodeUrl').value.trim();
+  try {
+    await wApi('set_node', { url });
+    document.getElementById('wNodeResult').innerHTML = '<div class="success">Node updated</div>';
+    wRefreshBalance();
+  } catch(e) { document.getElementById('wNodeResult').innerHTML = `<div class="error">${e.message}</div>`; }
+}
+
+// --- Wallet auto-refresh ---
+setInterval(() => {
+  if (activeTab === 'wallet' && wPage === 'home' && wUnlocked) wRefreshBalance();
+}, 30000);
+</script>
 </body>
 </html>
