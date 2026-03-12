@@ -112,7 +112,7 @@ func ValidateTx(txn *Transaction, utxos UTXOStore, height uint64, isTestnet bool
 		if out.Amount > MaxAmount {
 			return fmt.Errorf("validate: output %d value %d exceeds MaxAmount", i, out.Amount)
 		}
-		if out.Amount < DustLimit {
+		if out.Amount < DustLimit && !IsUnspendable(out.PkScript) {
 			return fmt.Errorf("validate: output %d value %d below dust limit %d", i, out.Amount, DustLimit)
 		}
 		sum, err := safeAdd(totalOut, out.Amount)
