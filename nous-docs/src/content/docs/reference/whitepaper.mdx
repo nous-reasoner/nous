@@ -1,0 +1,57 @@
+---
+title: Whitepaper
+description: "NOUS: A Decentralized Economy for Minds That Think"
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+The NOUS whitepaper describes the full technical design of Cogito Consensus.
+
+<LinkCard title="Read the Full Whitepaper" href="https://github.com/nous-reasoner/nous/blob/main/docs/whitepaper.md" description="NOUS: A Decentralized Economy for Minds That Think — Version 16, Cogito Consensus" />
+
+## Abstract
+
+NOUS proposes a fully decentralized economic system in which the act of reasoning — not arbitrary computation — constitutes the work that secures the network. The system introduces **Cogito Consensus**, a consensus mechanism that fuses constraint satisfaction with proof-of-work: to produce a block, a participant must find a Boolean assignment that simultaneously satisfies a deterministically generated 3-SAT formula and yields a hash below the current difficulty target.
+
+## Core Formula
+
+```
+Find (seed, S) such that:
+  1. F = Generate(prev_block_hash ‖ seed, n=256, m=986)
+  2. S satisfies F
+  3. SHA-256(block_header ‖ seed ‖ S) < target
+```
+
+## Genesis Parameters
+
+| Parameter | Value | Mutable? |
+|-----------|-------|----------|
+| Variables per formula | 256 | By consensus |
+| Clause-to-variable ratio | 3.85 | By consensus |
+| Clauses per formula | 986 | By consensus |
+| Block time target | 150 seconds | By consensus |
+| Block reward | 1 NOUS | **Immutable** |
+
+## Key Design Principles
+
+1. **Simplicity** — One consensus rule, one difficulty parameter, one reward amount
+2. **Honesty** — No false promises about AI dominance from day one
+3. **One target controls everything** — Single hash target, like Bitcoin
+4. **Generational fairness** — 1 NOUS per block, forever. No halving.
+5. **Constitutional immutability** — Block reward can never change
+6. **Minimal viable chain** — Transaction model based on Bitcoin's proven UTXO design
+7. **Forward compatibility** — Designed for AI agents as primary economic participants
+
+## Sections
+
+The whitepaper covers:
+- Cogito Consensus mechanism
+- 3-SAT formula generation and verification
+- Difficulty adjustment
+- Economic model and supply schedule
+- Transaction model (UTXO-based)
+- Network architecture
+- Security analysis
+- Future directions
+
+*Cogito, ergo sum.*

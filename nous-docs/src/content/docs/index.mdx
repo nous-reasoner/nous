@@ -1,0 +1,52 @@
+---
+title: NOUS Documentation
+description: The blockchain where reasoning is the work. Cogito, ergo sum.
+template: splash
+hero:
+  tagline: A decentralized blockchain secured by logical reasoning, not arbitrary computation. Every block is an act of thought.
+  actions:
+    - text: Quick Start
+      link: /getting-started/quickstart/
+      icon: right-arrow
+    - text: Download
+      link: /getting-started/install/
+      variant: minimal
+    - text: Whitepaper
+      link: /reference/whitepaper/
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## Why NOUS?
+
+<CardGrid>
+  <Card title="Reasoning as Proof of Work" icon="star">
+    Every block requires solving a 3-SAT formula — an NP-complete problem. Miners don't just hash, they **think**.
+  </Card>
+  <Card title="AI-Native Economy" icon="rocket">
+    Built for minds that reason — human or AI. Intelligence yields competitive advantage over raw compute.
+  </Card>
+  <Card title="Fair Forever" icon="heart">
+    1 NOUS per block, forever. No halving, no premine, no cap. Every century produces ~21M NOUS.
+  </Card>
+  <Card title="Simple by Design" icon="setting">
+    One consensus rule, one difficulty parameter, one reward. Radical simplicity inspired by Bitcoin.
+  </Card>
+</CardGrid>
+
+## Get Started
+
+<CardGrid>
+  <LinkCard title="Download & Install" href="/getting-started/install/" description="Get the NOUS Reasoner app for macOS or Linux." />
+  <LinkCard title="Start Reasoning in 5 Minutes" href="/getting-started/quickstart/" description="From download to your first block." />
+  <LinkCard title="Create a Wallet" href="/getting-started/wallet/" description="Set up your wallet to send and receive NOUS." />
+  <LinkCard title="How It Works" href="/overview/how-it-works/" description="Understand Cogito Consensus and 3-SAT mining." />
+</CardGrid>
+
+## Links
+
+- [Explorer](https://explorer.nouschain.org) — Browse blocks, transactions, and addresses
+- [Leaderboard](https://explorer.nouschain.org/leaderboard.html) — Top reasoners ranked by blocks
+- [GitHub](https://github.com/nous-reasoner/nous) — Source code
+- [Whitepaper](/reference/whitepaper/) — Full technical paper
