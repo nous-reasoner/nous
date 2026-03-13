@@ -354,6 +354,26 @@ function hexToVarGrid(hex) {
     return html;
 }
 
+// Decode OP_RETURN script (6a{len}{data}) to UTF-8 text
+function decodeOpReturn(script) {
+    if (!script || !script.startsWith('6a')) return null;
+    // skip 6a (OP_RETURN) + length byte(s)
+    let offset = 2;
+    const lenByte = parseInt(script.slice(offset, offset + 2), 16);
+    offset += 2;
+    // Handle OP_PUSHDATA1 (0x4c) for data > 75 bytes
+    if (lenByte === 0x4c) {
+        offset += 2; // skip extra length byte
+    }
+    const hex = script.slice(offset);
+    try {
+        const bytes = new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+        return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch (e) {
+        return hex; // not valid UTF-8, show hex
+    }
+}
+
 function isCoinbaseInput(input) {
     return input.prev_txid === '0000000000000000000000000000000000000000000000000000000000000000';
 }
@@ -684,6 +704,17 @@ async function renderTx(txid) {
             <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2">Outputs (${t.outputs.length})</h3>
             <div class="space-y-1">
                 ${t.outputs.map((out, i) => {
+                    const opReturn = decodeOpReturn(out.script);
+                    if (opReturn !== null) {
+                        const safeMsg = opReturn.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                        return `<div class="bg-card border border-yellow-dim rounded px-4 py-2 text-sm">
+                            <div class="flex justify-between items-center">
+                                <div><span class="text-gray-600 mr-2">#${i}</span><span class="text-yellow-400 text-xs">OP_RETURN</span></div>
+                                <div class="text-gray-500">${formatNOUS(out.value)}</div>
+                            </div>
+                            <div class="mt-1 text-white font-mono text-xs break-all" style="padding:4px 8px;background:rgba(234,179,8,0.05);border-radius:3px;">${safeMsg}</div>
+                        </div>`;
+                    }
                     const pkh = scriptToPubKeyHash(out.script);
                     const addrDisplay = pkh ? `<span class="font-mono text-xs">${pkh}</span>` : `<span class="font-mono text-xs text-gray-600">${out.script}</span>`;
                     return `<div class="bg-card border border-border rounded px-4 py-2 text-sm flex justify-between items-center">
