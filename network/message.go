@@ -134,6 +134,13 @@ func encodePayload(msg Message) ([]byte, error) {
 	case *MsgGetAddr:
 		// empty payload
 
+	case *MsgGetHeaders:
+		buf.Write(m.StartHash[:])
+		buf.Write(m.StopHash[:])
+
+	case *MsgHeaders:
+		buf.Write(m.Headers)
+
 	default:
 		return nil, fmt.Errorf("network: unknown message type %T", msg)
 	}
@@ -209,6 +216,15 @@ func decodePayload(cmd string, payload []byte) (Message, error) {
 
 	case CmdGetAddr:
 		return &MsgGetAddr{}, nil
+
+	case CmdGetHeaders:
+		m := &MsgGetHeaders{}
+		io.ReadFull(r, m.StartHash[:])
+		io.ReadFull(r, m.StopHash[:])
+		return m, nil
+
+	case CmdHeaders:
+		return &MsgHeaders{Headers: payload}, nil
 
 	default:
 		return nil, fmt.Errorf("network: unknown command %q", cmd)

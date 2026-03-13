@@ -1184,3 +1184,359 @@ func TestBanScoreConstants(t *testing.T) {
 		t.Fatalf("HandshakeTimeout %v out of reasonable range", HandshakeTimeout)
 	}
 }
+
+// ============================================================
+// 14. Headers-first message round-trip
+// ============================================================
+
+func TestGetHeadersHeadersRoundTrip(t *testing.T) {
+	start := crypto.Sha256([]byte("start"))
+	stop := crypto.Sha256([]byte("stop"))
+	orig := &MsgGetHeaders{StartHash: start, StopHash: stop}
+
+	data, err := EncodeMessage(MainNetMagic, orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeMessage(bytes.NewReader(data), MainNetMagic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh := decoded.(*MsgGetHeaders)
+	if gh.StartHash != start || gh.StopHash != stop {
+		t.Fatal("GetHeaders field mismatch")
+	}
+
+	// Headers message with 3 serialized headers.
+	hdr1 := block.Header{Version: 1, Timestamp: 100}
+	hdr2 := block.Header{Version: 1, Timestamp: 200, PrevBlockHash: hdr1.Hash()}
+	hdr3 := block.Header{Version: 1, Timestamp: 300, PrevBlockHash: hdr2.Hash()}
+	var payload []byte
+	payload = append(payload, hdr1.Serialize()...)
+	payload = append(payload, hdr2.Serialize()...)
+	payload = append(payload, hdr3.Serialize()...)
+
+	origHdrs := &MsgHeaders{Headers: payload}
+	data, err = EncodeMessage(MainNetMagic, origHdrs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err = DecodeMessage(bytes.NewReader(data), MainNetMagic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hdrs := decoded.(*MsgHeaders)
+	if len(hdrs.Headers) != 3*block.HeaderSize {
+		t.Fatalf("headers payload size: want %d, got %d", 3*block.HeaderSize, len(hdrs.Headers))
+	}
+}
+
+// ============================================================
+// 15. V2→V2: Headers-first full sync
+// ============================================================
+
+func TestHeadersFirstSync(t *testing.T) {
+	genesis := makeTestBlock(crypto.Hash{}, 0)
+
+	// Chain A: genesis + 20 blocks.
+	chainA := newMockChain(genesis)
+	for h := uint32(1); h <= 20; h++ {
+		blk := makeTestBlock(chainA.TipHash(), h)
+		if _, err := chainA.AddBlock(blk); err != nil {
+			t.Fatalf("chainA add block %d: %v", h, err)
+		}
+	}
+
+	// Chain B: genesis only.
+	chainB := newMockChain(genesis)
+
+	// Server A (v2).
+	serverA := NewServer(ServerConfig{ListenAddr: "127.0.0.1:0", Magic: TestNetMagic})
+	serverA.SetBlockHeight(chainA.Height())
+	if err := serverA.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer serverA.Stop()
+
+	// Server B (v2).
+	serverB := NewServer(ServerConfig{ListenAddr: "127.0.0.1:0", Magic: TestNetMagic})
+	serverB.SetBlockHeight(chainB.Height())
+	if err := serverB.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer serverB.Stop()
+
+	syncerA := NewBlockSyncer(serverA, chainA)
+	syncerA.Start()
+	syncerB := NewBlockSyncer(serverB, chainB)
+	syncerB.Start()
+
+	// B connects to A.
+	if err := serverB.Connect(serverA.ListenAddr()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify peer is v2.
+	peers := serverB.Peers().All()
+	if len(peers) == 0 {
+		t.Fatal("B should have at least 1 peer")
+	}
+	if peers[0].Version < 2 {
+		t.Fatalf("expected v2 peer, got v%d", peers[0].Version)
+	}
+
+	// Trigger sync — should use headers-first.
+	syncerB.TriggerSync()
+
+	// Wait for B to reach height 20.
+	if err := syncerB.WaitForSync(20, 10*time.Second); err != nil {
+		t.Fatalf("headers-first sync failed: %v (chainB height=%d)", err, chainB.Height())
+	}
+
+	if chainB.Height() != 20 {
+		t.Fatalf("chainB height: want 20, got %d", chainB.Height())
+	}
+	if chainA.TipHash() != chainB.TipHash() {
+		t.Fatal("tip hash mismatch after headers-first sync")
+	}
+}
+
+// ============================================================
+// 16. V2→V1 fallback: v2 node syncs with v1 peer via getblocks
+// ============================================================
+
+func TestV2FallbackToV1(t *testing.T) {
+	genesis := makeTestBlock(crypto.Hash{}, 0)
+
+	// Chain A: genesis + 5 blocks.
+	chainA := newMockChain(genesis)
+	for h := uint32(1); h <= 5; h++ {
+		blk := makeTestBlock(chainA.TipHash(), h)
+		if _, err := chainA.AddBlock(blk); err != nil {
+			t.Fatalf("chainA add block %d: %v", h, err)
+		}
+	}
+
+	chainB := newMockChain(genesis)
+
+	// Server A acts as v1 by advertising ProtocolVersion 1.
+	serverA := NewServer(ServerConfig{ListenAddr: "127.0.0.1:0", Magic: TestNetMagic})
+	serverA.SetBlockHeight(chainA.Height())
+	// Override the version A advertises to simulate a v1 peer.
+	serverA.SetProtocolVersion(1)
+	if err := serverA.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer serverA.Stop()
+
+	// Server B is v2.
+	serverB := NewServer(ServerConfig{ListenAddr: "127.0.0.1:0", Magic: TestNetMagic})
+	serverB.SetBlockHeight(chainB.Height())
+	if err := serverB.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer serverB.Stop()
+
+	syncerA := NewBlockSyncer(serverA, chainA)
+	syncerA.Start()
+	syncerB := NewBlockSyncer(serverB, chainB)
+	syncerB.Start()
+
+	if err := serverB.Connect(serverA.ListenAddr()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify peer appears as v1 to B.
+	peers := serverB.Peers().All()
+	if len(peers) == 0 {
+		t.Fatal("B should have at least 1 peer")
+	}
+	if peers[0].Version != 1 {
+		t.Fatalf("expected v1 peer, got v%d", peers[0].Version)
+	}
+
+	// Trigger sync — should fall back to getblocks (SyncInProgress).
+	syncerB.TriggerSync()
+
+	if err := syncerB.WaitForSync(5, 5*time.Second); err != nil {
+		t.Fatalf("v1 fallback sync failed: %v (chainB height=%d)", err, chainB.Height())
+	}
+
+	if chainA.TipHash() != chainB.TipHash() {
+		t.Fatal("tip hash mismatch after v1 fallback sync")
+	}
+}
+
+// ============================================================
+// 17. Headers peer disconnect → retry and switch
+// ============================================================
+
+func TestHeadersPeerDisconnect(t *testing.T) {
+	genesis := makeTestBlock(crypto.Hash{}, 0)
+
+	// Chain A: genesis + 10 blocks.
+	chainA := newMockChain(genesis)
+	for h := uint32(1); h <= 10; h++ {
+		blk := makeTestBlock(chainA.TipHash(), h)
+		chainA.AddBlock(blk)
+	}
+
+	// Chain A2: same chain as A (backup peer).
+	chainA2 := newMockChain(genesis)
+	for h := uint32(1); h <= 10; h++ {
+		blk, _ := chainA.GetBlockByHeight(uint64(h))
+		chainA2.AddBlock(blk)
+	}
+
+	chainB := newMockChain(genesis)
+
+	// Server A (will be disconnected).
+	serverA := NewServer(ServerConfig{ListenAddr: "127.0.0.1:0", Magic: TestNetMagic})
+	serverA.SetBlockHeight(chainA.Height())
+	if err := serverA.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Server A2 (backup).
+	serverA2 := NewServer(ServerConfig{ListenAddr: "127.0.0.1:0", Magic: TestNetMagic})
+	serverA2.SetBlockHeight(chainA2.Height())
+	if err := serverA2.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer serverA2.Stop()
+
+	// Server B.
+	serverB := NewServer(ServerConfig{ListenAddr: "127.0.0.1:0", Magic: TestNetMagic})
+	serverB.SetBlockHeight(chainB.Height())
+	if err := serverB.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer serverB.Stop()
+
+	syncerA := NewBlockSyncer(serverA, chainA)
+	syncerA.Start()
+	syncerA2 := NewBlockSyncer(serverA2, chainA2)
+	syncerA2.Start()
+	syncerB := NewBlockSyncer(serverB, chainB)
+	syncerB.Start()
+
+	// B connects to both A and A2.
+	if err := serverB.Connect(serverA.ListenAddr()); err != nil {
+		t.Fatal(err)
+	}
+	if err := serverB.Connect(serverA2.ListenAddr()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	if serverB.Peers().Count() < 2 {
+		t.Fatalf("B should have 2 peers, got %d", serverB.Peers().Count())
+	}
+
+	// Trigger sync — B starts headers-first with one of them.
+	syncerB.TriggerSync()
+	time.Sleep(100 * time.Millisecond)
+
+	// Kill server A mid-sync.
+	serverA.Stop()
+	time.Sleep(500 * time.Millisecond)
+
+	// Trigger sync again — should detect disconnect and switch to A2.
+	for i := 0; i < 10; i++ {
+		syncerB.TriggerSync()
+		time.Sleep(200 * time.Millisecond)
+		if chainB.Height() >= 10 {
+			break
+		}
+	}
+
+	if err := syncerB.WaitForSync(10, 10*time.Second); err != nil {
+		t.Fatalf("sync after peer disconnect failed: %v (height=%d)", err, chainB.Height())
+	}
+
+	if chainA.TipHash() != chainB.TipHash() {
+		t.Fatal("tip hash mismatch after peer switch")
+	}
+}
+
+// ============================================================
+// 18. Multi-peer parallel download with buffer limit
+// ============================================================
+
+func TestMultiPeerParallelDownload(t *testing.T) {
+	genesis := makeTestBlock(crypto.Hash{}, 0)
+
+	// Build a chain with 50 blocks — enough to span multiple chunks (16 blocks each).
+	chainA := newMockChain(genesis)
+	for h := uint32(1); h <= 50; h++ {
+		blk := makeTestBlock(chainA.TipHash(), h)
+		chainA.AddBlock(blk)
+	}
+
+	// Create two data servers with the same chain.
+	chainA2 := newMockChain(genesis)
+	for h := uint32(1); h <= 50; h++ {
+		blk, _ := chainA.GetBlockByHeight(uint64(h))
+		chainA2.AddBlock(blk)
+	}
+
+	chainB := newMockChain(genesis)
+
+	serverA := NewServer(ServerConfig{ListenAddr: "127.0.0.1:0", Magic: TestNetMagic})
+	serverA.SetBlockHeight(chainA.Height())
+	if err := serverA.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer serverA.Stop()
+
+	serverA2 := NewServer(ServerConfig{ListenAddr: "127.0.0.1:0", Magic: TestNetMagic})
+	serverA2.SetBlockHeight(chainA2.Height())
+	if err := serverA2.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer serverA2.Stop()
+
+	serverB := NewServer(ServerConfig{ListenAddr: "127.0.0.1:0", Magic: TestNetMagic})
+	serverB.SetBlockHeight(chainB.Height())
+	if err := serverB.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer serverB.Stop()
+
+	syncerA := NewBlockSyncer(serverA, chainA)
+	syncerA.Start()
+	syncerA2 := NewBlockSyncer(serverA2, chainA2)
+	syncerA2.Start()
+	syncerB := NewBlockSyncer(serverB, chainB)
+	syncerB.Start()
+
+	// B connects to both peers.
+	if err := serverB.Connect(serverA.ListenAddr()); err != nil {
+		t.Fatal(err)
+	}
+	if err := serverB.Connect(serverA2.ListenAddr()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	if serverB.Peers().Count() < 2 {
+		t.Fatalf("B should have 2 peers, got %d", serverB.Peers().Count())
+	}
+
+	// Trigger headers-first sync.
+	syncerB.TriggerSync()
+
+	// B should sync all 50 blocks using parallel download from both peers.
+	if err := syncerB.WaitForSync(50, 15*time.Second); err != nil {
+		t.Fatalf("multi-peer sync failed: %v (height=%d)", err, chainB.Height())
+	}
+
+	if chainB.Height() != 50 {
+		t.Fatalf("chainB height: want 50, got %d", chainB.Height())
+	}
+	if chainA.TipHash() != chainB.TipHash() {
+		t.Fatal("tip hash mismatch after multi-peer sync")
+	}
+}

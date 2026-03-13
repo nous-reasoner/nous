@@ -1,6 +1,8 @@
 package network
 
 import (
+	"time"
+
 	"nous/crypto"
 )
 
@@ -29,7 +31,8 @@ const (
 	MaxAddrCount = 1_000
 
 	// ProtocolVersion is the current protocol version.
-	ProtocolVersion uint32 = 1
+	// v2 adds getheaders/headers messages for headers-first sync.
+	ProtocolVersion uint32 = 2
 
 	// MinSupportedVersion is the minimum protocol version we accept from peers.
 	MinSupportedVersion uint32 = 1
@@ -64,7 +67,33 @@ const (
 	CmdPing      = "ping"
 	CmdPong      = "pong"
 	CmdAddr      = "addr"
-	CmdGetAddr   = "getaddr"
+	CmdGetAddr    = "getaddr"
+	CmdGetHeaders = "getheaders"
+	CmdHeaders    = "headers"
+)
+
+// Headers-first sync constants.
+const (
+	// MaxHeadersPerMsg is the maximum headers in a single headers message.
+	MaxHeadersPerMsg = 2000
+
+	// BlocksPerChunk is the number of blocks requested per download chunk
+	// during parallel block download. Configurable constant.
+	BlocksPerChunk = 16
+
+	// MaxBufferedBlocks is the maximum number of downloaded blocks waiting
+	// to be processed in order. Prevents memory blow-up when fast peers
+	// outpace slow ones.
+	MaxBufferedBlocks = 256
+
+	// HeadersStaleTimeout resets headers download if no progress.
+	HeadersStaleTimeout = 60 * time.Second
+
+	// MaxHeaderRetries switches header peer after this many failures.
+	MaxHeaderRetries = 3
+
+	// ChunkTimeout is how long to wait for a chunk before reassigning.
+	ChunkTimeout = 30 * time.Second
 )
 
 // InvType identifies the kind of inventory item.
@@ -170,3 +199,19 @@ func (m *MsgAddr) Command() string { return CmdAddr }
 type MsgGetAddr struct{}
 
 func (m *MsgGetAddr) Command() string { return CmdGetAddr }
+
+// MsgGetHeaders requests block headers starting after StartHash.
+// Same wire format as MsgGetBlocks but returns headers instead of inv.
+type MsgGetHeaders struct {
+	StartHash crypto.Hash
+	StopHash  crypto.Hash // zero hash = get as many as possible
+}
+
+func (m *MsgGetHeaders) Command() string { return CmdGetHeaders }
+
+// MsgHeaders carries a batch of serialized block headers (148 bytes each).
+type MsgHeaders struct {
+	Headers []byte // concatenated serialized headers (148 bytes × N)
+}
+
+func (m *MsgHeaders) Command() string { return CmdHeaders }

@@ -41,7 +41,8 @@ type Server struct {
 	protection *PeerProtection
 	handlers   map[string]MessageHandler
 
-	blockHeight uint64 // our current block height
+	blockHeight     uint64 // our current block height
+	protocolVersion uint32 // override ProtocolVersion if non-zero
 
 	quit chan struct{}
 	wg   sync.WaitGroup
@@ -85,6 +86,23 @@ func (s *Server) BlockHeight() uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.blockHeight
+}
+
+// SetProtocolVersion overrides the protocol version this server advertises.
+func (s *Server) SetProtocolVersion(v uint32) {
+	s.mu.Lock()
+	s.protocolVersion = v
+	s.mu.Unlock()
+}
+
+// getProtocolVersion returns the protocol version to advertise.
+func (s *Server) getProtocolVersion() uint32 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.protocolVersion != 0 {
+		return s.protocolVersion
+	}
+	return ProtocolVersion
 }
 
 // Peers returns the peer manager.
@@ -471,7 +489,7 @@ func (s *Server) handlePeer(peer *Peer) {
 		// Rate limit check — exempt block-sync messages (block, inv, getblocks,
 		// getdata) so initial block download doesn't trigger bans.
 		cmd := msg.Command()
-		isSyncMsg := cmd == CmdBlock || cmd == CmdInv || cmd == CmdGetBlocks || cmd == CmdGetData
+		isSyncMsg := cmd == CmdBlock || cmd == CmdInv || cmd == CmdGetBlocks || cmd == CmdGetData || cmd == CmdGetHeaders || cmd == CmdHeaders
 		if !isSyncMsg && !s.protection.CheckRate(peer.Addr) {
 			if s.protection.AddScore(peer.Addr, BanScoreRateExceeded) {
 				log.Printf("network: disconnecting banned peer %s (rate exceeded)", peer.Addr)
@@ -523,7 +541,7 @@ func (s *Server) sendVersion(peer *Peer) {
 		}
 	}
 	msg := &MsgVersion{
-		Version:     ProtocolVersion,
+		Version:     s.getProtocolVersion(),
 		BlockHeight: s.BlockHeight(),
 		Timestamp:   uint64(time.Now().Unix()),
 		Nonce:       uint64(time.Now().UnixNano()),

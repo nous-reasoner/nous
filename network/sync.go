@@ -37,9 +37,11 @@ const (
 type SyncState int
 
 const (
-	SyncIdle       SyncState = iota
-	SyncInProgress           // actively downloading blocks
-	SyncComplete             // caught up with best peer
+	SyncIdle          SyncState = iota
+	SyncInProgress              // actively downloading blocks (v1 legacy path)
+	SyncComplete                // caught up with best peer
+	SyncHeadersPhase            // v2: downloading headers from best peer
+	SyncBlocksPhase             // v2: parallel block download using header chain
 )
 
 // ChainAccess provides the network layer with read/write access to the chain.
@@ -99,6 +101,33 @@ type BlockSyncer struct {
 
 	// Bad sync peers: temporarily skip peers that send too many orphans.
 	badSyncPeers map[string]time.Time // peer addr → when marked bad
+
+	// --- Headers-first sync (v2) ---
+	headerChain       []headerEntry          // verified header skeleton from phase 1
+	headerPeer        *Peer                  // peer serving headers
+	headerRetries     int                    // consecutive header failures
+	lastHeaderAt      time.Time              // last header progress
+	// Parallel block download (phase 2)
+	downloadQueue     []crypto.Hash          // block hashes to download, in order
+	downloadNext      int                    // next index in downloadQueue to assign
+	activeChunks      map[string]*chunkInfo  // peer addr → active chunk
+	blockBuffer       map[uint64]*block.Block // height → downloaded block waiting for in-order processing
+	blockBufferIdx    map[crypto.Hash]uint64 // hash → height (reverse lookup)
+	nextProcessHeight uint64                 // next height to add to chain
+	downloadBaseHeight uint64                // height of downloadQueue[0]
+}
+
+// headerEntry is a verified header from the headers-first phase.
+type headerEntry struct {
+	Hash   crypto.Hash
+	Header block.Header
+}
+
+// chunkInfo tracks a block download chunk assigned to a peer.
+type chunkInfo struct {
+	StartIdx  int       // index into downloadQueue
+	EndIdx    int       // exclusive end index
+	AssignedAt time.Time
 }
 
 // NewBlockSyncer creates a new block syncer.
@@ -115,6 +144,9 @@ func NewBlockSyncer(server *Server, chain ChainAccess) *BlockSyncer {
 		badSyncPeers:   make(map[string]time.Time),
 		lastProgressAt: now,
 		lastProgressH:  chain.Height(),
+		activeChunks:   make(map[string]*chunkInfo),
+		blockBuffer:    make(map[uint64]*block.Block),
+		blockBufferIdx: make(map[crypto.Hash]uint64),
 	}
 }
 
@@ -139,6 +171,8 @@ func (bs *BlockSyncer) Start() {
 	bs.server.OnMessage(CmdBlock, bs.handleBlock)
 	bs.server.OnMessage(CmdTx, bs.handleTx)
 	bs.server.OnMessage(CmdInv, bs.handleInv)
+	bs.server.OnMessage(CmdGetHeaders, bs.handleGetHeaders)
+	bs.server.OnMessage(CmdHeaders, bs.handleHeaders)
 }
 
 // SyncFromPeer initiates block download from a specific peer.
@@ -178,15 +212,15 @@ func (bs *BlockSyncer) SyncFromPeer(peer *Peer) error {
 // so a fresh getblocks can be sent.
 func (bs *BlockSyncer) TriggerSync() {
 	bs.mu.Lock()
+
+	// Handle active v1 sync (SyncInProgress).
 	if bs.state == SyncInProgress {
-		// Check if the sync peer disconnected.
 		if bs.syncPeer != nil && bs.server.peers.Get(bs.syncPeer.Addr) == nil {
 			log.Printf("sync: peer %s disconnected, resetting sync state", bs.syncPeer.Addr)
 			bs.state = SyncIdle
 			bs.syncPeer = nil
 			bs.evictStalePendingLocked()
 		} else {
-			// Peer still connected — check for stale sync (no progress).
 			currentH := bs.chain.Height()
 			if currentH > bs.lastProgressH {
 				bs.lastProgressH = currentH
@@ -200,12 +234,10 @@ func (bs *BlockSyncer) TriggerSync() {
 				bs.evictStalePendingLocked()
 				bs.clearOrphansLocked()
 			} else if len(bs.orphans) > 0 && time.Since(bs.lastProgressAt) > OrphanRetryPeriod && time.Since(bs.lastOrphanRetry) > OrphanRetryPeriod {
-				// Orphans piling up with no height gain.
 				bs.orphanRetryCount++
 				bs.lastOrphanRetry = time.Now()
 
 				if bs.orphanRetryCount >= MaxOrphanRetries {
-					// Too many retries — mark this peer as bad and switch.
 					badAddr := ""
 					if bs.syncPeer != nil {
 						badAddr = bs.syncPeer.Addr
@@ -218,9 +250,7 @@ func (bs *BlockSyncer) TriggerSync() {
 					bs.orphanRetryCount = 0
 					bs.evictStalePendingLocked()
 					bs.clearOrphansLocked()
-					// Fall through to select a new peer below.
 				} else {
-					// Retry with same peer.
 					peer := bs.syncPeer
 					bs.evictStalePendingLocked()
 					bs.mu.Unlock()
@@ -241,7 +271,68 @@ func (bs *BlockSyncer) TriggerSync() {
 			}
 		}
 	}
-	// After sync completes, wait before re-polling. Blocks arrive via relay.
+
+	// Handle active v2 headers phase.
+	if bs.state == SyncHeadersPhase {
+		if bs.headerPeer != nil && bs.server.peers.Get(bs.headerPeer.Addr) == nil {
+			log.Printf("sync: header peer %s disconnected, resetting", bs.headerPeer.Addr)
+			bs.resetHeadersSyncLocked()
+		} else if time.Since(bs.lastHeaderAt) > HeadersStaleTimeout {
+			bs.headerRetries++
+			if bs.headerRetries >= MaxHeaderRetries {
+				badAddr := ""
+				if bs.headerPeer != nil {
+					badAddr = bs.headerPeer.Addr
+					bs.badSyncPeers[badAddr] = time.Now()
+				}
+				log.Printf("sync: headers stale after %d retries from %s, switching peer",
+					bs.headerRetries, badAddr)
+				bs.resetHeadersSyncLocked()
+			} else {
+				// Retry with same peer.
+				peer := bs.headerPeer
+				bs.lastHeaderAt = time.Now()
+				bs.mu.Unlock()
+				if peer != nil {
+					lastHash := bs.chain.TipHash()
+					if len(bs.headerChain) > 0 {
+						lastHash = bs.headerChain[len(bs.headerChain)-1].Hash
+					}
+					log.Printf("sync: headers stale, retrying getheaders (attempt %d/%d)",
+						bs.headerRetries, MaxHeaderRetries)
+					peer.SendMessage(bs.server.config.Magic, &MsgGetHeaders{
+						StartHash: lastHash,
+						StopHash:  crypto.Hash{},
+					})
+				}
+				return
+			}
+		} else {
+			bs.mu.Unlock()
+			return
+		}
+	}
+
+	// Handle active v2 blocks phase.
+	if bs.state == SyncBlocksPhase {
+		bs.checkChunkTimeoutsLocked()
+		if len(bs.downloadQueue) > 0 && bs.downloadNext < len(bs.downloadQueue) {
+			// Still downloading — assign chunks to idle peers.
+			bs.mu.Unlock()
+			bs.assignChunks()
+			return
+		}
+		// Check if all done.
+		if bs.downloadNext >= len(bs.downloadQueue) && len(bs.activeChunks) == 0 && len(bs.blockBuffer) == 0 {
+			bs.state = SyncComplete
+			bs.syncCompletedAt = time.Now()
+			log.Printf("sync: v2 complete at height %d", bs.chain.Height())
+		}
+		bs.mu.Unlock()
+		return
+	}
+
+	// After sync completes, wait before re-polling.
 	if bs.state == SyncComplete && time.Since(bs.syncCompletedAt) < 30*time.Second {
 		bs.mu.Unlock()
 		return
@@ -274,7 +365,53 @@ func (bs *BlockSyncer) TriggerSync() {
 	if best == nil {
 		return
 	}
-	bs.SyncFromPeer(best)
+
+	// If best peer supports v2, use headers-first sync.
+	if best.Version >= 2 && best.BlockHeight > bs.chain.Height() {
+		bs.startHeadersSync(best)
+	} else {
+		bs.SyncFromPeer(best)
+	}
+}
+
+// resetHeadersSyncLocked resets headers-first sync state. Must hold bs.mu.
+func (bs *BlockSyncer) resetHeadersSyncLocked() {
+	bs.state = SyncIdle
+	bs.headerPeer = nil
+	bs.headerChain = nil
+	bs.headerRetries = 0
+	bs.downloadQueue = nil
+	bs.downloadNext = 0
+	bs.activeChunks = make(map[string]*chunkInfo)
+	bs.blockBuffer = make(map[uint64]*block.Block)
+	bs.blockBufferIdx = make(map[crypto.Hash]uint64)
+}
+
+// startHeadersSync begins the headers-first sync from a v2 peer.
+func (bs *BlockSyncer) startHeadersSync(peer *Peer) {
+	bs.mu.Lock()
+	if bs.state != SyncIdle {
+		bs.mu.Unlock()
+		return
+	}
+	now := time.Now()
+	bs.state = SyncHeadersPhase
+	bs.headerPeer = peer
+	bs.headerChain = nil
+	bs.headerRetries = 0
+	bs.lastHeaderAt = now
+	bs.lastProgressAt = now
+	bs.lastProgressH = bs.chain.Height()
+	bs.mu.Unlock()
+
+	log.Printf("sync: v2 headers-first starting from peer %s (height %d, our height %d)",
+		peer.Addr, peer.BlockHeight, bs.chain.Height())
+
+	tipHash := bs.chain.TipHash()
+	peer.SendMessage(bs.server.config.Magic, &MsgGetHeaders{
+		StartHash: tipHash,
+		StopHash:  crypto.Hash{},
+	})
 }
 
 // --- message handlers ---
@@ -394,6 +531,15 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 	}
 
 	blockHash := blk.Header.Hash()
+
+	// Route to v2 handler if in parallel download phase.
+	bs.mu.Lock()
+	isBlocksPhase := bs.state == SyncBlocksPhase
+	bs.mu.Unlock()
+	if isBlocksPhase {
+		bs.handleBlockV2(peer, blk, blockHash)
+		return
+	}
 
 	// Skip blocks we already have (can arrive via relay + sync simultaneously).
 	if bs.chain.HasBlock(blockHash) {
@@ -686,8 +832,12 @@ func (bs *BlockSyncer) handleTx(peer *Peer, msg Message) {
 
 // relayBlock forwards a block to all peers except the sender.
 func (bs *BlockSyncer) relayBlock(sender *Peer, blkMsg *MsgBlock) {
+	senderAddr := ""
+	if sender != nil {
+		senderAddr = sender.Addr
+	}
 	for _, p := range bs.server.peers.All() {
-		if p.Addr != sender.Addr && p.Handshaked {
+		if p.Addr != senderAddr && p.Handshaked {
 			p.SendMessage(bs.server.config.Magic, blkMsg)
 		}
 	}
@@ -701,6 +851,380 @@ func (bs *BlockSyncer) BroadcastBlock(blk *block.Block) error {
 	}
 	bs.server.BroadcastMessage(&MsgBlock{Payload: payload})
 	return nil
+}
+
+// --- headers-first sync (v2) handlers ---
+
+// handleGetHeaders responds with a headers message containing serialized block headers.
+func (bs *BlockSyncer) handleGetHeaders(peer *Peer, msg Message) {
+	gh := msg.(*MsgGetHeaders)
+
+	// Find the start height by locating StartHash in our chain.
+	startHeight := uint64(0)
+	ourHeight := bs.chain.Height()
+
+	for h := uint64(0); h <= ourHeight; h++ {
+		hash, err := bs.chain.GetBlockHashByHeight(h)
+		if err != nil {
+			continue
+		}
+		if hash == gh.StartHash {
+			startHeight = h + 1
+			break
+		}
+	}
+
+	// Build headers payload.
+	var buf bytes.Buffer
+	count := 0
+	for h := startHeight; h <= ourHeight && count < MaxHeadersPerMsg; h++ {
+		blk, err := bs.chain.GetBlockByHeight(h)
+		if err != nil {
+			break
+		}
+		if gh.StopHash != (crypto.Hash{}) && blk.Header.Hash() == gh.StopHash {
+			break
+		}
+		buf.Write(blk.Header.Serialize())
+		count++
+	}
+
+	peer.SendMessage(bs.server.config.Magic, &MsgHeaders{Headers: buf.Bytes()})
+}
+
+// handleHeaders processes received block headers during headers-first sync.
+func (bs *BlockSyncer) handleHeaders(peer *Peer, msg Message) {
+	hdrs := msg.(*MsgHeaders)
+
+	bs.mu.Lock()
+	if bs.state != SyncHeadersPhase || bs.headerPeer == nil || bs.headerPeer.Addr != peer.Addr {
+		bs.mu.Unlock()
+		return
+	}
+
+	data := hdrs.Headers
+	headerCount := len(data) / block.HeaderSize
+	if len(data)%block.HeaderSize != 0 || headerCount == 0 {
+		// Empty headers = headers phase complete, transition to blocks phase.
+		if len(data) == 0 {
+			bs.mu.Unlock()
+			bs.startBlocksPhase()
+			return
+		}
+		log.Printf("sync: invalid headers payload size %d from %s", len(data), peer.Addr)
+		bs.headerRetries++
+		if bs.headerRetries >= MaxHeaderRetries {
+			bs.badSyncPeers[peer.Addr] = time.Now()
+			bs.resetHeadersSyncLocked()
+		}
+		bs.mu.Unlock()
+		return
+	}
+
+	// Determine expected previous hash.
+	var prevHash crypto.Hash
+	if len(bs.headerChain) > 0 {
+		prevHash = bs.headerChain[len(bs.headerChain)-1].Hash
+	} else {
+		prevHash = bs.chain.TipHash()
+	}
+
+	// Parse and verify header chain linkage.
+	for i := 0; i < headerCount; i++ {
+		hdrBytes := data[i*block.HeaderSize : (i+1)*block.HeaderSize]
+		hdr, err := block.DeserializeHeader(hdrBytes)
+		if err != nil {
+			log.Printf("sync: malformed header %d from %s: %v", i, peer.Addr, err)
+			bs.headerRetries++
+			if bs.headerRetries >= MaxHeaderRetries {
+				bs.badSyncPeers[peer.Addr] = time.Now()
+				bs.resetHeadersSyncLocked()
+			}
+			bs.mu.Unlock()
+			return
+		}
+
+		hash := hdr.Hash()
+
+		// Verify chain linkage.
+		if hdr.PrevBlockHash != prevHash {
+			log.Printf("sync: header chain broken at %d from %s (expected parent %x, got %x)",
+				i, peer.Addr, prevHash[:8], hdr.PrevBlockHash[:8])
+			bs.headerRetries++
+			if bs.headerRetries >= MaxHeaderRetries {
+				bs.badSyncPeers[peer.Addr] = time.Now()
+				bs.resetHeadersSyncLocked()
+			}
+			bs.mu.Unlock()
+			return
+		}
+
+		bs.headerChain = append(bs.headerChain, headerEntry{Hash: hash, Header: *hdr})
+		prevHash = hash
+	}
+
+	bs.lastHeaderAt = time.Now()
+	bs.headerRetries = 0 // reset on success
+	totalHeaders := len(bs.headerChain)
+	bs.mu.Unlock()
+
+	log.Printf("sync: received %d headers (total: %d) from %s", headerCount, totalHeaders, peer.Addr)
+
+	// If we got a full batch, request more.
+	if headerCount == MaxHeadersPerMsg {
+		peer.SendMessage(bs.server.config.Magic, &MsgGetHeaders{
+			StartHash: prevHash,
+			StopHash:  crypto.Hash{},
+		})
+	} else {
+		// Fewer than max = no more headers, transition to blocks phase.
+		bs.startBlocksPhase()
+	}
+}
+
+// startBlocksPhase transitions from headers to parallel block download.
+func (bs *BlockSyncer) startBlocksPhase() {
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+
+	if len(bs.headerChain) == 0 {
+		log.Printf("sync: no new headers, sync complete at height %d", bs.chain.Height())
+		bs.state = SyncComplete
+		bs.syncCompletedAt = time.Now()
+		bs.headerPeer = nil
+		return
+	}
+
+	// Build download queue from header chain.
+	bs.downloadQueue = make([]crypto.Hash, len(bs.headerChain))
+	for i, entry := range bs.headerChain {
+		bs.downloadQueue[i] = entry.Hash
+	}
+	bs.downloadNext = 0
+	bs.downloadBaseHeight = bs.chain.Height() + 1
+	bs.nextProcessHeight = bs.downloadBaseHeight
+	bs.activeChunks = make(map[string]*chunkInfo)
+	bs.blockBuffer = make(map[uint64]*block.Block)
+	bs.blockBufferIdx = make(map[crypto.Hash]uint64)
+	bs.state = SyncBlocksPhase
+	bs.lastProgressAt = time.Now()
+	bs.lastProgressH = bs.chain.Height()
+
+	log.Printf("sync: headers phase complete, %d blocks to download (height %d → %d)",
+		len(bs.downloadQueue), bs.nextProcessHeight, bs.nextProcessHeight+uint64(len(bs.downloadQueue))-1)
+
+	// Assign initial chunks (outside lock via goroutine since we hold mu).
+	go bs.assignChunks()
+}
+
+// assignChunks assigns download chunks to available peers.
+func (bs *BlockSyncer) assignChunks() {
+	bs.mu.Lock()
+	if bs.state != SyncBlocksPhase {
+		bs.mu.Unlock()
+		return
+	}
+
+	// Collect peers eligible for chunk assignment.
+	busyPeers := make(map[string]bool)
+	for addr := range bs.activeChunks {
+		busyPeers[addr] = true
+	}
+
+	// Check buffer limit — pause assignment if buffer is full.
+	if len(bs.blockBuffer) >= MaxBufferedBlocks {
+		bs.mu.Unlock()
+		return
+	}
+
+	badPeers := make(map[string]bool, len(bs.badSyncPeers))
+	for addr := range bs.badSyncPeers {
+		badPeers[addr] = true
+	}
+	bs.mu.Unlock()
+
+	// Find idle peers.
+	var idlePeers []*Peer
+	for _, p := range bs.server.peers.All() {
+		if p.Handshaked && !busyPeers[p.Addr] && !badPeers[p.Addr] {
+			idlePeers = append(idlePeers, p)
+		}
+	}
+
+	bs.mu.Lock()
+	for _, peer := range idlePeers {
+		if bs.downloadNext >= len(bs.downloadQueue) {
+			break
+		}
+		if len(bs.blockBuffer) >= MaxBufferedBlocks {
+			break
+		}
+
+		startIdx := bs.downloadNext
+		endIdx := startIdx + BlocksPerChunk
+		if endIdx > len(bs.downloadQueue) {
+			endIdx = len(bs.downloadQueue)
+		}
+
+		// Build getdata items for this chunk.
+		items := make([]InvItem, 0, endIdx-startIdx)
+		for i := startIdx; i < endIdx; i++ {
+			items = append(items, InvItem{Type: InvTypeBlock, Hash: bs.downloadQueue[i]})
+		}
+
+		bs.activeChunks[peer.Addr] = &chunkInfo{
+			StartIdx:   startIdx,
+			EndIdx:     endIdx,
+			AssignedAt: time.Now(),
+		}
+		bs.downloadNext = endIdx
+
+		// Send request outside of critical section concern — but peer.SendMessage is thread-safe.
+		peer.SendMessage(bs.server.config.Magic, &MsgGetData{Items: items})
+
+		log.Printf("sync: assigned chunk [%d..%d) to %s (%d blocks)",
+			startIdx, endIdx, peer.Addr, endIdx-startIdx)
+	}
+	bs.mu.Unlock()
+}
+
+// checkChunkTimeoutsLocked checks for timed-out chunks and reassigns them.
+// Must hold bs.mu.
+func (bs *BlockSyncer) checkChunkTimeoutsLocked() {
+	now := time.Now()
+	for addr, chunk := range bs.activeChunks {
+		if now.Sub(chunk.AssignedAt) > ChunkTimeout {
+			log.Printf("sync: chunk [%d..%d) from %s timed out, reassigning",
+				chunk.StartIdx, chunk.EndIdx, addr)
+			// Rewind downloadNext to the first undelivered block in this chunk.
+			for i := chunk.StartIdx; i < chunk.EndIdx; i++ {
+				h := bs.downloadBaseHeight + uint64(i)
+				if h < bs.nextProcessHeight {
+					continue // already processed
+				}
+				if _, ok := bs.blockBuffer[h]; !ok {
+					if i < bs.downloadNext {
+						bs.downloadNext = i
+					}
+					break
+				}
+			}
+			delete(bs.activeChunks, addr)
+		}
+	}
+}
+
+// handleBlockV2 processes a block received during parallel download phase.
+// Called from handleBlock when state is SyncBlocksPhase.
+func (bs *BlockSyncer) handleBlockV2(peer *Peer, blk *block.Block, blockHash crypto.Hash) {
+	bs.mu.Lock()
+
+	// Find this block's index in downloadQueue to compute expected height.
+	idx := bs.indexOfHash(blockHash)
+	if idx < 0 {
+		// Not part of our download — might be a relay block. Process normally.
+		bs.mu.Unlock()
+		// Fall through to standard block processing for relay blocks.
+		newHeight, err := bs.chain.AddBlock(blk)
+		if err == nil {
+			log.Printf("sync: v2 accepted relay block %x at height %d", blockHash[:8], newHeight)
+			bs.server.SetBlockHeight(newHeight)
+			bs.server.mempool.RemoveConfirmed(blk.Transactions)
+		}
+		return
+	}
+
+	expectedHeight := bs.downloadBaseHeight + uint64(idx)
+
+	// Already processed?
+	if expectedHeight < bs.nextProcessHeight {
+		bs.mu.Unlock()
+		return
+	}
+
+	// Store in buffer.
+	bs.blockBuffer[expectedHeight] = blk
+	bs.blockBufferIdx[blockHash] = expectedHeight
+
+	// Check if peer's chunk is fully received.
+	if chunk, ok := bs.activeChunks[peer.Addr]; ok {
+		allReceived := true
+		for i := chunk.StartIdx; i < chunk.EndIdx; i++ {
+			h := bs.downloadBaseHeight + uint64(i)
+			if h < bs.nextProcessHeight {
+				continue // already processed
+			}
+			if _, ok := bs.blockBuffer[h]; !ok {
+				allReceived = false
+				break
+			}
+		}
+		if allReceived {
+			delete(bs.activeChunks, peer.Addr)
+		}
+	}
+
+	bs.mu.Unlock()
+
+	// Process buffered blocks in order.
+	bs.processBlockBuffer()
+
+	// Assign more chunks to idle peers.
+	bs.assignChunks()
+}
+
+// indexOfHash returns the index in downloadQueue for the given hash, or -1.
+func (bs *BlockSyncer) indexOfHash(hash crypto.Hash) int {
+	for i, h := range bs.downloadQueue {
+		if h == hash {
+			return i
+		}
+	}
+	return -1
+}
+
+// processBlockBuffer processes buffered blocks in height order.
+func (bs *BlockSyncer) processBlockBuffer() {
+	for {
+		bs.mu.Lock()
+		blk, ok := bs.blockBuffer[bs.nextProcessHeight]
+		if !ok {
+			bs.mu.Unlock()
+			return
+		}
+		height := bs.nextProcessHeight
+		delete(bs.blockBuffer, height)
+		// Clean up reverse lookup.
+		hash := blk.Header.Hash()
+		delete(bs.blockBufferIdx, hash)
+		bs.mu.Unlock()
+
+		newHeight, err := bs.chain.AddBlock(blk)
+		if err != nil {
+			log.Printf("sync: v2 reject block %x at expected height %d: %v", hash[:8], height, err)
+			// Block invalid — reset entire sync.
+			bs.mu.Lock()
+			bs.resetHeadersSyncLocked()
+			bs.mu.Unlock()
+			return
+		}
+
+		log.Printf("sync: v2 accepted block %x at height %d", hash[:8], newHeight)
+		bs.server.SetBlockHeight(newHeight)
+		bs.server.mempool.RemoveConfirmed(blk.Transactions)
+
+		bs.mu.Lock()
+		bs.nextProcessHeight = newHeight + 1
+		bs.lastProgressH = newHeight
+		bs.lastProgressAt = time.Now()
+		bs.mu.Unlock()
+
+		// Relay to other peers.
+		payload, err := EncodeBlock(blk)
+		if err == nil {
+			bs.relayBlock(nil, &MsgBlock{Payload: payload})
+		}
+	}
 }
 
 // --- block serialization helpers ---
