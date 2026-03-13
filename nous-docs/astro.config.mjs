@@ -9,7 +9,7 @@ export default defineConfig({
       description: 'Documentation for the NOUS blockchain — Cogito Consensus',
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/nous-reasoner/nous' },
-        { icon: 'x.com', label: 'Twitter', href: 'https://x.com/nouschain' },
+        { icon: 'x.com', label: 'Twitter', href: 'https://x.com/nous_poi' },
       ],
       customCss: ['./src/styles/custom.css'],
       sidebar: [
@@ -27,6 +27,7 @@ export default defineConfig({
             { label: 'Download & Install', slug: 'getting-started/install' },
             { label: 'Quick Start', slug: 'getting-started/quickstart' },
             { label: 'Create a Wallet', slug: 'getting-started/wallet' },
+            { label: 'Run a Full Node', slug: 'guides/run-a-node' },
           ],
         },
         {

@@ -21,7 +21,7 @@ nousd [flags]
 
 ```bash
 nousd --port 8333 --rpcport 8332 \
-  --seeds 80.78.25.211:8333,80.78.26.244:8333
+  --seeds seed1.nouschain.org:8333,seed2.nouschain.org:8333,seed3.nouschain.org:8333
 ```
 
 ## Miner
