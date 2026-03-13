@@ -26,9 +26,11 @@ const (
 
 // Stale sync detection.
 const (
-	SyncStaleTimeout  = 120 * time.Second // reset sync if no progress for this long
-	PendingExpiry     = 120 * time.Second // drop pending entries older than this
-	OrphanRetryPeriod = 30 * time.Second  // retry getblocks if orphans pile up with no height gain
+	SyncStaleTimeout   = 120 * time.Second // reset sync if no progress for this long
+	PendingExpiry      = 120 * time.Second // drop pending entries older than this
+	OrphanRetryPeriod  = 30 * time.Second  // retry getblocks if orphans pile up with no height gain
+	MaxOrphanRetries   = 3                 // switch peer after this many orphan retries without progress
+	BadPeerCooldown    = 10 * time.Minute  // ignore bad sync peer for this long
 )
 
 // SyncState tracks the current synchronization status.
@@ -88,11 +90,15 @@ type BlockSyncer struct {
 	syncStartedAt   time.Time                     // when current sync started
 	lastProgressAt  time.Time                     // last time chain height increased during sync
 	lastProgressH   uint64                        // chain height at lastProgressAt
-	lastOrphanRetry time.Time                     // rate-limit orphan retry getblocks
+	lastOrphanRetry  time.Time // rate-limit orphan retry getblocks
+	orphanRetryCount int       // consecutive orphan retries without progress
 
 	// Orphan pool: blocks whose parents are not yet known.
 	orphans        map[crypto.Hash]*orphanBlock             // block hash → orphan
 	orphanByParent map[crypto.Hash]map[crypto.Hash]struct{} // parent hash → set of orphan hashes
+
+	// Bad sync peers: temporarily skip peers that send too many orphans.
+	badSyncPeers map[string]time.Time // peer addr → when marked bad
 }
 
 // NewBlockSyncer creates a new block syncer.
@@ -106,6 +112,7 @@ func NewBlockSyncer(server *Server, chain ChainAccess) *BlockSyncer {
 		blockChan:      make(chan *block.Block, 64),
 		orphans:        make(map[crypto.Hash]*orphanBlock),
 		orphanByParent: make(map[crypto.Hash]map[crypto.Hash]struct{}),
+		badSyncPeers:   make(map[string]time.Time),
 		lastProgressAt: now,
 		lastProgressH:  chain.Height(),
 	}
@@ -193,21 +200,41 @@ func (bs *BlockSyncer) TriggerSync() {
 				bs.evictStalePendingLocked()
 				bs.clearOrphansLocked()
 			} else if len(bs.orphans) > 0 && time.Since(bs.lastProgressAt) > OrphanRetryPeriod && time.Since(bs.lastOrphanRetry) > OrphanRetryPeriod {
-				// Orphans piling up with no height gain — resend getblocks.
-				peer := bs.syncPeer
+				// Orphans piling up with no height gain.
+				bs.orphanRetryCount++
 				bs.lastOrphanRetry = time.Now()
-				bs.evictStalePendingLocked()
-				bs.mu.Unlock()
-				if peer != nil {
-					tipHash := bs.chain.TipHash()
-					log.Printf("sync: %d orphans with no progress for %s, retrying getblocks from tip",
-						len(bs.orphans), OrphanRetryPeriod)
-					peer.SendMessage(bs.server.config.Magic, &MsgGetBlocks{
-						StartHash: tipHash,
-						StopHash:  crypto.Hash{},
-					})
+
+				if bs.orphanRetryCount >= MaxOrphanRetries {
+					// Too many retries — mark this peer as bad and switch.
+					badAddr := ""
+					if bs.syncPeer != nil {
+						badAddr = bs.syncPeer.Addr
+						bs.badSyncPeers[badAddr] = time.Now()
+					}
+					log.Printf("sync: %d orphans after %d retries from %s, switching peer",
+						len(bs.orphans), bs.orphanRetryCount, badAddr)
+					bs.state = SyncIdle
+					bs.syncPeer = nil
+					bs.orphanRetryCount = 0
+					bs.evictStalePendingLocked()
+					bs.clearOrphansLocked()
+					// Fall through to select a new peer below.
+				} else {
+					// Retry with same peer.
+					peer := bs.syncPeer
+					bs.evictStalePendingLocked()
+					bs.mu.Unlock()
+					if peer != nil {
+						tipHash := bs.chain.TipHash()
+						log.Printf("sync: %d orphans with no progress for %s, retrying getblocks from tip (attempt %d/%d)",
+							len(bs.orphans), OrphanRetryPeriod, bs.orphanRetryCount, MaxOrphanRetries)
+						peer.SendMessage(bs.server.config.Magic, &MsgGetBlocks{
+							StartHash: tipHash,
+							StopHash:  crypto.Hash{},
+						})
+					}
+					return
 				}
-				return
 			} else {
 				bs.mu.Unlock()
 				return
@@ -221,11 +248,30 @@ func (bs *BlockSyncer) TriggerSync() {
 	}
 	bs.mu.Unlock()
 
-	best := bs.server.peers.BestPeer()
-	if best == nil {
-		return
+	// Clean up expired bad peer entries.
+	bs.mu.Lock()
+	for addr, t := range bs.badSyncPeers {
+		if time.Since(t) > BadPeerCooldown {
+			delete(bs.badSyncPeers, addr)
+		}
 	}
-	if !best.Handshaked {
+	badPeers := make(map[string]bool, len(bs.badSyncPeers))
+	for addr := range bs.badSyncPeers {
+		badPeers[addr] = true
+	}
+	bs.mu.Unlock()
+
+	// Select best peer, skipping bad ones.
+	var best *Peer
+	for _, p := range bs.server.peers.All() {
+		if !p.Handshaked || badPeers[p.Addr] {
+			continue
+		}
+		if best == nil || p.BlockHeight > best.BlockHeight {
+			best = p
+		}
+	}
+	if best == nil {
 		return
 	}
 	bs.SyncFromPeer(best)
@@ -403,6 +449,7 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 		bs.mu.Lock()
 		bs.lastProgressH = newHeight
 		bs.lastProgressAt = time.Now()
+		bs.orphanRetryCount = 0 // reset on successful progress
 		bs.mu.Unlock()
 
 		// Update server's advertised height.
