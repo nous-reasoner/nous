@@ -161,6 +161,7 @@
         <div>Height <span id="statHeight" class="text-nous font-bold">—</span></div>
         <div>Difficulty <span id="statDifficulty" class="text-white font-bold">—</span></div>
         <div>Peers <span id="statPeers" class="text-white font-bold">—</span></div>
+        <div>Mempool <span id="statMempool" class="text-white font-bold">—</span></div>
         <div>Target <span class="text-white font-bold">150s</span></div>
         <div class="ml-auto flex items-center gap-2">
             <a href="#block/0" class="badge-genesis rounded text-xs font-bold cursor-pointer transition" style="padding:2px 8px;">⭐ Genesis</a>
@@ -437,10 +438,14 @@ async function fetchRecent() {
 
 async function updateStatus() {
     try {
-        const data = await fetchRecent();
+        const [data, miningInfo] = await Promise.all([
+            fetchRecent(),
+            rpc('getmininginfo')
+        ]);
         document.getElementById('statHeight').textContent = data.height.toLocaleString();
         document.getElementById('statDifficulty').textContent = diffBitsToMultiplier(data.difficulty_bits) + 'x';
         document.getElementById('statPeers').textContent = data.peers;
+        document.getElementById('statMempool').textContent = miningInfo.mempool_size + ' tx';
         document.getElementById('statUpdated').textContent = formatTimeShort();
     } catch (e) {
         document.getElementById('statUpdated').textContent = 'error';
