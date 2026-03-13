@@ -16,8 +16,8 @@
   "build": {
     "appId": "org.nouschain.reasoner",
     "productName": "NOUS Reasoner",
-    "files": ["src/**/*", "public/**/*", "backend/miner", "backend/miner.exe", "backend/wallet-backend", "backend/wallet-backend.exe"],
-    "asarUnpack": ["backend/miner", "backend/miner.exe", "backend/wallet-backend", "backend/wallet-backend.exe"],
+    "files": ["src/**/*", "public/**/*", "backend/miner", "backend/miner.exe", "backend/miner-linux-amd64", "backend/wallet-backend", "backend/wallet-backend.exe", "backend/wallet-backend-linux-amd64"],
+    "asarUnpack": ["backend/*"],
     "mac": {
       "category": "public.app-category.finance",
       "target": ["dmg", "zip"]
@@ -31,7 +31,11 @@
       "createStartMenuShortcut": true
     },
     "linux": {
-      "target": ["AppImage", "deb"]
+      "target": ["AppImage"],
+      "extraResources": [
+        { "from": "backend/miner-linux-amd64", "to": "app.asar.unpacked/backend/miner" },
+        { "from": "backend/wallet-backend-linux-amd64", "to": "app.asar.unpacked/backend/wallet-backend" }
+      ]
     }
   }
 }
