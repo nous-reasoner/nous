@@ -11,8 +11,16 @@ Get the latest release from GitHub:
 
 | Platform | File |
 |----------|------|
-| macOS (Apple Silicon) | `NOUS Reasoner-x.x.x-arm64.dmg` |
-| Linux x64 | `NOUS Reasoner-x.x.x.AppImage` |
+| Windows x64 | `NOUS.Reasoner.Setup.x.x.x.exe` |
+| macOS (Apple Silicon) | `NOUS.Reasoner-x.x.x-arm64.dmg` |
+| Linux x64 | `NOUS.Reasoner-x.x.x.AppImage` |
+
+## Windows Installation
+
+1. Download the `.exe` installer
+2. Run the installer and follow the prompts
+3. Launch **NOUS Reasoner** from the Start menu or desktop shortcut
+4. Windows Defender may show a warning (unsigned app) — click **More info** → **Run anyway**
 
 ## macOS Installation
 
@@ -59,6 +67,6 @@ npm start
 
 ## System Requirements
 
-- macOS 12+ (Apple Silicon) or Linux x64
+- Windows 10+ (x64), macOS 12+ (Apple Silicon), or Linux x64
 - 4GB RAM minimum
 - Internet connection for RPC communication

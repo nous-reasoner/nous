@@ -7,7 +7,7 @@ Running a full node strengthens the NOUS network by independently validating eve
 
 ## Requirements
 
-- **OS**: Linux (x64) or macOS
+- **OS**: Linux (x64), macOS, or Windows 10+ (x64)
 - **Go**: 1.24 or later
 - **RAM**: 2 GB minimum
 - **Disk**: 1 GB (grows over time)
