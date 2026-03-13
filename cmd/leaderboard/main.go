@@ -52,35 +52,77 @@ type rpcErr struct{ msg string }
 
 func (e *rpcErr) Error() string { return e.msg }
 
-// countNetworkNodes counts unique nodes by querying local getpeerinfo,
-// deduplicating by IP, and adding 1 for ourselves.
+// rpcTo calls an RPC method on a specific node URL.
+func rpcTo(url, method string, params ...any) (json.RawMessage, error) {
+	body, _ := json.Marshal(rpcRequest{Method: method, Params: params, ID: 1})
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(url, "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var r rpcResponse
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return nil, err
+	}
+	if r.Error != nil {
+		return nil, &rpcErr{r.Error.Message}
+	}
+	return r.Result, nil
+}
+
+// seedRPCURLs lists all seed node RPC endpoints for cross-node queries.
+var seedRPCURLs = []string{
+	"http://80.78.26.7:8332/rpc",
+	"http://80.78.25.211:8332/rpc",
+	"http://80.78.26.244:8332/rpc",
+}
+
+// seedHosts contains all known seed node IPs and hostnames to avoid double-counting.
+var seedHosts = map[string]bool{
+	"80.78.26.7": true, "80.78.25.211": true, "80.78.26.244": true,
+	"seed1.nouschain.org": true, "seed2.nouschain.org": true, "seed3.nouschain.org": true,
+}
+
+// countNetworkNodes queries all seed nodes' getpeerinfo, deduplicates by IP,
+// and returns total unique node count (seeds + external).
 func countNetworkNodes() int {
 	type peerInfo struct {
 		Addr string `json:"addr"`
 	}
 
-	raw, err := rpc("getpeerinfo")
-	if err != nil {
-		return 1
-	}
-	var peers []peerInfo
-	if json.Unmarshal(raw, &peers) != nil {
-		return 1
-	}
-
 	uniqueIPs := make(map[string]bool)
-	for _, p := range peers {
-		host := p.Addr
-		// Strip port to get IP.
-		if idx := strings.LastIndex(host, ":"); idx > 0 {
-			host = host[:idx]
+
+	for _, seedURL := range seedRPCURLs {
+		raw, err := rpcTo(seedURL, "getpeerinfo")
+		if err != nil {
+			continue
 		}
-		// Resolve domain names (e.g. seed2.nouschain.org) to avoid counting twice.
-		uniqueIPs[host] = true
+		var peers []peerInfo
+		if json.Unmarshal(raw, &peers) != nil {
+			continue
+		}
+		for _, p := range peers {
+			host := p.Addr
+			if idx := strings.LastIndex(host, ":"); idx > 0 {
+				host = host[:idx]
+			}
+			uniqueIPs[host] = true
+		}
 	}
 
-	// +1 for ourselves.
-	return len(uniqueIPs) + 1
+	// Count: 3 seed nodes + unique external IPs.
+	nodeCount := 3 // 3 seed nodes
+	for ip := range uniqueIPs {
+		if !seedHosts[ip] {
+			nodeCount++
+		}
+	}
+	if nodeCount < 1 {
+		nodeCount = 1
+	}
+	return nodeCount
 }
 
 type minerStat struct {
