@@ -360,6 +360,7 @@ func (s *Server) broadcastAddresses() {
 }
 
 // autoConnect tries to fill outbound slots from the address book.
+// Seed nodes are always retried regardless of failure count.
 func (s *Server) autoConnect() {
 	// Count current outbound peers.
 	outbound := 0
@@ -368,7 +369,36 @@ func (s *Server) autoConnect() {
 		if !p.Inbound {
 			outbound++
 		}
+		// Track both outbound addr and inbound addr (peer may connect to us).
 		connected[p.Addr] = true
+	}
+
+	// Always retry seed nodes first — seeds must stay connected.
+	seedSet := make(map[string]bool)
+	for _, seed := range s.config.Seeds {
+		seedSet[seed] = true
+		if connected[seed] {
+			continue
+		}
+		// Check if seed is already connected as inbound (different port).
+		alreadyConnected := false
+		seedHost, _, _ := net.SplitHostPort(seed)
+		for _, p := range s.peers.All() {
+			peerHost, _, _ := net.SplitHostPort(p.Addr)
+			if peerHost == seedHost {
+				alreadyConnected = true
+				break
+			}
+		}
+		if alreadyConnected {
+			continue
+		}
+		if s.protection.IsBanned(seed) {
+			continue
+		}
+		if err := s.Connect(seed); err == nil {
+			outbound++
+		}
 	}
 
 	if outbound >= MaxOutbound {
@@ -382,7 +412,7 @@ func (s *Server) autoConnect() {
 			break
 		}
 		key := net.JoinHostPort(addr.IP, fmt.Sprintf("%d", addr.Port))
-		if connected[key] {
+		if connected[key] || seedSet[key] {
 			continue
 		}
 		if s.protection.IsBanned(key) {
