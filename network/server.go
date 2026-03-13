@@ -373,6 +373,13 @@ func (s *Server) autoConnect() {
 		connected[p.Addr] = true
 	}
 
+	// Build a set of connected peer IPs (resolved) for dedup.
+	connectedIPs := make(map[string]bool)
+	for _, p := range s.peers.All() {
+		peerHost, _, _ := net.SplitHostPort(p.Addr)
+		connectedIPs[peerHost] = true
+	}
+
 	// Always retry seed nodes first — seeds must stay connected.
 	seedSet := make(map[string]bool)
 	for _, seed := range s.config.Seeds {
@@ -380,14 +387,18 @@ func (s *Server) autoConnect() {
 		if connected[seed] {
 			continue
 		}
-		// Check if seed is already connected as inbound (different port).
-		alreadyConnected := false
+		// Resolve seed hostname to IP and check if already connected.
 		seedHost, _, _ := net.SplitHostPort(seed)
-		for _, p := range s.peers.All() {
-			peerHost, _, _ := net.SplitHostPort(p.Addr)
-			if peerHost == seedHost {
-				alreadyConnected = true
-				break
+		alreadyConnected := connectedIPs[seedHost]
+		if !alreadyConnected {
+			// Seed may be a domain name — resolve to IPs and check.
+			if ips, err := net.LookupHost(seedHost); err == nil {
+				for _, ip := range ips {
+					if connectedIPs[ip] {
+						alreadyConnected = true
+						break
+					}
+				}
 			}
 		}
 		if alreadyConnected {
