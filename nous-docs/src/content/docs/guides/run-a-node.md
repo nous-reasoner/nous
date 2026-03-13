@@ -168,10 +168,27 @@ In the Reasoner GUI, set the node URL to `http://127.0.0.1:8332/rpc` in settings
 - Check that port 8333 is open and reachable
 - Verify you have at least 1 peer: use the `getpeerinfo` RPC call above
 - Restart the node — it will resume sync from where it left off (blockchain data is persisted)
+- If your log shows many `orphan block` messages, your node may be syncing from a peer with an incompatible chain. The node will automatically switch to a better peer after a few retries
+
+### Disconnected from seed nodes
+
+Seed nodes may occasionally restart for maintenance. Your node will **automatically reconnect** — no action needed. If you use systemd with `Restart=always`, your node recovers from any interruption automatically.
+
+If you stay disconnected for more than a few minutes:
+
+```bash
+# Check your peers
+curl -s -X POST http://127.0.0.1:8332/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"method":"getpeerinfo","params":null,"id":1}'
+```
+
+If you have 0 peers, restart your node. It will reconnect to seeds on startup.
 
 ### No peers connecting
 
-- Make sure `--seeds` is set correctly
+- Make sure `--seeds` is set correctly with all three seeds:
+  `seed1.nouschain.org:8333,seed2.nouschain.org:8333,seed3.nouschain.org:8333`
 - Check your firewall allows outbound connections on port 8333
 - If behind NAT, configure port forwarding for port 8333
 
