@@ -55,7 +55,7 @@ func (e *rpcErr) Error() string { return e.msg }
 // rpcTo calls an RPC method on a specific node URL.
 func rpcTo(url, method string, params ...any) (json.RawMessage, error) {
 	body, _ := json.Marshal(rpcRequest{Method: method, Params: params, ID: 1})
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post(url, "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		return nil, err
@@ -85,8 +85,18 @@ var seedHosts = map[string]bool{
 	"seed1.nouschain.org": true, "seed2.nouschain.org": true, "seed3.nouschain.org": true,
 }
 
+// cached node count to smooth over transient RPC failures
+var (
+	cachedNodeCount int
+	cachedNodeTime  time.Time
+)
+
+const nodeCountCacheTTL = 5 * time.Minute
+
 // countNetworkNodes queries all seed nodes' getpeerinfo, deduplicates by IP,
 // and returns total unique node count (seeds + external).
+// Uses a 5-minute cache: if the fresh count is lower due to RPC failures,
+// the cached value is returned until it expires.
 func countNetworkNodes() int {
 	type peerInfo struct {
 		Addr string `json:"addr"`
@@ -94,16 +104,44 @@ func countNetworkNodes() int {
 
 	uniqueIPs := make(map[string]bool)
 
-	for _, seedURL := range seedRPCURLs {
-		raw, err := rpcTo(seedURL, "getpeerinfo")
-		if err != nil {
-			continue
-		}
+	// Query local node first (always fast, no network hop).
+	if raw, err := rpc("getpeerinfo"); err == nil {
 		var peers []peerInfo
-		if json.Unmarshal(raw, &peers) != nil {
-			continue
+		if json.Unmarshal(raw, &peers) == nil {
+			for _, p := range peers {
+				host := p.Addr
+				if idx := strings.LastIndex(host, ":"); idx > 0 {
+					host = host[:idx]
+				}
+				uniqueIPs[host] = true
+			}
 		}
-		for _, p := range peers {
+	}
+
+	// Query remote seed nodes in parallel.
+	type result struct {
+		peers []peerInfo
+	}
+	results := make([]result, len(seedRPCURLs))
+	var wg sync.WaitGroup
+	for i, seedURL := range seedRPCURLs {
+		wg.Add(1)
+		go func(i int, url string) {
+			defer wg.Done()
+			raw, err := rpcTo(url, "getpeerinfo")
+			if err != nil {
+				return
+			}
+			var peers []peerInfo
+			if json.Unmarshal(raw, &peers) == nil {
+				results[i] = result{peers: peers}
+			}
+		}(i, seedURL)
+	}
+	wg.Wait()
+
+	for _, r := range results {
+		for _, p := range r.peers {
 			host := p.Addr
 			if idx := strings.LastIndex(host, ":"); idx > 0 {
 				host = host[:idx]
@@ -122,7 +160,13 @@ func countNetworkNodes() int {
 	if nodeCount < 1 {
 		nodeCount = 1
 	}
-	return nodeCount
+
+	// Cache: only update if fresh count is >= cached, or cache expired.
+	if nodeCount >= cachedNodeCount || time.Since(cachedNodeTime) > nodeCountCacheTTL {
+		cachedNodeCount = nodeCount
+		cachedNodeTime = time.Now()
+	}
+	return cachedNodeCount
 }
 
 type minerStat struct {
