@@ -1213,6 +1213,14 @@ func (bs *BlockSyncer) processBlockBuffer() {
 		bs.server.SetBlockHeight(newHeight)
 		bs.server.mempool.RemoveConfirmed(blk.Transactions)
 
+		// Update BlockHeight on all peers that served us blocks,
+		// so getpeerinfo stays accurate.
+		for _, p := range bs.server.peers.All() {
+			if p.Handshaked && newHeight > p.BlockHeight {
+				p.BlockHeight = newHeight
+			}
+		}
+
 		bs.mu.Lock()
 		bs.nextProcessHeight = newHeight + 1
 		bs.lastProgressH = newHeight
