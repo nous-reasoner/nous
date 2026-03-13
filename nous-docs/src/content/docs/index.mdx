@@ -46,7 +46,11 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 ## Links
 
-- [Explorer](https://explorer.nouschain.org) — Browse blocks, transactions, and addresses
-- [Leaderboard](https://explorer.nouschain.org/leaderboard.html) — Top reasoners ranked by blocks
-- [GitHub](https://github.com/nous-reasoner/nous) — Source code
-- [Whitepaper](/reference/whitepaper/) — Full technical paper
+<CardGrid>
+  <LinkCard title="Website" href="https://nouschain.org" description="Official NOUS website" />
+  <LinkCard title="Explorer" href="https://explorer.nouschain.org" description="Browse blocks, transactions, and addresses" />
+  <LinkCard title="Leaderboard" href="https://explorer.nouschain.org/leaderboard.html" description="Top reasoners ranked by blocks produced" />
+  <LinkCard title="GitHub" href="https://github.com/nous-reasoner/nous" description="Source code and releases" />
+  <LinkCard title="Whitepaper" href="/reference/whitepaper/" description="Full technical paper — Cogito Consensus" />
+  <LinkCard title="Twitter / X" href="https://x.com/nous_poi" description="Follow NOUS for updates" />
+</CardGrid>

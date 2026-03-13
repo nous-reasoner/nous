@@ -14,8 +14,21 @@
   --sl-font-mono: 'JetBrains Mono', 'Courier New', monospace;
 }
 
+/* Hide "auto" option from theme selector — only dark/light */
+starlight-theme-select option[value="auto"] {
+  display: none;
+}
+
 [data-theme='light'] {
   --sl-color-accent-low: #d1ffe6;
   --sl-color-accent: #008844;
   --sl-color-accent-high: #003d1f;
+  --sl-color-white: #181818;
+  --sl-color-gray-1: #272727;
+  --sl-color-gray-2: #484848;
+  --sl-color-gray-3: #707070;
+  --sl-color-gray-4: #999999;
+  --sl-color-gray-5: #d0d0d0;
+  --sl-color-gray-6: #eeeeee;
+  --sl-color-black: #ffffff;
 }
