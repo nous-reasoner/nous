@@ -52,6 +52,37 @@ type rpcErr struct{ msg string }
 
 func (e *rpcErr) Error() string { return e.msg }
 
+// countNetworkNodes counts unique nodes by querying local getpeerinfo,
+// deduplicating by IP, and adding 1 for ourselves.
+func countNetworkNodes() int {
+	type peerInfo struct {
+		Addr string `json:"addr"`
+	}
+
+	raw, err := rpc("getpeerinfo")
+	if err != nil {
+		return 1
+	}
+	var peers []peerInfo
+	if json.Unmarshal(raw, &peers) != nil {
+		return 1
+	}
+
+	uniqueIPs := make(map[string]bool)
+	for _, p := range peers {
+		host := p.Addr
+		// Strip port to get IP.
+		if idx := strings.LastIndex(host, ":"); idx > 0 {
+			host = host[:idx]
+		}
+		// Resolve domain names (e.g. seed2.nouschain.org) to avoid counting twice.
+		uniqueIPs[host] = true
+	}
+
+	// +1 for ourselves.
+	return len(uniqueIPs) + 1
+}
+
 type minerStat struct {
 	Address    string  `json:"address"`
 	Blocks     int     `json:"blocks"`
@@ -270,14 +301,8 @@ func fetchRecentBlocks(height int) recentBlocksData {
 		}
 	}
 
-	// Fetch peer count
-	peers := 0
-	if raw, err := rpc("getpeerinfo"); err == nil {
-		var peerList []json.RawMessage
-		if json.Unmarshal(raw, &peerList) == nil {
-			peers = len(peerList)
-		}
-	}
+	// Fetch network-wide unique node count by querying all seed nodes.
+	peers := countNetworkNodes()
 
 	// Get current difficulty from mining info
 	var diffBits int64
