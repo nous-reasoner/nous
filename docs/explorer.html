@@ -330,6 +330,29 @@ function updateTzButton() {
     if (btn) btn.textContent = tzPref === 'utc' ? 'UTC' : 'Local';
 }
 
+function hexToVarGrid(hex) {
+    let bits = [];
+    for (let i = 0; i < hex.length; i++) {
+        const nibble = parseInt(hex[i], 16).toString(2).padStart(4, '0');
+        for (const b of nibble) bits.push(b === '1');
+    }
+    // 16x16 grid, each cell shows variable number (x1..x256)
+    let html = '<div style="display:grid;grid-template-columns:repeat(16,1fr);gap:3px;">';
+    for (let i = 0; i < 256; i++) {
+        const isTrue = bits[i];
+        const bg = isTrue ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.03)';
+        const color = isTrue ? '#00ff88' : '#4b5563';
+        const label = isTrue ? 'T' : 'F';
+        html += `<div style="background:${bg};border:1px solid ${isTrue ? 'rgba(0,255,136,0.3)' : '#222'};border-radius:3px;padding:2px 0;text-align:center;font-size:9px;" title="x${i+1} = ${isTrue ? 'True' : 'False'}">` +
+            `<div style="color:${color};font-weight:bold;">${label}</div>` +
+            `<div style="color:#666;font-size:8px;">x${i+1}</div></div>`;
+    }
+    html += '</div>';
+    const trueCount = bits.filter(b => b).length;
+    html += `<div style="margin-top:8px;font-size:11px;color:#9ca3af;text-align:center;">${trueCount} of 256 variables set to True</div>`;
+    return html;
+}
+
 function isCoinbaseInput(input) {
     return input.prev_txid === '0000000000000000000000000000000000000000000000000000000000000000';
 }
@@ -591,6 +614,14 @@ async function renderBlock(heightStr) {
                         <div class="text-nous text-lg font-bold font-mono">${block.seed}</div>
                     </div>
                 </div>
+                ${block.sat_solution ? `
+                <div class="mt-3">
+                    <div class="text-gray-500 text-xs uppercase tracking-wider mb-2">SAT Solution — 256 Variables Assignment</div>
+                    <div class="bg-bg rounded p-3">
+                        ${hexToVarGrid(block.sat_solution)}
+                    </div>
+                    <div class="mt-2 text-gray-600 text-xs">Solution Hash: <span class="font-mono">${block.sat_solution_hash}</span></div>
+                </div>` : ''}
                 <div class="mt-3 text-center text-nous text-sm">Verified</div>
             </div>
 
@@ -614,9 +645,10 @@ async function renderTx(txid) {
     app.innerHTML = '<div class="text-gray-500 py-20 text-center">Loading transaction...</div>';
 
     try {
-        const t = await rpc('gettx', [txid]);
-
-        const info = await rpc('getmininginfo');
+        const [t, info] = await Promise.all([
+            rpc('gettx', [txid]),
+            rpc('getmininginfo')
+        ]);
         const currentHeight = info.height;
         const confirmations = t.block_height !== undefined ? currentHeight - t.block_height + 1 : 0;
 
@@ -710,7 +742,7 @@ async function lookupAddress() {
             <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2">UTXOs (${utxos.length})</h3>
             <div class="space-y-1">
                 ${utxos.length === 0 ? '<div class="text-gray-600 py-4 text-center text-sm">No spendable UTXOs</div>' :
-                utxos.map(u => `
+                utxos.slice().sort((a, b) => b.height - a.height).map(u => `
                     <div class="bg-card border border-border rounded px-4 py-2 text-sm flex flex-col sm-flex-row sm-justify-between sm-items-center gap-1">
                         <div>
                             <a href="#tx/${u.txid}" class="font-mono text-xs text-nous">${shortHash(u.txid)}</a>

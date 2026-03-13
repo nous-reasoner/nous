@@ -192,18 +192,32 @@ func (r *RPCServer) handleGetBlock(params json.RawMessage) (interface{}, *rpcErr
 			}
 		}
 	}
+	// Encode SAT solution as compact hex string (1 bit per variable, MSB first).
+	satSolHex := ""
+	if len(blk.SATSolution) > 0 {
+		nBytes := (len(blk.SATSolution) + 7) / 8
+		buf := make([]byte, nBytes)
+		for i, v := range blk.SATSolution {
+			if v {
+				buf[i/8] |= 1 << (7 - uint(i%8))
+			}
+		}
+		satSolHex = hex.EncodeToString(buf)
+	}
 	return map[string]interface{}{
-		"hash":          hex.EncodeToString(hash[:]),
-		"height":        height,
-		"version":       blk.Header.Version,
-		"timestamp":     blk.Header.Timestamp,
-		"prev_hash":     hex.EncodeToString(blk.Header.PrevBlockHash[:]),
-		"merkle_root":   hex.EncodeToString(blk.Header.MerkleRoot[:]),
-		"difficulty":    blk.Header.DifficultyBits,
-		"seed":          blk.Header.Seed,
-		"tx_count":      len(blk.Transactions),
-		"transactions":  txIDs,
-		"miner_address": minerAddr,
+		"hash":              hex.EncodeToString(hash[:]),
+		"height":            height,
+		"version":           blk.Header.Version,
+		"timestamp":         blk.Header.Timestamp,
+		"prev_hash":         hex.EncodeToString(blk.Header.PrevBlockHash[:]),
+		"merkle_root":       hex.EncodeToString(blk.Header.MerkleRoot[:]),
+		"difficulty":        blk.Header.DifficultyBits,
+		"seed":              blk.Header.Seed,
+		"tx_count":          len(blk.Transactions),
+		"transactions":      txIDs,
+		"miner_address":     minerAddr,
+		"sat_solution":      satSolHex,
+		"sat_solution_hash": hex.EncodeToString(blk.Header.SATSolutionHash[:]),
 	}, nil
 }
 

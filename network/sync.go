@@ -408,6 +408,11 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 		// Update server's advertised height.
 		bs.server.SetBlockHeight(newHeight)
 
+		// Update peer's known height so getpeerinfo stays accurate.
+		if newHeight > peer.BlockHeight {
+			peer.BlockHeight = newHeight
+		}
+
 		// Remove confirmed transactions from mempool.
 		bs.server.mempool.RemoveConfirmed(blk.Transactions)
 
@@ -525,6 +530,9 @@ func (bs *BlockSyncer) processOrphans(acceptedHash crypto.Hash, peer *Peer) {
 			}
 			log.Printf("sync: accepted orphan block %x at height %d", o.Hash[:8], newHeight)
 			bs.server.SetBlockHeight(newHeight)
+			if newHeight > peer.BlockHeight {
+				peer.BlockHeight = newHeight
+			}
 			bs.server.mempool.RemoveConfirmed(o.Block.Transactions)
 			// Queue this block's hash so its children are processed next.
 			worklist = append(worklist, o.Hash)
