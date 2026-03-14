@@ -754,9 +754,10 @@ async function lookupAddress() {
     resultEl.innerHTML = '<div class="text-gray-500 py-8 text-center">Loading...</div>';
 
     try {
-        const [balance, utxos] = await Promise.all([
+        const [balance, utxos, history] = await Promise.all([
             rpc('getbalance', [addr]),
-            rpc('listunspent', [addr])
+            rpc('listunspent', [addr]),
+            fetchAddrHistory(addr)
         ]);
 
         resultEl.innerHTML = `
@@ -775,6 +776,21 @@ async function lookupAddress() {
                 </div>
             </div>
 
+            <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2">Transaction History (${history.length})</h3>
+            <div class="space-y-1 mb-6">
+                ${history.length === 0 ? '<div class="text-gray-600 py-4 text-center text-sm">No transactions found</div>' :
+                history.map(tx => `
+                    <div class="bg-card border border-border rounded px-4 py-2 text-sm flex flex-col sm-flex-row sm-justify-between sm-items-center gap-1">
+                        <div>
+                            <span class="text-xs ${tx.direction === 'in' ? 'text-nous' : 'text-red-400'}" style="display:inline-block;width:14px;">${tx.direction === 'in' ? '+' : '-'}</span>
+                            <a href="#tx/${tx.txid}" class="font-mono text-xs text-nous hover-underline">${shortHash(tx.txid)}</a>
+                            <a href="#block/${tx.height}" class="text-gray-600 text-xs ml-2 hover-underline">block ${tx.height}</a>
+                            <span class="text-gray-600 text-xs ml-2">${formatTime(tx.timestamp)}</span>
+                        </div>
+                        <div class="font-bold ${tx.direction === 'in' ? 'text-nous' : 'text-red-400'}">${tx.direction === 'in' ? '+' : '-'}${formatNOUS(tx.value)}</div>
+                    </div>`).join('')}
+            </div>
+
             <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2">UTXOs (${utxos.length})</h3>
             <div class="space-y-1">
                 ${utxos.length === 0 ? '<div class="text-gray-600 py-4 text-center text-sm">No spendable UTXOs</div>' :
@@ -791,6 +807,16 @@ async function lookupAddress() {
             </div>`;
     } catch (e) {
         resultEl.innerHTML = `<div class="text-red-400 py-4">${e.message}</div>`;
+    }
+}
+
+async function fetchAddrHistory(addr) {
+    try {
+        const res = await fetch('/explorer-api/address/' + addr + '/txs');
+        if (!res.ok) return [];
+        return await res.json();
+    } catch (e) {
+        return [];
     }
 }
 

@@ -1,10 +1,14 @@
 // leaderboard is a background service that scans the NOUS blockchain and
 // writes a leaderboard.json file for the block explorer frontend.
+// It also builds an in-memory address→transaction index and serves
+// an HTTP API for the explorer to query address history.
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -13,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"nous/crypto"
 )
 
 type rpcRequest struct {
@@ -169,6 +175,8 @@ func countNetworkNodes() int {
 	return cachedNodeCount
 }
 
+// --- Data types ---
+
 type minerStat struct {
 	Address    string  `json:"address"`
 	Blocks     int     `json:"blocks"`
@@ -195,20 +203,76 @@ type diffChartData struct {
 	Points    []diffPoint `json:"points"`
 }
 
-// state kept in memory across update cycles
+// --- Address index ---
+
+type addrTx struct {
+	TxID      string `json:"txid"`
+	Height    int    `json:"height"`
+	Timestamp int64  `json:"timestamp"`
+	Value     int64  `json:"value"`
+	Direction string `json:"direction"` // "in" = received, "out" = sent
+}
+
+type outputRef struct {
+	Address string
+	Value   int64
+}
+
+// gettx response shape
+type txData struct {
+	TxID    string `json:"txid"`
+	Inputs  []struct {
+		PrevTxID  string `json:"prev_txid"`
+		PrevIndex int    `json:"prev_index"`
+	} `json:"inputs"`
+	Outputs []struct {
+		Value  int64  `json:"value"`
+		Script string `json:"script"`
+	} `json:"outputs"`
+}
+
+const zeroCoinbasePrev = "0000000000000000000000000000000000000000000000000000000000000000"
+
+// scriptToAddress decodes a P2PKH script (76a914{20-byte-pkh}88ac) to a bech32m address.
+func scriptToAddress(scriptHex string) string {
+	if len(scriptHex) != 50 || !strings.HasPrefix(scriptHex, "76a914") || !strings.HasSuffix(scriptHex, "88ac") {
+		return ""
+	}
+	pkh, err := hex.DecodeString(scriptHex[6:46])
+	if err != nil || len(pkh) != 20 {
+		return ""
+	}
+	return crypto.PubKeyHashToBech32mAddress(pkh)
+}
+
+// --- State ---
+
 var (
 	mu         sync.Mutex
 	minerMap   = map[string]*minerStat{}
-	diffPoints []diffPoint // all blocks, for chart
-	lastScan   = -1        // last block height that was scanned
+	diffPoints []diffPoint
+	lastScan   = -1
+	addrIndex  = map[string][]addrTx{}
+	outputMap  = map[string]outputRef{} // "txid:vout" → ref
 )
 
 const batchSize = 50
 
+// --- Block scanning ---
+
+type blockResult struct {
+	Height       int      `json:"height"`
+	Timestamp    int64    `json:"timestamp"`
+	Difficulty   int64    `json:"difficulty"`
+	MinerAddress string   `json:"miner_address"`
+	TxCount      int      `json:"tx_count"`
+	Transactions []string `json:"transactions"`
+}
+
 func scanNewBlocks(height int) error {
 	from := lastScan + 1
 	if from > height {
-		return nil // nothing new
+		return nil
 	}
 	log.Printf("leaderboard: scanning blocks %d..%d", from, height)
 
@@ -218,15 +282,9 @@ func scanNewBlocks(height int) error {
 			end = height
 		}
 
-		type blockResult struct {
-			Height       int   `json:"height"`
-			Timestamp    int64 `json:"timestamp"`
-			Difficulty   int64 `json:"difficulty"`
-			MinerAddress string `json:"miner_address"`
-		}
-
-		results := make([]blockResult, end-start+1)
-		errs := make([]error, end-start+1)
+		// 1. Fetch block headers in parallel.
+		blocks := make([]blockResult, end-start+1)
+		blockErrs := make([]error, end-start+1)
 		var wg sync.WaitGroup
 		for h := start; h <= end; h++ {
 			wg.Add(1)
@@ -234,37 +292,120 @@ func scanNewBlocks(height int) error {
 				defer wg.Done()
 				raw, err := rpc("getblock", h)
 				if err != nil {
-					errs[i] = err
+					blockErrs[i] = err
 					return
 				}
-				json.Unmarshal(raw, &results[i])
+				json.Unmarshal(raw, &blocks[i])
 			}(h, h-start)
 		}
 		wg.Wait()
 
-		mu.Lock()
-		for i, b := range results {
-			if errs[i] != nil {
+		// 2. Collect all txids from this batch and fetch them in parallel.
+		type txKey struct {
+			blockIdx int
+			txIdx    int
+			txid     string
+		}
+		var allTxKeys []txKey
+		for i, b := range blocks {
+			if blockErrs[i] != nil {
 				continue
 			}
-			// difficulty chart data
+			for j, txid := range b.Transactions {
+				allTxKeys = append(allTxKeys, txKey{blockIdx: i, txIdx: j, txid: txid})
+			}
+		}
+
+		txResults := make([]txData, len(allTxKeys))
+		txErrs := make([]error, len(allTxKeys))
+		for k, tk := range allTxKeys {
+			wg.Add(1)
+			go func(k int, txid string) {
+				defer wg.Done()
+				raw, err := rpc("gettx", txid)
+				if err != nil {
+					txErrs[k] = err
+					return
+				}
+				json.Unmarshal(raw, &txResults[k])
+			}(k, tk.txid)
+		}
+		wg.Wait()
+
+		// Build a map: blockIdx → []txData (preserving tx order within block)
+		blockTxs := map[int][]txData{}
+		for k, tk := range allTxKeys {
+			if txErrs[k] != nil {
+				continue
+			}
+			blockTxs[tk.blockIdx] = append(blockTxs[tk.blockIdx], txResults[k])
+		}
+
+		// 3. Process blocks sequentially (for outputMap ordering).
+		mu.Lock()
+		for i, b := range blocks {
+			if blockErrs[i] != nil {
+				continue
+			}
+
+			// Difficulty chart data.
 			diffPoints = append(diffPoints, diffPoint{
 				Height:     b.Height,
 				Difficulty: b.Difficulty,
 				Timestamp:  b.Timestamp,
 			})
-			if b.MinerAddress == "" {
-				continue
+
+			// Miner leaderboard.
+			if b.MinerAddress != "" {
+				s, ok := minerMap[b.MinerAddress]
+				if !ok {
+					s = &minerStat{Address: b.MinerAddress}
+					minerMap[b.MinerAddress] = s
+				}
+				s.Blocks++
+				if b.Timestamp > s.LastTs {
+					s.LastTs = b.Timestamp
+					s.LastHeight = b.Height
+				}
 			}
-			s, ok := minerMap[b.MinerAddress]
-			if !ok {
-				s = &minerStat{Address: b.MinerAddress}
-				minerMap[b.MinerAddress] = s
-			}
-			s.Blocks++
-			if b.Timestamp > s.LastTs {
-				s.LastTs = b.Timestamp
-				s.LastHeight = b.Height
+
+			// Address index: process this block's transactions.
+			for _, t := range blockTxs[i] {
+				// Outputs first (populate outputMap before resolving inputs).
+				for vout, out := range t.Outputs {
+					addr := scriptToAddress(out.Script)
+					if addr == "" {
+						continue
+					}
+					key := fmt.Sprintf("%s:%d", t.TxID, vout)
+					outputMap[key] = outputRef{Address: addr, Value: out.Value}
+					addrIndex[addr] = append(addrIndex[addr], addrTx{
+						TxID:      t.TxID,
+						Height:    b.Height,
+						Timestamp: b.Timestamp,
+						Value:     out.Value,
+						Direction: "in",
+					})
+				}
+
+				// Inputs (skip coinbase).
+				for _, inp := range t.Inputs {
+					if inp.PrevTxID == zeroCoinbasePrev {
+						continue
+					}
+					key := fmt.Sprintf("%s:%d", inp.PrevTxID, inp.PrevIndex)
+					ref, ok := outputMap[key]
+					if !ok {
+						continue
+					}
+					addrIndex[ref.Address] = append(addrIndex[ref.Address], addrTx{
+						TxID:      t.TxID,
+						Height:    b.Height,
+						Timestamp: b.Timestamp,
+						Value:     ref.Value,
+						Direction: "out",
+					})
+				}
 			}
 		}
 		mu.Unlock()
@@ -274,6 +415,8 @@ func scanNewBlocks(height int) error {
 	return nil
 }
 
+// --- Build JSON outputs ---
+
 func buildJSON(height int) leaderboardData {
 	mu.Lock()
 	miners := make([]minerStat, 0, len(minerMap))
@@ -282,7 +425,7 @@ func buildJSON(height int) leaderboardData {
 	}
 	mu.Unlock()
 
-	// Fetch actual balance for each miner
+	// Fetch actual balance for each miner.
 	var wg sync.WaitGroup
 	for i := range miners {
 		wg.Add(1)
@@ -326,14 +469,16 @@ func writeJSON(path string, v any) error {
 	return os.Rename(tmp, path)
 }
 
+// --- Recent blocks ---
+
 type recentBlock struct {
-	Height       int    `json:"height"`
-	Hash         string `json:"hash"`
-	Timestamp    int64  `json:"timestamp"`
-	Difficulty   int64  `json:"difficulty"`
-	Seed         uint64 `json:"seed"`
-	TxCount      int    `json:"tx_count"`
-	MinerAddress string `json:"miner_address"`
+	Height       int      `json:"height"`
+	Hash         string   `json:"hash"`
+	Timestamp    int64    `json:"timestamp"`
+	Difficulty   int64    `json:"difficulty"`
+	Seed         uint64   `json:"seed"`
+	TxCount      int      `json:"tx_count"`
+	MinerAddress string   `json:"miner_address"`
 	Transactions []string `json:"transactions,omitempty"`
 }
 
@@ -387,10 +532,8 @@ func fetchRecentBlocks(height int) recentBlocksData {
 		}
 	}
 
-	// Fetch network-wide unique node count by querying all seed nodes.
 	peers := countNetworkNodes()
 
-	// Get current difficulty from mining info
 	var diffBits int64
 	if raw, err := rpc("getmininginfo"); err == nil {
 		var info struct {
@@ -409,6 +552,46 @@ func fetchRecentBlocks(height int) recentBlocksData {
 		Blocks:         blocks,
 	}
 }
+
+// --- HTTP API for address history ---
+
+func startAPI(listenAddr string) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/address/", handleAddrHistory)
+	log.Printf("explorer API listening on %s", listenAddr)
+	if err := http.ListenAndServe(listenAddr, mux); err != nil {
+		log.Fatalf("explorer API: %v", err)
+	}
+}
+
+func handleAddrHistory(w http.ResponseWriter, r *http.Request) {
+	// URL: /address/{addr}/txs
+	path := strings.TrimPrefix(r.URL.Path, "/address/")
+	addr := strings.TrimSuffix(path, "/txs")
+	addr = strings.TrimSuffix(addr, "/")
+
+	if addr == "" || !strings.HasPrefix(addr, "nous1") {
+		http.Error(w, `{"error":"invalid address"}`, http.StatusBadRequest)
+		return
+	}
+
+	mu.Lock()
+	txs := addrIndex[addr]
+	result := make([]addrTx, len(txs))
+	copy(result, txs)
+	mu.Unlock()
+
+	// Most recent first.
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Height > result[j].Height
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(result)
+}
+
+// --- Main update loop ---
 
 func update(outFile string) {
 	raw, err := rpc("getblockcount")
@@ -433,7 +616,7 @@ func update(outFile string) {
 		return
 	}
 
-	// Write difficulty chart JSON (last 200 points)
+	// Write difficulty chart JSON (last 200 points).
 	mu.Lock()
 	pts := diffPoints
 	if len(pts) > 200 {
@@ -448,27 +631,41 @@ func update(outFile string) {
 		log.Printf("leaderboard: write %s: %v", diffFile, err)
 	}
 
-	// Write recent blocks JSON for explorer homepage
+	// Write recent blocks JSON for explorer homepage.
 	recentData := fetchRecentBlocks(height)
 	recentFile := baseDir + "recentblocks.json"
 	if err := writeJSON(recentFile, recentData); err != nil {
 		log.Printf("leaderboard: write %s: %v", recentFile, err)
 	}
 
-	log.Printf("leaderboard: updated height=%d miners=%d", height, data.TotalMiners)
+	mu.Lock()
+	addrCount := len(addrIndex)
+	txCount := 0
+	for _, txs := range addrIndex {
+		txCount += len(txs)
+	}
+	mu.Unlock()
+
+	log.Printf("leaderboard: updated height=%d miners=%d addresses=%d tx_records=%d",
+		height, data.TotalMiners, addrCount, txCount)
 }
 
 func main() {
 	node := flag.String("node", "http://localhost:8332/rpc", "Node RPC URL")
-	out  := flag.String("out", "/var/www/nous/leaderboard.json", "Output JSON file")
+	out := flag.String("out", "/var/www/nous/leaderboard.json", "Output JSON file")
 	interval := flag.Duration("interval", 30*time.Second, "Update interval")
+	apiAddr := flag.String("api", ":8081", "Explorer API listen address")
 	flag.Parse()
 
 	nodeURL = *node
 
-	log.Printf("leaderboard builder starting: node=%s out=%s interval=%s", nodeURL, *out, *interval)
+	log.Printf("leaderboard starting: node=%s out=%s interval=%s api=%s",
+		nodeURL, *out, *interval, *apiAddr)
 
-	// Run immediately on start, then on interval
+	// Start HTTP API server in background.
+	go startAPI(*apiAddr)
+
+	// Run immediately on start, then on interval.
 	update(*out)
 	for range time.Tick(*interval) {
 		update(*out)
