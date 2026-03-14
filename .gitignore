@@ -37,9 +37,27 @@ release/
 test_connection.cmd
 vps_security_setup.sh
 
-# Deploy secrets
+# Deploy secrets & SSH keys
 *.env
 scripts/*secret*
+nous_vps
+id_rsa*
+*.ssh/
+
+# Linux binaries (cross-compiled)
+*-linux-amd64
+*-linux-arm64
+
+# Wallet backend binaries
+wallet-backend
+wallet-backend-*
+
+# Node modules & frontend build
+node_modules/
+dist/
+
+# Leaderboard build
+leaderboard/
 
 # IDE
 .vs/
