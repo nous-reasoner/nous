@@ -56,8 +56,8 @@ wallet-backend-*
 node_modules/
 dist/
 
-# Leaderboard build
-leaderboard/
+# Leaderboard old build dir
+/leaderboard
 
 # IDE
 .vs/

@@ -464,27 +464,62 @@ func scanNewBlocks(height int) error {
 // --- Build JSON outputs ---
 
 func buildJSON(height int) leaderboardData {
-	// Load miners from DB.
-	rows, err := db.Query("SELECT address,blocks,last_ts,last_height FROM miners")
-	if err != nil {
-		return leaderboardData{UpdatedAt: time.Now().Unix(), Height: height}
+	// Build unified list: all addresses with balance > 0 OR blocks > 0.
+	// 1. Load miners (addresses that mined blocks).
+	minerMap := map[string]minerStat{}
+	mRows, err := db.Query("SELECT address,blocks,last_ts,last_height FROM miners")
+	if err == nil {
+		for mRows.Next() {
+			var m minerStat
+			mRows.Scan(&m.Address, &m.Blocks, &m.LastTs, &m.LastHeight)
+			minerMap[m.Address] = m
+		}
+		mRows.Close()
 	}
-	defer rows.Close()
 
-	var miners []minerStat
-	for rows.Next() {
-		var m minerStat
-		rows.Scan(&m.Address, &m.Blocks, &m.LastTs, &m.LastHeight)
-		miners = append(miners, m)
+	// 2. Find all addresses that hold NOUS (from outputs table = UTXOs).
+	//    This includes pure holders who received NOUS via transfers.
+	holderAddrs := map[string]bool{}
+	for addr := range minerMap {
+		holderAddrs[addr] = true
+	}
+	hRows, err := db.Query("SELECT DISTINCT address FROM outputs")
+	if err == nil {
+		for hRows.Next() {
+			var addr string
+			hRows.Scan(&addr)
+			holderAddrs[addr] = true
+		}
+		hRows.Close()
 	}
 
-	// Fetch actual balance for each miner.
+	// 3. Build unified list and fetch balances.
+	var entries []minerStat
+	for addr := range holderAddrs {
+		if m, ok := minerMap[addr]; ok {
+			entries = append(entries, m)
+		} else {
+			entries = append(entries, minerStat{Address: addr})
+		}
+	}
+
+	// Fill last_ts for pure holders from their most recent transaction.
+	for i := range entries {
+		if entries[i].LastTs == 0 {
+			var ts int64
+			err := db.QueryRow("SELECT MAX(timestamp) FROM addr_txs WHERE address=?", entries[i].Address).Scan(&ts)
+			if err == nil && ts > 0 {
+				entries[i].LastTs = ts
+			}
+		}
+	}
+
 	var wg sync.WaitGroup
-	for i := range miners {
+	for i := range entries {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			raw, err := rpc("getbalance", miners[i].Address)
+			raw, err := rpc("getbalance", entries[i].Address)
 			if err != nil {
 				return
 			}
@@ -493,20 +528,28 @@ func buildJSON(height int) leaderboardData {
 				Immature int64 `json:"immature"`
 			}
 			if json.Unmarshal(raw, &bal) == nil {
-				miners[i].TotalNous = float64(bal.Balance+bal.Immature) / 1e8
+				entries[i].TotalNous = float64(bal.Balance+bal.Immature) / 1e8
 			}
 		}(i)
 	}
 	wg.Wait()
 
-	sort.Slice(miners, func(i, j int) bool {
-		return miners[i].TotalNous > miners[j].TotalNous
+	// Remove entries with zero balance and zero blocks.
+	var filtered []minerStat
+	for _, e := range entries {
+		if e.TotalNous > 0 || e.Blocks > 0 {
+			filtered = append(filtered, e)
+		}
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].TotalNous > filtered[j].TotalNous
 	})
 	return leaderboardData{
 		UpdatedAt:   time.Now().Unix(),
 		Height:      height,
-		TotalMiners: len(miners),
-		Miners:      miners,
+		TotalMiners: len(filtered),
+		Miners:      filtered,
 	}
 }
 
