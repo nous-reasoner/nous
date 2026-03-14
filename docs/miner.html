@@ -6,98 +6,37 @@
   <title>NOUS Reasoner</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #0a0a0a;
-      color: #e0e0e0;
-      padding: 20px;
-    }
-    .container { max-width: 700px; margin: 0 auto; }
-    h1 { color: #00ff88; margin-bottom: 30px; }
-    .section {
-      background: #1a1a1a;
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 20px;
-      margin-bottom: 20px;
-    }
-    .section h2 {
-      color: #00ff88;
-      font-size: 18px;
-      margin-bottom: 15px;
-    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+    /* Tabs */
+    .tab-bar { display: flex; border-bottom: 1px solid #222; background: #111; }
+    .tab-btn { flex: 1; padding: 14px; text-align: center; font-size: 14px; font-weight: 600; color: #666; cursor: pointer; border: none; background: none; transition: all 0.2s; border-bottom: 2px solid transparent; }
+    .tab-btn:hover { color: #aaa; }
+    .tab-btn.active { color: #00ff88; border-bottom-color: #00ff88; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Common */
+    .container { max-width: 700px; margin: 0 auto; padding: 20px; }
+    .section { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    .section h2 { color: #00ff88; font-size: 18px; margin-bottom: 15px; }
     .form-group { margin-bottom: 15px; }
-    label {
-      display: block;
-      color: #999;
-      font-size: 12px;
-      margin-bottom: 5px;
-    }
-    input, select {
-      width: 100%;
-      padding: 10px;
-      background: #0a0a0a;
-      border: 1px solid #333;
-      border-radius: 4px;
-      color: #e0e0e0;
-      font-size: 14px;
-    }
+    label { display: block; color: #999; font-size: 12px; margin-bottom: 5px; }
+    input, select { width: 100%; padding: 10px; background: #0a0a0a; border: 1px solid #333; border-radius: 4px; color: #e0e0e0; font-size: 14px; }
     input:focus, select:focus { outline: none; border-color: #00ff88; }
-    button {
-      padding: 12px 24px;
-      background: #00ff88;
-      color: #0a0a0a;
-      border: none;
-      border-radius: 4px;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 14px;
-    }
+    button { padding: 12px 24px; background: #00ff88; color: #0a0a0a; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; font-size: 14px; }
     button:hover { background: #00dd77; }
     button:disabled { background: #333; color: #666; cursor: not-allowed; }
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 15px;
-      background: #0a0a0a;
-      border-radius: 4px;
-      margin-bottom: 15px;
-    }
+    .status { display: flex; align-items: center; gap: 10px; padding: 15px; background: #0a0a0a; border-radius: 4px; margin-bottom: 15px; }
     .status-dot { width: 12px; height: 12px; border-radius: 50%; background: #666; }
     .status-dot.active { background: #00ff88; animation: pulse 1.5s infinite; }
     .status-dot.loading { background: #f59e0b; animation: pulse 1s infinite; }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-    .progress-bar {
-      width: 100%;
-      height: 4px;
-      background: #222;
-      border-radius: 2px;
-      margin-top: 10px;
-      overflow: hidden;
-      display: none;
-    }
-    .progress-bar .fill {
-      height: 100%;
-      background: #00ff88;
-      border-radius: 2px;
-      width: 0%;
-      transition: width 0.3s;
-    }
-    .log {
-      background: #0a0a0a;
-      border: 1px solid #333;
-      border-radius: 4px;
-      padding: 15px;
-      height: 250px;
-      overflow-y: auto;
-      font-family: 'Courier New', monospace;
-      font-size: 12px;
-      color: #999;
-    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .progress-bar { width: 100%; height: 4px; background: #222; border-radius: 2px; margin-top: 10px; overflow: hidden; display: none; }
+    .progress-bar .fill { height: 100%; background: #00ff88; border-radius: 2px; width: 0%; transition: width 0.3s; }
+    .log { background: #0a0a0a; border: 1px solid #333; border-radius: 4px; padding: 15px; height: 200px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; color: #999; }
     .log .success { color: #00ff88; }
     .log .error { color: #ff4444; }
     .log .progress { color: #88aaff; }
@@ -105,45 +44,72 @@
     .stat-card { background: #0a0a0a; padding: 12px; border-radius: 4px; }
     .stat-label { color: #666; font-size: 11px; margin-bottom: 4px; }
     .stat-value { color: #00ff88; font-size: 20px; font-weight: 600; }
-    .footer {
-      text-align: center;
-      margin-top: 20px;
-      color: #444;
-      font-size: 12px;
-    }
+    .footer { text-align: center; margin-top: 20px; color: #444; font-size: 12px; padding-bottom: 20px; }
     .footer a { color: #7aa2f7; text-decoration: none; }
     .footer a:hover { text-decoration: underline; }
-    .btn-export { background: #ff9500; }
-    .btn-export:hover { background: #e08500; }
     .btn-stop { background: #ff4444; margin-left: 10px; }
     .btn-stop:hover { background: #dd3333; }
+
+    /* Wallet tab */
+    .w-content { max-width: 500px; margin: 0 auto; padding: 20px; }
+    .card { background: #151515; border: 1px solid #222; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+    .w-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .w-value { font-size: 32px; font-weight: 700; color: #fff; }
+    .w-value .unit { font-size: 14px; color: #00ff88; font-weight: 400; margin-left: 4px; }
+    .w-sub { font-size: 12px; color: #555; margin-top: 4px; }
+    .w-btn { width: 100%; padding: 12px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+    .w-btn-primary { background: #00ff88; color: #000; }
+    .w-btn-primary:hover { background: #00e07a; }
+    .w-btn-secondary { background: #1a1a1a; color: #ccc; border: 1px solid #333; }
+    .w-btn-secondary:hover { background: #222; }
+    .w-btn-danger { background: #1a1a1a; color: #ff6b6b; border: 1px solid #333; }
+    .w-btn-danger:hover { background: #221010; }
+    .w-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .w-btn-small { width: auto; padding: 6px 14px; font-size: 12px; border-radius: 6px; display: inline-block; }
+    .w-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .w-row > * { flex: 1; }
+    .addr-text { font-family: 'SF Mono', 'Courier New', monospace; font-size: 12px; color: #888; word-break: break-all; cursor: pointer; padding: 8px; border-radius: 6px; background: #0d0d0d; border: 1px solid #1a1a1a; }
+    .addr-text:hover { color: #00ff88; border-color: #00ff8844; }
+    .privkey-box { background: #0d0d0d; border: 1px solid #ff6b6b33; border-radius: 8px; padding: 12px; font-family: 'SF Mono', monospace; font-size: 11px; color: #ff6b6b; word-break: break-all; line-height: 1.6; user-select: all; }
+    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #222; color: #00ff88; padding: 8px 20px; border-radius: 20px; font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 99; }
+    .toast.show { opacity: 1; }
+    .logo { text-align: center; padding: 30px 0 15px; }
+    .logo h1 { font-size: 28px; color: #fff; letter-spacing: 4px; }
+    .logo .tagline { font-size: 11px; color: #444; margin-top: 4px; letter-spacing: 2px; }
+    .hidden { display: none !important; }
+    .center { text-align: center; }
+    .mt { margin-top: 12px; }
+
     @media (max-width: 600px) {
       .stats { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>NOUS Reasoner</h1>
 
+<!-- Tab Bar -->
+<div class="tab-bar">
+  <div class="tab-btn active" onclick="switchTab('reasoning')">Reasoning</div>
+  <div class="tab-btn" onclick="switchTab('wallet')">Wallet</div>
+</div>
+
+<!-- Reasoning Tab -->
+<div class="tab-content active" id="tab-reasoning">
+  <div class="container">
     <div class="section">
       <h2>Configuration</h2>
       <div class="form-group">
         <label>Node URL</label>
-        <input type="text" id="nodeUrl" value="http://rpc.nouschain.org/api" placeholder="http://rpc.nouschain.org/api" />
+        <input type="text" id="nodeUrl" value="/api" />
       </div>
       <div class="form-group">
-        <label>Address</label>
+        <label>Reasoning Address</label>
         <div style="display: flex; gap: 8px;">
           <input type="text" id="address" placeholder="nous1q..." style="flex: 1;" />
-          <button onclick="createWallet()" style="width: auto; padding: 10px 16px;">New Wallet</button>
-          <button class="btn-export" onclick="exportWallet()" style="width: auto; padding: 10px 16px;">Export</button>
+          <button onclick="useWalletAddress()" style="width: auto; padding: 10px 16px; font-size: 12px;">Use Wallet</button>
         </div>
         <div style="color: #666; font-size: 11px; margin-top: 5px;">
-          Wallet stored in browser localStorage. Use Export to backup.
-        </div>
-        <div style="color: #ff9500; font-size: 11px; margin-top: 4px;">
-          Note: Browser wallets are for testing only. For security, generate your wallet locally with nous-cli.
+          Click "Use Wallet" to load address, or switch to the Wallet tab to create one.
         </div>
       </div>
     </div>
@@ -157,40 +123,15 @@
       </div>
       <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
       <div class="stats">
-        <div class="stat-card">
-          <div class="stat-label">Balance</div>
-          <div class="stat-value" id="balance" style="font-size:16px;">0.00</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Immature</div>
-          <div class="stat-value" id="immature" style="color:#ffaa00;font-size:16px;">0.00</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Solve Rate</div>
-          <div class="stat-value" id="solveRate" style="color:#88aaff;font-size:16px;">&mdash;</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Session Blocks</div>
-          <div class="stat-value" id="blocksFound">0</div>
-        </div>
+        <div class="stat-card"><div class="stat-label">Balance</div><div class="stat-value" id="balance" style="font-size:16px;">0.00</div></div>
+        <div class="stat-card"><div class="stat-label">Immature</div><div class="stat-value" id="immature" style="color:#ffaa00;font-size:16px;">0.00</div></div>
+        <div class="stat-card"><div class="stat-label">Solve Rate</div><div class="stat-value" id="solveRate" style="color:#88aaff;font-size:16px;">&mdash;</div></div>
+        <div class="stat-card"><div class="stat-label">Session Blocks</div><div class="stat-value" id="blocksFound">0</div></div>
       </div>
-      <div class="stats" style="margin-top: 10px;">
-        <div class="stat-card">
-          <div class="stat-label">Avg Time/Block</div>
-          <div class="stat-value" id="avgBlockTime" style="font-size:16px;">&mdash;</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Expected Next</div>
-          <div class="stat-value" id="expectedNext" style="font-size:16px;">&mdash;</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">All-Time Blocks</div>
-          <div class="stat-value" id="totalBlocks" style="font-size:16px;">0</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Total Earnings</div>
-          <div class="stat-value" id="totalEarnings" style="font-size:16px;">0</div>
-        </div>
+      <div class="stats" style="margin-top: 10px; grid-template-columns: 1fr 1fr 1fr;">
+        <div class="stat-card"><div class="stat-label">Avg Time/Block</div><div class="stat-value" id="avgBlockTime" style="font-size:16px;">&mdash;</div></div>
+        <div class="stat-card"><div class="stat-label">Total Blocks</div><div class="stat-value" id="totalBlocks" style="font-size:16px;">0</div></div>
+        <div class="stat-card"><div class="stat-label">Total Earnings</div><div class="stat-value" id="totalEarnings" style="font-size:16px;">0</div></div>
       </div>
       <div style="margin-top: 15px;">
         <button id="startBtn" onclick="startReasoning()" disabled>Loading...</button>
@@ -204,316 +145,455 @@
     </div>
 
     <div class="footer">
-      <p><a href="https://nouschain.org">nouschain.org</a> &middot; <a href="https://github.com/nous-reasoner/nous">GitHub</a> &middot; <a href="https://discord.gg/SzKUuEjuQW">Discord</a></p>
+      <p><a href="https://nouschain.org">nouschain.org</a> &middot; <a href="https://github.com/nous-reasoner/nous">GitHub</a> &middot; <a href="https://discord.gg/naun4tbD">Discord</a></p>
       <p style="margin-top: 6px;">Cogito, ergo sum.</p>
     </div>
   </div>
+</div>
 
-  <script>
-    let isReasoning = false;
-    let sessionStart = null;
-    let sessionBlocks = 0;
-    let lastBlockTime = null;
-    let blockIntervals = [];
-    let statsInterval = null;
-    let balanceInterval = null;
-    let worker = null;
+<!-- Wallet Tab -->
+<div class="tab-content" id="tab-wallet">
+  <div class="w-content" id="walletApp">
+    <div class="logo">
+      <h1>NOUS</h1>
+      <div class="tagline">COGITO, ERGO SUM</div>
+    </div>
+    <div id="walletMain"></div>
+  </div>
+</div>
 
-    // --- All-time stats ---
-    function getAllTimeStats() {
-      return JSON.parse(localStorage.getItem('nousAllTime') || '{"blocks":0,"intervals":[]}');
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================
+// TAB SWITCHING
+// ============================================
+let activeTab = 'reasoning';
+
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+  var idx = tab === 'reasoning' ? 0 : 1;
+  document.querySelectorAll('.tab-btn')[idx].classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+  if (tab === 'wallet') renderWallet();
+}
+
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(function() { t.classList.remove('show'); }, 2000);
+}
+
+// ============================================
+// WALLET TAB
+// ============================================
+function getStoredWallet() {
+  var w = localStorage.getItem('nousWallet');
+  return w ? JSON.parse(w) : null;
+}
+
+function renderWallet() {
+  var el = document.getElementById('walletMain');
+  var w = getStoredWallet();
+
+  if (!w || !w.address) {
+    el.innerHTML =
+      '<div class="card center">' +
+        '<div class="w-sub" style="margin-bottom:16px;">No wallet found. Create one to start reasoning.</div>' +
+        '<button class="w-btn w-btn-primary" onclick="doCreateWallet()">Create Wallet</button>' +
+        '<div style="margin-top:12px;">' +
+          '<button class="w-btn w-btn-secondary" onclick="showImportView()">Import Private Key</button>' +
+        '</div>' +
+        '<div style="color: #ff9500; font-size: 11px; margin-top: 12px;">' +
+          'Browser wallets are for testing only. For security, use the desktop app.' +
+        '</div>' +
+      '</div>';
+    return;
+  }
+
+  el.innerHTML =
+    '<div class="card">' +
+      '<div class="w-label">Balance</div>' +
+      '<div class="w-value" id="wBalance">--<span class="unit">NOUS</span></div>' +
+      '<div class="w-sub" id="wImmature"></div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<div class="w-label">Your Address</div>' +
+      '<div class="addr-text" onclick="copyAddress()" title="Click to copy">' + escHtml(w.address) + '</div>' +
+      '<div class="w-sub mt">Click to copy. Share this address to receive NOUS.</div>' +
+    '</div>' +
+    '<div class="w-row">' +
+      '<button class="w-btn w-btn-secondary" onclick="exportWallet()">Export Key</button>' +
+      '<button class="w-btn w-btn-secondary" onclick="refreshBalance()">Refresh</button>' +
+    '</div>' +
+    '<button class="w-btn w-btn-danger" onclick="deleteWallet()">Delete Wallet</button>' +
+    '<div style="color: #ff9500; font-size: 11px; margin-top: 12px; text-align: center;">' +
+      'Browser wallets are for testing only. Export your private key before deleting.' +
+    '</div>';
+
+  refreshBalance();
+}
+
+function doCreateWallet() {
+  if (!worker) { showToast('WASM not loaded yet'); return; }
+  var existing = getStoredWallet();
+  if (existing && existing.address) {
+    if (!confirm('A wallet already exists. Create a new one? The old wallet will be overwritten.')) return;
+  }
+  worker.postMessage({ action: 'createWallet' });
+}
+
+function showImportView() {
+  var el = document.getElementById('walletMain');
+  el.innerHTML =
+    '<div class="card">' +
+      '<div class="w-label">Import Private Key</div>' +
+      '<div style="margin-top:10px;">' +
+        '<input type="text" id="importKeyInput" placeholder="Enter 64-character hex private key" style="font-family:monospace;font-size:12px;" />' +
+      '</div>' +
+      '<div style="margin-top:12px;">' +
+        '<button class="w-btn w-btn-primary" onclick="doImportKey()">Import</button>' +
+      '</div>' +
+      '<div style="margin-top:8px;">' +
+        '<button class="w-btn w-btn-secondary" onclick="renderWallet()">Cancel</button>' +
+      '</div>' +
+    '</div>';
+}
+
+function doImportKey() {
+  var key = document.getElementById('importKeyInput').value.trim();
+  if (key.length !== 64 || !/^[0-9a-fA-F]+$/.test(key)) {
+    showToast('Invalid private key (must be 64 hex characters)');
+    return;
+  }
+  // We need WASM to derive address from private key. Since WASM only exposes createWallet
+  // (random key), we store the key and let the user know the address derivation requires
+  // the desktop app for now.
+  showToast('Import requires desktop app. Use Create Wallet for browser.');
+}
+
+function copyAddress() {
+  var w = getStoredWallet();
+  if (!w) return;
+  navigator.clipboard.writeText(w.address).then(function() {
+    showToast('Address copied!');
+  });
+}
+
+function exportWallet() {
+  var w = getStoredWallet();
+  if (!w) { showToast('No wallet found'); return; }
+  var blob = new Blob([JSON.stringify(w, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'nous-wallet-backup.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Wallet exported');
+}
+
+function deleteWallet() {
+  if (!confirm('Are you sure? Make sure you have exported your private key!')) return;
+  if (!confirm('This cannot be undone. Delete wallet?')) return;
+  localStorage.removeItem('nousWallet');
+  document.getElementById('address').value = '';
+  renderWallet();
+  showToast('Wallet deleted');
+}
+
+function refreshBalance() {
+  var w = getStoredWallet();
+  if (!w || !worker) return;
+  var nodeUrl = document.getElementById('nodeUrl').value;
+  worker.postMessage({ action: 'getBalance', nodeUrl: nodeUrl, address: w.address });
+}
+
+function useWalletAddress() {
+  var w = getStoredWallet();
+  if (w && w.address) {
+    document.getElementById('address').value = w.address;
+    addLog('Wallet address loaded: ' + w.address);
+    fetchBalance();
+  } else {
+    addLog('No wallet found. Switch to Wallet tab to create one.', 'error');
+  }
+}
+
+function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ============================================
+// REASONING TAB
+// ============================================
+var isReasoning = false;
+var sessionStart = null;
+var sessionBlocks = 0;
+var lastBlockTime = null;
+var blockIntervals = [];
+var statsInterval = null;
+var balanceInterval = null;
+var worker = null;
+
+function getAllTimeStats() {
+  return JSON.parse(localStorage.getItem('nousAllTime') || '{"blocks":0,"intervals":[]}');
+}
+function saveAllTimeBlock(interval) {
+  var s = getAllTimeStats();
+  s.blocks++;
+  if (interval > 0) s.intervals.push(interval);
+  if (s.intervals.length > 100) s.intervals = s.intervals.slice(-100);
+  localStorage.setItem('nousAllTime', JSON.stringify(s));
+}
+
+function formatDuration(ms) {
+  var sec = Math.floor(ms / 1000);
+  if (sec < 60) return sec + 's';
+  var min = Math.floor(sec / 60);
+  if (min < 60) return min + 'm';
+  return Math.floor(min / 60) + 'h ' + (min % 60) + 'm';
+}
+
+function addLog(text, cls) {
+  var log = document.getElementById('log');
+  var time = new Date().toLocaleTimeString();
+  var div = document.createElement('div');
+  div.className = cls || '';
+  div.textContent = '[' + time + '] ' + text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  while (log.children.length > 200) log.removeChild(log.firstChild);
+}
+
+var logStats = { sat: 0, seeds: 0, rate: '' };
+var logTimer = null;
+
+function flushLog() {
+  if (logStats.seeds > 0) {
+    addLog('Checked ' + logStats.seeds + ' seeds, SAT solved: ' + logStats.sat + ' (' + logStats.rate + ')', 'progress');
+    document.getElementById('solveRate').textContent = logStats.rate || '\u2014';
+    logStats = { sat: 0, seeds: 0, rate: '' };
+  }
+}
+
+function handleReasonerLog(msg) {
+  if (/Block found|Block reasoned|accepted/i.test(msg)) {
+    flushLog();
+    addLog(msg, 'success');
+    var now = Date.now();
+    if (lastBlockTime) {
+      var interval = now - lastBlockTime;
+      blockIntervals.push(interval);
+      saveAllTimeBlock(interval);
+    } else {
+      saveAllTimeBlock(0);
     }
-    function saveAllTimeBlock(interval) {
-      const s = getAllTimeStats();
-      s.blocks++;
-      if (interval > 0) s.intervals.push(interval);
-      if (s.intervals.length > 100) s.intervals = s.intervals.slice(-100);
-      localStorage.setItem('nousAllTime', JSON.stringify(s));
+    sessionBlocks++;
+    lastBlockTime = now;
+    document.getElementById('blocksFound').textContent = sessionBlocks;
+    updateStatsUI();
+    fetchBalance();
+    return;
+  }
+  if (/Reasoner loaded|Reasoning started|Reasoning block/i.test(msg)) {
+    addLog(msg);
+    return;
+  }
+  if (/error|fail|fatal/i.test(msg) && !/no PoW match/i.test(msg)) {
+    addLog(msg, 'error');
+    return;
+  }
+  var m = msg.match(/(\d+) SAT solved \(([^)]+)\), seed=(\d+)/);
+  if (m) {
+    logStats.sat = parseInt(m[1]);
+    logStats.rate = m[2];
+    logStats.seeds = parseInt(m[3]);
+    document.getElementById('solveRate').textContent = logStats.rate;
+    var rateNum = parseFloat(logStats.rate);
+    if (rateNum < 10) {
+      addLog('Checked ' + logStats.seeds + ' seeds, SAT solved: ' + logStats.sat + ' (' + logStats.rate + ')', 'progress');
+      logStats = { sat: 0, seeds: 0, rate: '' };
+    } else if (!logTimer) {
+      logTimer = setInterval(flushLog, 5000);
     }
+    return;
+  }
+  if (/Round done/i.test(msg)) {
+    var rm = msg.match(/(\d+) SAT solved.*\(([^)]+)\)/);
+    if (rm) document.getElementById('solveRate').textContent = rm[2];
+    addLog(msg, 'progress');
+    return;
+  }
+  addLog(msg);
+}
 
-    function formatDuration(ms) {
-      const sec = Math.floor(ms / 1000);
-      if (sec < 60) return sec + 's';
-      const min = Math.floor(sec / 60);
-      if (min < 60) return min + 'm';
-      return Math.floor(min / 60) + 'h ' + (min % 60) + 'm';
-    }
+function updateStatsUI() {
+  if (sessionStart) {
+    document.getElementById('uptimeText').textContent = 'Uptime: ' + formatDuration(Date.now() - sessionStart);
+  } else {
+    document.getElementById('uptimeText').textContent = '';
+  }
+  document.getElementById('blocksFound').textContent = sessionBlocks;
+  var allTime = getAllTimeStats();
+  document.getElementById('totalBlocks').textContent = allTime.blocks;
+  document.getElementById('totalEarnings').textContent = allTime.blocks + ' NOUS';
+  if (blockIntervals.length >= 1) {
+    var avg = blockIntervals.reduce(function(a, b) { return a + b; }, 0) / blockIntervals.length;
+    document.getElementById('avgBlockTime').textContent = formatDuration(avg);
+  }
+}
 
-    // --- Logging ---
-    function addLog(text, cls) {
-      const log = document.getElementById('log');
-      const time = new Date().toLocaleTimeString();
-      const div = document.createElement('div');
-      div.className = cls || '';
-      div.textContent = '[' + time + '] ' + text;
-      log.appendChild(div);
-      log.scrollTop = log.scrollHeight;
-      while (log.children.length > 200) log.removeChild(log.firstChild);
-    }
+function fetchBalance() {
+  var address = document.getElementById('address').value;
+  var nodeUrl = document.getElementById('nodeUrl').value;
+  if (!address || !worker) return;
+  worker.postMessage({ action: 'getBalance', nodeUrl: nodeUrl, address: address });
+}
 
-    let logStats = { sat: 0, seeds: 0, rate: '' };
-    let logTimer = null;
+function startReasoning() {
+  var nodeUrl = document.getElementById('nodeUrl').value.trim();
+  var address = document.getElementById('address').value.trim();
+  if (!address) { addLog('Please enter an address or create a wallet', 'error'); return; }
+  if (!address.startsWith('nous1')) { addLog('Address should start with "nous1"', 'error'); return; }
+  worker.postMessage({ action: 'start', nodeUrl: nodeUrl, address: address });
+}
 
-    function flushLog() {
-      if (logStats.seeds > 0) {
-        addLog('Checked ' + logStats.seeds + ' seeds, SAT solved: ' + logStats.sat + ' (' + logStats.rate + ')', 'progress');
-        document.getElementById('solveRate').textContent = logStats.rate || '\u2014';
-        logStats = { sat: 0, seeds: 0, rate: '' };
-      }
-    }
+function stopReasoning() {
+  worker.postMessage({ action: 'stop' });
+}
 
-    function handleReasonerLog(msg) {
-      if (/Block found|Block reasoned|accepted/i.test(msg)) {
-        flushLog();
-        addLog(msg, 'success');
-        const now = Date.now();
-        if (lastBlockTime) {
-          const interval = now - lastBlockTime;
-          blockIntervals.push(interval);
-          saveAllTimeBlock(interval);
-        } else {
-          saveAllTimeBlock(0);
-        }
-        sessionBlocks++;
-        lastBlockTime = now;
-        document.getElementById('blocksFound').textContent = sessionBlocks;
-        updateStatsUI();
-        fetchBalance();
-        return;
-      }
-      if (/Reasoner loaded|Reasoning started|Reasoning block/i.test(msg)) {
-        addLog(msg);
-        return;
-      }
-      if (/error|fail|fatal/i.test(msg) && !/no PoW match/i.test(msg)) {
-        addLog(msg, 'error');
-        return;
-      }
-      const m = msg.match(/(\d+) SAT solved \(([^)]+)\), seed=(\d+)/);
-      if (m) {
-        logStats.sat = parseInt(m[1]);
-        logStats.rate = m[2];
-        logStats.seeds = parseInt(m[3]);
-        document.getElementById('solveRate').textContent = logStats.rate;
-        const rateNum = parseFloat(logStats.rate);
-        if (rateNum < 10) {
-          addLog('Checked ' + logStats.seeds + ' seeds, SAT solved: ' + logStats.sat + ' (' + logStats.rate + ')', 'progress');
-          logStats = { sat: 0, seeds: 0, rate: '' };
-        } else if (!logTimer) {
-          logTimer = setInterval(flushLog, 5000);
-        }
-        return;
-      }
-      if (/Round done/i.test(msg)) {
-        const rm = msg.match(/(\d+) SAT solved.*\(([^)]+)\)/);
-        if (rm) document.getElementById('solveRate').textContent = rm[2];
-        addLog(msg, 'progress');
-        return;
-      }
-      addLog(msg);
-    }
+function setReasoningUI(active) {
+  isReasoning = active;
+  document.getElementById('startBtn').disabled = active;
+  document.getElementById('stopBtn').disabled = !active;
+  document.getElementById('statusDot').className = 'status-dot' + (active ? ' active' : '');
+  document.getElementById('statusText').textContent = active ? 'Reasoning...' : 'Idle';
+  if (active) {
+    sessionStart = Date.now();
+    sessionBlocks = 0;
+    lastBlockTime = Date.now();
+    blockIntervals = [];
+    statsInterval = setInterval(function() {
+      updateStatsUI();
+      worker.postMessage({ action: 'stats' });
+    }, 2000);
+    balanceInterval = setInterval(fetchBalance, 30000);
+  } else {
+    sessionStart = null;
+    if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
+    if (balanceInterval) { clearInterval(balanceInterval); balanceInterval = null; }
+    updateStatsUI();
+  }
+}
 
-    // --- Stats UI ---
-    function updateStatsUI() {
-      if (sessionStart) {
-        document.getElementById('uptimeText').textContent = 'Uptime: ' + formatDuration(Date.now() - sessionStart);
-      } else {
-        document.getElementById('uptimeText').textContent = '';
-      }
-      document.getElementById('blocksFound').textContent = sessionBlocks;
-      if (blockIntervals.length >= 1) {
-        const avg = blockIntervals.reduce((a, b) => a + b, 0) / blockIntervals.length;
-        document.getElementById('avgBlockTime').textContent = formatDuration(avg);
-        if (lastBlockTime && isReasoning) {
-          const elapsed = Date.now() - lastBlockTime;
-          document.getElementById('expectedNext').textContent = elapsed < avg ? '~' + formatDuration(avg - elapsed) : 'Any moment';
-        } else {
-          document.getElementById('expectedNext').textContent = '\u2014';
-        }
-      } else {
-        document.getElementById('avgBlockTime').textContent = '\u2014';
-        document.getElementById('expectedNext').textContent = '\u2014';
-      }
-      const allTime = getAllTimeStats();
-      document.getElementById('totalBlocks').textContent = allTime.blocks;
-      document.getElementById('totalEarnings').textContent = allTime.blocks + ' NOUS';
-    }
+// ============================================
+// WORKER
+// ============================================
+function initWorker() {
+  if (worker) { worker.terminate(); worker = null; }
+  addLog('Loading WASM reasoner...');
+  worker = new Worker('worker.js');
 
-    // --- Balance ---
-    function fetchBalance() {
-      const address = document.getElementById('address').value;
-      const nodeUrl = document.getElementById('nodeUrl').value;
-      if (!address || !worker) return;
-      worker.postMessage({ action: 'getBalance', nodeUrl: nodeUrl, address: address });
-    }
+  worker.onerror = function(e) {
+    addLog('Worker error: ' + (e.message || 'unknown'), 'error');
+    document.getElementById('statusText').textContent = 'Error';
+    document.getElementById('statusDot').className = 'status-dot';
+  };
 
-    // --- Wallet ---
-    function getStoredWallet() {
-      const w = localStorage.getItem('nousWallet');
-      return w ? JSON.parse(w) : null;
-    }
-
-    function createWallet() {
-      if (document.getElementById('address').value) {
-        if (!confirm('A wallet already exists. Create a new one? The old wallet will be overwritten.')) return;
-      }
-      if (!worker) { addLog('WASM not loaded yet', 'error'); return; }
-      worker.postMessage({ action: 'createWallet' });
-    }
-
-    function exportWallet() {
-      const w = getStoredWallet();
-      if (!w) { alert('No wallet found. Create one first.'); return; }
-      const blob = new Blob([JSON.stringify(w, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'nous-wallet-backup.json';
-      a.click();
-      URL.revokeObjectURL(url);
-      addLog('Wallet exported: ' + w.address);
-    }
-
-    // --- Reasoning controls ---
-    function startReasoning() {
-      const nodeUrl = document.getElementById('nodeUrl').value.trim();
-      const address = document.getElementById('address').value.trim();
-      if (!address) { addLog('Please enter an address or create a wallet', 'error'); return; }
-      if (!address.startsWith('nous1')) { addLog('Address should start with "nous1"', 'error'); return; }
-      worker.postMessage({ action: 'start', nodeUrl: nodeUrl, address: address });
-    }
-
-    function stopReasoning() {
-      worker.postMessage({ action: 'stop' });
-    }
-
-    function setReasoningUI(active) {
-      isReasoning = active;
-      document.getElementById('startBtn').disabled = active;
-      document.getElementById('stopBtn').disabled = !active;
-      document.getElementById('statusDot').className = 'status-dot' + (active ? ' active' : '');
-      document.getElementById('statusText').textContent = active ? 'Reasoning...' : 'Idle';
-      if (active) {
-        sessionStart = Date.now();
-        sessionBlocks = 0;
-        lastBlockTime = Date.now();
-        blockIntervals = [];
-        statsInterval = setInterval(function() {
-          updateStatsUI();
-          worker.postMessage({ action: 'stats' });
-        }, 2000);
-        balanceInterval = setInterval(fetchBalance, 30000);
-      } else {
-        sessionStart = null;
-        if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
-        if (balanceInterval) { clearInterval(balanceInterval); balanceInterval = null; }
-        updateStatsUI();
-      }
-    }
-
-    // --- Worker message handler ---
-    function initWorker() {
-      // Clean up any previous worker on page refresh.
-      if (worker) {
-        worker.terminate();
-        worker = null;
-      }
-      addLog('Loading WASM reasoner...');
-      worker = new Worker('worker.js');
-
-      worker.onerror = function(e) {
-        addLog('Worker error: ' + (e.message || 'unknown'), 'error');
-        document.getElementById('statusText').textContent = 'Error';
+  worker.onmessage = function(e) {
+    var msg = e.data;
+    switch (msg.type) {
+      case 'ready':
+        document.getElementById('progressBar').style.display = 'none';
+        document.getElementById('startBtn').textContent = 'Start Reasoning';
+        document.getElementById('startBtn').disabled = false;
         document.getElementById('statusDot').className = 'status-dot';
-      };
-
-      worker.onmessage = function(e) {
-        const msg = e.data;
-        switch (msg.type) {
-          case 'ready':
-            document.getElementById('progressBar').style.display = 'none';
-            document.getElementById('startBtn').textContent = 'Start Reasoning';
-            document.getElementById('startBtn').disabled = false;
-            document.getElementById('statusDot').className = 'status-dot';
-            document.getElementById('statusText').textContent = 'Idle';
-            addLog('WASM loaded. Ready.', 'success');
-            // Load saved wallet
-            const w = getStoredWallet();
-            if (w && w.address) {
-              document.getElementById('address').value = w.address;
-              addLog('Wallet loaded: ' + w.address);
-              fetchBalance();
-            }
-            updateStatsUI();
-            break;
-
-          case 'log':
-            handleReasonerLog(msg.msg);
-            break;
-
-          case 'started':
-            if (msg.result === 'started') {
-              setReasoningUI(true);
-              addLog('Reasoning started with ProbSAT solver...');
-            } else {
-              addLog('Start failed: ' + msg.result, 'error');
-            }
-            break;
-
-          case 'stopped':
-            setReasoningUI(false);
-            addLog('Reasoning stopped');
-            break;
-
-          case 'stats':
-            try {
-              const s = JSON.parse(msg.data);
-              if (s.solve_rate > 0) document.getElementById('solveRate').textContent = s.solve_rate.toFixed(1) + '/s';
-            } catch(err) {}
-            break;
-
-          case 'wallet':
-            if (msg.data.error) {
-              addLog('Wallet error: ' + msg.data.error, 'error');
-            } else {
-              localStorage.setItem('nousWallet', JSON.stringify(msg.data));
-              document.getElementById('address').value = msg.data.address;
-              addLog('Wallet created: ' + msg.data.address, 'success');
-              alert('Wallet created!\n\nAddress: ' + msg.data.address + '\n\nStored in browser. Click "Export" to backup your private key.');
-            }
-            break;
-
-          case 'balance':
-            if (msg.data) {
-              document.getElementById('balance').textContent = (msg.data.balance / 100000000).toFixed(8);
-              document.getElementById('immature').textContent = (msg.data.immature / 100000000).toFixed(8);
-            }
-            break;
-
-          case 'progress':
-            var bar = document.getElementById('progressBar');
-            bar.style.display = 'block';
-            document.getElementById('progressFill').style.width = msg.pct + '%';
-            document.getElementById('statusText').textContent = 'Loading WASM... ' + msg.pct + '%';
-            break;
-
-          case 'error':
-            addLog(msg.msg, 'error');
-            document.getElementById('startBtn').textContent = 'WASM Failed';
-            document.getElementById('statusText').textContent = 'Error';
-            break;
+        document.getElementById('statusText').textContent = 'Idle';
+        addLog('WASM loaded. Ready.', 'success');
+        var w = getStoredWallet();
+        if (w && w.address) {
+          document.getElementById('address').value = w.address;
+          addLog('Wallet loaded: ' + w.address);
+          fetchBalance();
         }
-      };
+        updateStatsUI();
+        break;
 
-      worker.postMessage({ action: 'load' });
+      case 'log':
+        handleReasonerLog(msg.msg);
+        break;
+
+      case 'started':
+        if (msg.result === 'started') {
+          setReasoningUI(true);
+          addLog('Reasoning started with ProbSAT solver...');
+        } else {
+          addLog('Start failed: ' + msg.result, 'error');
+        }
+        break;
+
+      case 'stopped':
+        setReasoningUI(false);
+        addLog('Reasoning stopped');
+        break;
+
+      case 'stats':
+        try {
+          var s = JSON.parse(msg.data);
+          if (s.solve_rate > 0) document.getElementById('solveRate').textContent = s.solve_rate.toFixed(1) + '/s';
+        } catch(err) {}
+        break;
+
+      case 'wallet':
+        if (msg.data.error) {
+          addLog('Wallet error: ' + msg.data.error, 'error');
+        } else {
+          localStorage.setItem('nousWallet', JSON.stringify(msg.data));
+          document.getElementById('address').value = msg.data.address;
+          addLog('Wallet created: ' + msg.data.address, 'success');
+          if (activeTab === 'wallet') renderWallet();
+          showToast('Wallet created!');
+        }
+        break;
+
+      case 'balance':
+        if (msg.data) {
+          var bal = (msg.data.balance / 100000000).toFixed(8);
+          var imm = (msg.data.immature / 100000000).toFixed(8);
+          document.getElementById('balance').textContent = bal;
+          document.getElementById('immature').textContent = imm;
+          var wBal = document.getElementById('wBalance');
+          if (wBal) wBal.innerHTML = bal + '<span class="unit">NOUS</span>';
+          var wImm = document.getElementById('wImmature');
+          if (wImm && msg.data.immature > 0) wImm.textContent = 'Immature: ' + imm + ' NOUS';
+        }
+        break;
+
+      case 'progress':
+        var bar = document.getElementById('progressBar');
+        bar.style.display = 'block';
+        document.getElementById('progressFill').style.width = msg.pct + '%';
+        document.getElementById('statusText').textContent = 'Loading WASM... ' + msg.pct + '%';
+        break;
+
+      case 'error':
+        addLog(msg.msg, 'error');
+        document.getElementById('startBtn').textContent = 'WASM Failed';
+        document.getElementById('statusText').textContent = 'Error';
+        break;
     }
+  };
 
-    // Terminate worker on page unload to prevent zombie workers.
-    window.addEventListener('beforeunload', function() {
-      if (worker) { worker.terminate(); }
-    });
+  worker.postMessage({ action: 'load' });
+}
 
-    initWorker();
-  </script>
+window.addEventListener('beforeunload', function() {
+  if (worker) { worker.terminate(); }
+});
+
+initWorker();
+</script>
 </body>
 </html>
