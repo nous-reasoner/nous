@@ -507,25 +507,6 @@ func (r *RPCServer) handleGetWork(params json.RawMessage) (interface{}, *rpcErro
 	diff := r.chain.GetDifficulty()
 	prevHash := tip.Hash()
 
-	// Generate SAT formula for this seed.
-	satSeed := consensus.MakeSATSeed(prevHash, seed)
-	formula := sat.GenerateFormula(satSeed, consensus.SATVariables, consensus.SATClausesRatio)
-
-	// Format as DIMACS CNF.
-	n := consensus.SATVariables
-	m := len(formula)
-	dimacs := fmt.Sprintf("p cnf %d %d\n", n, m)
-	for _, clause := range formula {
-		for _, lit := range clause {
-			v := lit.Var + 1 // DIMACS is 1-indexed
-			if lit.Neg {
-				v = -v
-			}
-			dimacs += fmt.Sprintf("%d ", v)
-		}
-		dimacs += "0\n"
-	}
-
 	// Build header template for client-side PoW verification.
 	// Build coinbase + merkle root (same as submitwork).
 	mempoolTxs := r.server.Mempool().GetTopN(500)
@@ -584,10 +565,6 @@ func (r *RPCServer) handleGetWork(params json.RawMessage) (interface{}, *rpcErro
 		"height":          height,
 		"prev_hash":       hex.EncodeToString(prevHash[:]),
 		"difficulty_bits": diffBits,
-		"seed":            seed,
-		"n_vars":          n,
-		"n_clauses":       m,
-		"formula":         dimacs,
 		"header_hex":      headerHex,
 	}, nil
 }

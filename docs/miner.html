@@ -70,7 +70,6 @@
     .w-row > * { flex: 1; }
     .addr-text { font-family: 'SF Mono', 'Courier New', monospace; font-size: 12px; color: #888; word-break: break-all; cursor: pointer; padding: 8px; border-radius: 6px; background: #0d0d0d; border: 1px solid #1a1a1a; }
     .addr-text:hover { color: #00ff88; border-color: #00ff8844; }
-    .privkey-box { background: #0d0d0d; border: 1px solid #ff6b6b33; border-radius: 8px; padding: 12px; font-family: 'SF Mono', monospace; font-size: 11px; color: #ff6b6b; word-break: break-all; line-height: 1.6; user-select: all; }
     .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #222; color: #00ff88; padding: 8px 20px; border-radius: 20px; font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 99; }
     .toast.show { opacity: 1; }
     .logo { text-align: center; padding: 30px 0 15px; }
@@ -103,6 +102,15 @@
         <input type="text" id="nodeUrl" value="/api" />
       </div>
       <div class="form-group">
+        <label>Solver</label>
+        <select id="solver">
+          <option value="probsat" selected>ProbSAT</option>
+          <option value="ai" disabled>AI-Guided (Desktop Only)</option>
+          <option value="pureai" disabled>Pure AI (Desktop Only)</option>
+          <option value="custom" disabled>Custom (Desktop Only)</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label>Reasoning Address</label>
         <div style="display: flex; gap: 8px;">
           <input type="text" id="address" placeholder="nous1q..." style="flex: 1;" />
@@ -128,7 +136,8 @@
         <div class="stat-card"><div class="stat-label">Solve Rate</div><div class="stat-value" id="solveRate" style="color:#88aaff;font-size:16px;">&mdash;</div></div>
         <div class="stat-card"><div class="stat-label">Session Blocks</div><div class="stat-value" id="blocksFound">0</div></div>
       </div>
-      <div class="stats" style="margin-top: 10px; grid-template-columns: 1fr 1fr 1fr;">
+      <div class="stats" style="margin-top: 10px; grid-template-columns: 1fr 1fr 1fr 1fr;">
+        <div class="stat-card"><div class="stat-label">Workers</div><div class="stat-value" id="workerCount" style="font-size:16px;">0</div></div>
         <div class="stat-card"><div class="stat-label">Avg Time/Block</div><div class="stat-value" id="avgBlockTime" style="font-size:16px;">&mdash;</div></div>
         <div class="stat-card"><div class="stat-label">Total Blocks</div><div class="stat-value" id="totalBlocks" style="font-size:16px;">0</div></div>
         <div class="stat-card"><div class="stat-label">Total Earnings</div><div class="stat-value" id="totalEarnings" style="font-size:16px;">0</div></div>
@@ -168,7 +177,7 @@
 // ============================================
 // TAB SWITCHING
 // ============================================
-let activeTab = 'reasoning';
+var activeTab = 'reasoning';
 
 function switchTab(tab) {
   activeTab = tab;
@@ -238,12 +247,12 @@ function renderWallet() {
 }
 
 function doCreateWallet() {
-  if (!worker) { showToast('WASM not loaded yet'); return; }
+  if (!utilWorker) { showToast('WASM not loaded yet'); return; }
   var existing = getStoredWallet();
   if (existing && existing.address) {
     if (!confirm('A wallet already exists. Create a new one? The old wallet will be overwritten.')) return;
   }
-  worker.postMessage({ action: 'createWallet' });
+  utilWorker.postMessage({ action: 'createWallet' });
 }
 
 function showImportView() {
@@ -269,9 +278,6 @@ function doImportKey() {
     showToast('Invalid private key (must be 64 hex characters)');
     return;
   }
-  // We need WASM to derive address from private key. Since WASM only exposes createWallet
-  // (random key), we store the key and let the user know the address derivation requires
-  // the desktop app for now.
   showToast('Import requires desktop app. Use Create Wallet for browser.');
 }
 
@@ -307,9 +313,9 @@ function deleteWallet() {
 
 function refreshBalance() {
   var w = getStoredWallet();
-  if (!w || !worker) return;
+  if (!w || !utilWorker) return;
   var nodeUrl = document.getElementById('nodeUrl').value;
-  worker.postMessage({ action: 'getBalance', nodeUrl: nodeUrl, address: w.address });
+  utilWorker.postMessage({ action: 'getBalance', nodeUrl: nodeUrl, address: w.address });
 }
 
 function useWalletAddress() {
@@ -326,16 +332,34 @@ function useWalletAddress() {
 function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 // ============================================
-// REASONING TAB
+// REASONING — MULTI-WORKER PARALLEL MINING
 // ============================================
+var NUM_WORKERS = navigator.hardwareConcurrency || 4;
+var BATCH_SIZE = 200;
+var SEEDS_PER_ROUND = 10000;
+
 var isReasoning = false;
 var sessionStart = null;
 var sessionBlocks = 0;
 var lastBlockTime = null;
 var blockIntervals = [];
-var statsInterval = null;
 var balanceInterval = null;
-var worker = null;
+var uptimeInterval = null;
+
+// Workers: utilWorker handles wallet/balance; mineWorkers[] handle solving
+var utilWorker = null;
+var mineWorkers = [];
+var workersReady = 0;
+
+// Round state
+var currentWork = null;   // work template JSON from getwork
+var currentWorkJSON = '';  // serialized for workers
+var nextSeed = 0;          // dynamic batch counter
+var roundSatSolved = 0;
+var roundSeedsTried = 0;
+var roundStart = 0;
+var roundBlockFound = false;
+var activeBatches = 0;     // how many workers are currently solving
 
 function getAllTimeStats() {
   return JSON.parse(localStorage.getItem('nousAllTime') || '{"blocks":0,"intervals":[]}');
@@ -367,68 +391,6 @@ function addLog(text, cls) {
   while (log.children.length > 200) log.removeChild(log.firstChild);
 }
 
-var logStats = { sat: 0, seeds: 0, rate: '' };
-var logTimer = null;
-
-function flushLog() {
-  if (logStats.seeds > 0) {
-    addLog('Checked ' + logStats.seeds + ' seeds, SAT solved: ' + logStats.sat + ' (' + logStats.rate + ')', 'progress');
-    document.getElementById('solveRate').textContent = logStats.rate || '\u2014';
-    logStats = { sat: 0, seeds: 0, rate: '' };
-  }
-}
-
-function handleReasonerLog(msg) {
-  if (/Block found|Block reasoned|accepted/i.test(msg)) {
-    flushLog();
-    addLog(msg, 'success');
-    var now = Date.now();
-    if (lastBlockTime) {
-      var interval = now - lastBlockTime;
-      blockIntervals.push(interval);
-      saveAllTimeBlock(interval);
-    } else {
-      saveAllTimeBlock(0);
-    }
-    sessionBlocks++;
-    lastBlockTime = now;
-    document.getElementById('blocksFound').textContent = sessionBlocks;
-    updateStatsUI();
-    fetchBalance();
-    return;
-  }
-  if (/Reasoner loaded|Reasoning started|Reasoning block/i.test(msg)) {
-    addLog(msg);
-    return;
-  }
-  if (/error|fail|fatal/i.test(msg) && !/no PoW match/i.test(msg)) {
-    addLog(msg, 'error');
-    return;
-  }
-  var m = msg.match(/(\d+) SAT solved \(([^)]+)\), seed=(\d+)/);
-  if (m) {
-    logStats.sat = parseInt(m[1]);
-    logStats.rate = m[2];
-    logStats.seeds = parseInt(m[3]);
-    document.getElementById('solveRate').textContent = logStats.rate;
-    var rateNum = parseFloat(logStats.rate);
-    if (rateNum < 10) {
-      addLog('Checked ' + logStats.seeds + ' seeds, SAT solved: ' + logStats.sat + ' (' + logStats.rate + ')', 'progress');
-      logStats = { sat: 0, seeds: 0, rate: '' };
-    } else if (!logTimer) {
-      logTimer = setInterval(flushLog, 5000);
-    }
-    return;
-  }
-  if (/Round done/i.test(msg)) {
-    var rm = msg.match(/(\d+) SAT solved.*\(([^)]+)\)/);
-    if (rm) document.getElementById('solveRate').textContent = rm[2];
-    addLog(msg, 'progress');
-    return;
-  }
-  addLog(msg);
-}
-
 function updateStatsUI() {
   if (sessionStart) {
     document.getElementById('uptimeText').textContent = 'Uptime: ' + formatDuration(Date.now() - sessionStart);
@@ -443,107 +405,282 @@ function updateStatsUI() {
     var avg = blockIntervals.reduce(function(a, b) { return a + b; }, 0) / blockIntervals.length;
     document.getElementById('avgBlockTime').textContent = formatDuration(avg);
   }
+  // Update solve rate from round stats
+  if (roundStart > 0 && roundSatSolved > 0) {
+    var elapsed = (Date.now() - roundStart) / 1000;
+    if (elapsed > 0) {
+      var rate = roundSatSolved / elapsed;
+      document.getElementById('solveRate').textContent = rate.toFixed(1) + '/s';
+    }
+  }
 }
 
 function fetchBalance() {
   var address = document.getElementById('address').value;
   var nodeUrl = document.getElementById('nodeUrl').value;
-  if (!address || !worker) return;
-  worker.postMessage({ action: 'getBalance', nodeUrl: nodeUrl, address: address });
+  if (!address || !utilWorker) return;
+  utilWorker.postMessage({ action: 'getBalance', nodeUrl: nodeUrl, address: address });
 }
 
-function startReasoning() {
+// --- RPC via fetch (main thread) ---
+
+function rpcCall(method, params) {
   var nodeUrl = document.getElementById('nodeUrl').value.trim();
+  return fetch(nodeUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', method: method, params: params, id: 1 })
+  }).then(function(r) { return r.json(); }).then(function(j) {
+    if (j.error) throw new Error(j.error.message);
+    return j.result;
+  });
+}
+
+// --- Mining orchestration ---
+
+function startReasoning() {
   var address = document.getElementById('address').value.trim();
   if (!address) { addLog('Please enter an address or create a wallet', 'error'); return; }
   if (!address.startsWith('nous1')) { addLog('Address should start with "nous1"', 'error'); return; }
-  worker.postMessage({ action: 'start', nodeUrl: nodeUrl, address: address });
+
+  isReasoning = true;
+  sessionStart = Date.now();
+  sessionBlocks = 0;
+  lastBlockTime = Date.now();
+  blockIntervals = [];
+
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = false;
+  document.getElementById('statusDot').className = 'status-dot active';
+  document.getElementById('statusText').textContent = 'Reasoning (' + NUM_WORKERS + ' workers)...';
+
+  balanceInterval = setInterval(fetchBalance, 30000);
+  uptimeInterval = setInterval(updateStatsUI, 2000);
+
+  addLog('Starting with ' + NUM_WORKERS + ' parallel workers...');
+  startNewRound();
 }
 
 function stopReasoning() {
-  worker.postMessage({ action: 'stop' });
+  isReasoning = false;
+
+  // Terminate all mine workers and recreate them
+  for (var i = 0; i < mineWorkers.length; i++) {
+    mineWorkers[i].terminate();
+  }
+  mineWorkers = [];
+  activeBatches = 0;
+
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  document.getElementById('statusDot').className = 'status-dot';
+  document.getElementById('statusText').textContent = 'Idle';
+
+  if (balanceInterval) { clearInterval(balanceInterval); balanceInterval = null; }
+  if (uptimeInterval) { clearInterval(uptimeInterval); uptimeInterval = null; }
+  sessionStart = null;
+  updateStatsUI();
+  addLog('Reasoning stopped');
+
+  // Recreate mine workers for next start
+  initMineWorkers();
 }
 
-function setReasoningUI(active) {
-  isReasoning = active;
-  document.getElementById('startBtn').disabled = active;
-  document.getElementById('stopBtn').disabled = !active;
-  document.getElementById('statusDot').className = 'status-dot' + (active ? ' active' : '');
-  document.getElementById('statusText').textContent = active ? 'Reasoning...' : 'Idle';
-  if (active) {
-    sessionStart = Date.now();
-    sessionBlocks = 0;
-    lastBlockTime = Date.now();
-    blockIntervals = [];
-    statsInterval = setInterval(function() {
+function startNewRound() {
+  if (!isReasoning) return;
+
+  var address = document.getElementById('address').value.trim();
+  rpcCall('getwork', [address, 0]).then(function(work) {
+    if (!isReasoning) return;
+
+    currentWork = work;
+    currentWorkJSON = JSON.stringify(work);
+    nextSeed = 0;
+    roundSatSolved = 0;
+    roundSeedsTried = 0;
+    roundStart = Date.now();
+    roundBlockFound = false;
+    activeBatches = 0;
+
+    addLog('Reasoning block ' + work.height + ' (diff: 0x' + work.difficulty_bits.toString(16).padStart(8, '0') + ')');
+
+    // Dispatch initial batches to all workers
+    for (var i = 0; i < mineWorkers.length; i++) {
+      dispatchBatch(mineWorkers[i]);
+    }
+  }).catch(function(err) {
+    if (!isReasoning) return;
+    addLog('getwork error: ' + err.message, 'error');
+    setTimeout(startNewRound, 5000);
+  });
+}
+
+function dispatchBatch(worker) {
+  if (!isReasoning || roundBlockFound) return;
+  if (nextSeed >= SEEDS_PER_ROUND) return; // round exhausted, wait for all batches
+
+  var seedStart = nextSeed;
+  var seedEnd = Math.min(nextSeed + BATCH_SIZE, SEEDS_PER_ROUND);
+  nextSeed = seedEnd;
+  activeBatches++;
+
+  worker.postMessage({
+    action: 'solveBatch',
+    workJSON: currentWorkJSON,
+    seedStart: seedStart,
+    seedEnd: seedEnd
+  });
+}
+
+function handleBatchResult(worker, dataStr) {
+  activeBatches--;
+  if (!isReasoning) return;
+
+  var data;
+  try { data = JSON.parse(dataStr); } catch(e) { return; }
+
+  if (data.error) {
+    addLog('Batch error: ' + data.error, 'error');
+    return;
+  }
+
+  roundSatSolved += data.sat_solved;
+  roundSeedsTried += data.seeds_tried;
+
+  if (data.found && !roundBlockFound) {
+    roundBlockFound = true;
+    addLog('Block found at seed ' + data.seed + '! Submitting...', 'success');
+
+    var address = document.getElementById('address').value.trim();
+    rpcCall('submitwork', [address, data.seed, data.solution, data.header_timestamp]).then(function(result) {
+      addLog('Block reasoned! Height: ' + result.height + ', Hash: ' + result.block_hash, 'success');
+
+      var now = Date.now();
+      if (lastBlockTime) {
+        var interval = now - lastBlockTime;
+        blockIntervals.push(interval);
+        saveAllTimeBlock(interval);
+      } else {
+        saveAllTimeBlock(0);
+      }
+      sessionBlocks++;
+      lastBlockTime = now;
       updateStatsUI();
-      worker.postMessage({ action: 'stats' });
-    }, 2000);
-    balanceInterval = setInterval(fetchBalance, 30000);
-  } else {
-    sessionStart = null;
-    if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
-    if (balanceInterval) { clearInterval(balanceInterval); balanceInterval = null; }
-    updateStatsUI();
+      fetchBalance();
+
+      // Start next round
+      startNewRound();
+    }).catch(function(err) {
+      addLog('Submit error: ' + err.message, 'error');
+      roundBlockFound = false; // allow retry
+      startNewRound();
+    });
+    return;
+  }
+
+  // Update stats display
+  if (roundStart > 0 && roundSatSolved > 0) {
+    var elapsed = (Date.now() - roundStart) / 1000;
+    if (elapsed > 0.5) {
+      var rate = roundSatSolved / elapsed;
+      document.getElementById('solveRate').textContent = rate.toFixed(1) + '/s';
+    }
+  }
+
+  // Dispatch next batch to this worker (dynamic allocation)
+  if (nextSeed < SEEDS_PER_ROUND && !roundBlockFound) {
+    dispatchBatch(worker);
+  } else if (activeBatches === 0 && !roundBlockFound) {
+    // All seeds exhausted, no block found — log and start new round
+    var elapsed = (Date.now() - roundStart) / 1000;
+    var rate = elapsed > 0 ? (roundSatSolved / elapsed).toFixed(1) : '0';
+    addLog('Round done: ' + roundSatSolved + ' SAT solved in ' + elapsed.toFixed(1) + 's (' + rate + '/s)', 'progress');
+    startNewRound();
   }
 }
 
 // ============================================
-// WORKER
+// WORKER INIT
 // ============================================
-function initWorker() {
-  if (worker) { worker.terminate(); worker = null; }
-  addLog('Loading WASM reasoner...');
-  worker = new Worker('worker.js');
+function initMineWorkers() {
+  workersReady = 0;
+  mineWorkers = [];
 
-  worker.onerror = function(e) {
-    addLog('Worker error: ' + (e.message || 'unknown'), 'error');
-    document.getElementById('statusText').textContent = 'Error';
-    document.getElementById('statusDot').className = 'status-dot';
-  };
+  for (var i = 0; i < NUM_WORKERS; i++) {
+    (function(idx) {
+      var w = new Worker('worker.js');
 
-  worker.onmessage = function(e) {
+      w.onmessage = function(e) {
+        var msg = e.data;
+        switch (msg.type) {
+          case 'ready':
+            workersReady++;
+            if (workersReady === NUM_WORKERS) {
+              document.getElementById('progressBar').style.display = 'none';
+              document.getElementById('startBtn').textContent = 'Start Reasoning';
+              document.getElementById('startBtn').disabled = false;
+              document.getElementById('statusDot').className = 'status-dot';
+              document.getElementById('statusText').textContent = 'Idle (' + NUM_WORKERS + ' workers ready)';
+              document.getElementById('workerCount').textContent = NUM_WORKERS;
+              addLog(NUM_WORKERS + ' workers loaded. Ready.', 'success');
+
+              var wallet = getStoredWallet();
+              if (wallet && wallet.address) {
+                document.getElementById('address').value = wallet.address;
+                addLog('Wallet loaded: ' + wallet.address);
+                fetchBalance();
+              }
+              updateStatsUI();
+            } else {
+              document.getElementById('statusText').textContent = 'Loading workers... ' + workersReady + '/' + NUM_WORKERS;
+            }
+            break;
+
+          case 'batchResult':
+            handleBatchResult(w, msg.data);
+            break;
+
+          case 'log':
+            // Only show critical logs from mine workers, skip per-worker verbose logs
+            if (/error|fail|fatal/i.test(msg.msg) && !/no PoW match/i.test(msg.msg)) {
+              addLog('[W' + idx + '] ' + msg.msg, 'error');
+            }
+            break;
+
+          case 'progress':
+            // Show progress from first worker only
+            if (idx === 0) {
+              var bar = document.getElementById('progressBar');
+              bar.style.display = 'block';
+              document.getElementById('progressFill').style.width = msg.pct + '%';
+              document.getElementById('statusText').textContent = 'Loading WASM... ' + msg.pct + '%';
+            }
+            break;
+
+          case 'error':
+            addLog('[W' + idx + '] ' + msg.msg, 'error');
+            break;
+        }
+      };
+
+      w.onerror = function(e) {
+        addLog('[W' + idx + '] Worker error: ' + (e.message || 'unknown'), 'error');
+      };
+
+      mineWorkers.push(w);
+      w.postMessage({ action: 'load' });
+    })(i);
+  }
+}
+
+function initUtilWorker() {
+  utilWorker = new Worker('worker.js');
+
+  utilWorker.onmessage = function(e) {
     var msg = e.data;
     switch (msg.type) {
       case 'ready':
-        document.getElementById('progressBar').style.display = 'none';
-        document.getElementById('startBtn').textContent = 'Start Reasoning';
-        document.getElementById('startBtn').disabled = false;
-        document.getElementById('statusDot').className = 'status-dot';
-        document.getElementById('statusText').textContent = 'Idle';
-        addLog('WASM loaded. Ready.', 'success');
-        var w = getStoredWallet();
-        if (w && w.address) {
-          document.getElementById('address').value = w.address;
-          addLog('Wallet loaded: ' + w.address);
-          fetchBalance();
-        }
-        updateStatsUI();
-        break;
-
-      case 'log':
-        handleReasonerLog(msg.msg);
-        break;
-
-      case 'started':
-        if (msg.result === 'started') {
-          setReasoningUI(true);
-          addLog('Reasoning started with ProbSAT solver...');
-        } else {
-          addLog('Start failed: ' + msg.result, 'error');
-        }
-        break;
-
-      case 'stopped':
-        setReasoningUI(false);
-        addLog('Reasoning stopped');
-        break;
-
-      case 'stats':
-        try {
-          var s = JSON.parse(msg.data);
-          if (s.solve_rate > 0) document.getElementById('solveRate').textContent = s.solve_rate.toFixed(1) + '/s';
-        } catch(err) {}
+        // Util worker ready silently
         break;
 
       case 'wallet':
@@ -571,29 +708,25 @@ function initWorker() {
         }
         break;
 
-      case 'progress':
-        var bar = document.getElementById('progressBar');
-        bar.style.display = 'block';
-        document.getElementById('progressFill').style.width = msg.pct + '%';
-        document.getElementById('statusText').textContent = 'Loading WASM... ' + msg.pct + '%';
-        break;
-
-      case 'error':
-        addLog(msg.msg, 'error');
-        document.getElementById('startBtn').textContent = 'WASM Failed';
-        document.getElementById('statusText').textContent = 'Error';
+      case 'log':
+        // Util worker WASM load log
         break;
     }
   };
 
-  worker.postMessage({ action: 'load' });
+  utilWorker.postMessage({ action: 'load' });
 }
 
 window.addEventListener('beforeunload', function() {
-  if (worker) { worker.terminate(); }
+  for (var i = 0; i < mineWorkers.length; i++) {
+    mineWorkers[i].terminate();
+  }
+  if (utilWorker) utilWorker.terminate();
 });
 
-initWorker();
+addLog('Initializing ' + NUM_WORKERS + ' reasoning workers...');
+initUtilWorker();
+initMineWorkers();
 </script>
 </body>
 </html>

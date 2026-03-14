@@ -1,12 +1,12 @@
 // NOUS Reasoner Web Worker
-// Runs WASM in a separate thread so the UI stays responsive.
+// Each worker loads its own WASM instance for parallel solving.
 
-const WASM_VERSION = '1.2.0';
+const WASM_VERSION = '2.0.0';
 const WASM_CACHE_KEY = 'miner-' + WASM_VERSION;
 
 importScripts('wasm_exec.js');
 
-// Bridge: Go WASM calls postReasonerLog → worker sends to main thread.
+// Bridge: Go WASM calls postReasonerLog -> worker sends to main thread.
 self.postReasonerLog = function(msg) {
   self.postMessage({ type: 'log', msg: msg });
 };
@@ -93,39 +93,25 @@ async function cacheWasm(bytes) {
 }
 
 self.onmessage = function(e) {
-  const { action, nodeUrl, address } = e.data;
+  var d = e.data;
 
-  if (!wasmReady && action !== 'load') {
+  if (!wasmReady && d.action !== 'load') {
     self.postMessage({ type: 'error', msg: 'WASM not ready' });
     return;
   }
 
-  switch (action) {
+  switch (d.action) {
     case 'load':
       loadWasm();
       break;
 
-    case 'start':
-      const result = nousReasoner.start(nodeUrl, address);
-      self.postMessage({ type: 'started', result: result });
-      break;
-
-    case 'stop':
-      nousReasoner.stop();
-      self.postMessage({ type: 'stopped' });
-      break;
-
-    case 'stats':
-      try {
-        const stats = nousReasoner.getStats();
-        self.postMessage({ type: 'stats', data: stats });
-      } catch(err) {
-        self.postMessage({ type: 'stats', data: '{}' });
-      }
+    case 'solveBatch':
+      var result = nousReasoner.solveBatch(d.workJSON, d.seedStart, d.seedEnd);
+      self.postMessage({ type: 'batchResult', data: result });
       break;
 
     case 'createWallet':
-      const wallet = nousReasoner.createWallet();
+      var wallet = nousReasoner.createWallet();
       self.postMessage({ type: 'wallet', data: {
         private_key: wallet.private_key,
         public_key: wallet.public_key,
@@ -135,7 +121,7 @@ self.onmessage = function(e) {
       break;
 
     case 'getBalance':
-      nousReasoner.getBalance(nodeUrl, address).then(function(bal) {
+      nousReasoner.getBalance(d.nodeUrl, d.address).then(function(bal) {
         self.postMessage({ type: 'balance', data: { balance: bal.balance, immature: bal.immature } });
       }).catch(function() {
         self.postMessage({ type: 'balance', data: null });

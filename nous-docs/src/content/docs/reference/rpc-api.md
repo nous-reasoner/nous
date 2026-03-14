@@ -104,11 +104,28 @@ Response:
 ```
 
 ### getwork
-Returns a mining work template.
+Returns a mining work template for the given address.
 
-**Params**: `[address, extra_nonce]`
+**Params**: `[address]`
 
-Returns the block header template, 3-SAT formula, difficulty bits, and height.
+Response:
+```json
+{
+  "height": 6200,
+  "prev_hash": "0000063dbc5334ed...",
+  "difficulty_bits": 503747976,
+  "header_hex": "0100000000000..."
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `height` | Block height being mined |
+| `prev_hash` | Previous block hash (hex) |
+| `difficulty_bits` | Compact difficulty target |
+| `header_hex` | 148-byte header template (hex). Miner fills in seed (bytes 76-84) and solution hash (bytes 84-116) |
+
+Miners generate the 3-SAT formula locally from `SHA256(prev_hash || seed)` — the formula is deterministic and does not need to be transmitted.
 
 ### submitblock
 Submits a solved block.
