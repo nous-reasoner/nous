@@ -1,6 +1,9 @@
 // NOUS Reasoner Web Worker
 // Runs WASM in a separate thread so the UI stays responsive.
 
+const WASM_VERSION = '1.2.0';
+const WASM_CACHE_KEY = 'miner-' + WASM_VERSION;
+
 importScripts('wasm_exec.js');
 
 // Bridge: Go WASM calls postReasonerLog → worker sends to main thread.
@@ -76,7 +79,7 @@ async function getCachedWasm() {
     const db = await openCacheDB();
     return new Promise(function(resolve) {
       const tx = db.transaction('wasm', 'readonly');
-      const req = tx.objectStore('wasm').get('miner');
+      const req = tx.objectStore('wasm').get(WASM_CACHE_KEY);
       req.onsuccess = function() { resolve(req.result || null); };
       req.onerror = function() { resolve(null); };
     });
@@ -86,7 +89,7 @@ async function getCachedWasm() {
 async function cacheWasm(bytes) {
   const db = await openCacheDB();
   const tx = db.transaction('wasm', 'readwrite');
-  tx.objectStore('wasm').put(bytes, 'miner');
+  tx.objectStore('wasm').put(bytes, WASM_CACHE_KEY);
 }
 
 self.onmessage = function(e) {
