@@ -1,10 +1,11 @@
-// leaderboard is a background service that scans the NOUS blockchain and
-// writes a leaderboard.json file for the block explorer frontend.
-// It also builds an in-memory address→transaction index and serves
-// an HTTP API for the explorer to query address history.
+// leaderboard is a background service that scans the NOUS blockchain,
+// writes leaderboard/explorer JSON files, and serves an HTTP API for
+// address transaction history. All index data is persisted in SQLite
+// so restarts only need to scan new blocks.
 package main
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -19,7 +20,11 @@ import (
 	"time"
 
 	"nous/crypto"
+
+	_ "modernc.org/sqlite"
 )
+
+// --- RPC client ---
 
 type rpcRequest struct {
 	Method string `json:"method"`
@@ -58,7 +63,6 @@ type rpcErr struct{ msg string }
 
 func (e *rpcErr) Error() string { return e.msg }
 
-// rpcTo calls an RPC method on a specific node URL.
 func rpcTo(url, method string, params ...any) (json.RawMessage, error) {
 	body, _ := json.Marshal(rpcRequest{Method: method, Params: params, ID: 1})
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -78,20 +82,19 @@ func rpcTo(url, method string, params ...any) (json.RawMessage, error) {
 	return r.Result, nil
 }
 
-// seedRPCURLs lists all seed node RPC endpoints for cross-node queries.
+// --- Node count ---
+
 var seedRPCURLs = []string{
 	"http://80.78.26.7:8332/rpc",
 	"http://80.78.25.211:8332/rpc",
 	"http://80.78.26.244:8332/rpc",
 }
 
-// seedHosts contains all known seed node IPs and hostnames to avoid double-counting.
 var seedHosts = map[string]bool{
 	"80.78.26.7": true, "80.78.25.211": true, "80.78.26.244": true,
 	"seed1.nouschain.org": true, "seed2.nouschain.org": true, "seed3.nouschain.org": true,
 }
 
-// cached node count to smooth over transient RPC failures
 var (
 	cachedNodeCount int
 	cachedNodeTime  time.Time
@@ -99,18 +102,12 @@ var (
 
 const nodeCountCacheTTL = 5 * time.Minute
 
-// countNetworkNodes queries all seed nodes' getpeerinfo, deduplicates by IP,
-// and returns total unique node count (seeds + external).
-// Uses a 5-minute cache: if the fresh count is lower due to RPC failures,
-// the cached value is returned until it expires.
 func countNetworkNodes() int {
 	type peerInfo struct {
 		Addr string `json:"addr"`
 	}
-
 	uniqueIPs := make(map[string]bool)
 
-	// Query local node first (always fast, no network hop).
 	if raw, err := rpc("getpeerinfo"); err == nil {
 		var peers []peerInfo
 		if json.Unmarshal(raw, &peers) == nil {
@@ -124,10 +121,7 @@ func countNetworkNodes() int {
 		}
 	}
 
-	// Query remote seed nodes in parallel.
-	type result struct {
-		peers []peerInfo
-	}
+	type result struct{ peers []peerInfo }
 	results := make([]result, len(seedRPCURLs))
 	var wg sync.WaitGroup
 	for i, seedURL := range seedRPCURLs {
@@ -156,8 +150,7 @@ func countNetworkNodes() int {
 		}
 	}
 
-	// Count: 3 seed nodes + unique external IPs.
-	nodeCount := 3 // 3 seed nodes
+	nodeCount := 3
 	for ip := range uniqueIPs {
 		if !seedHosts[ip] {
 			nodeCount++
@@ -166,8 +159,6 @@ func countNetworkNodes() int {
 	if nodeCount < 1 {
 		nodeCount = 1
 	}
-
-	// Cache: only update if fresh count is >= cached, or cache expired.
 	if nodeCount >= cachedNodeCount || time.Since(cachedNodeTime) > nodeCountCacheTTL {
 		cachedNodeCount = nodeCount
 		cachedNodeTime = time.Now()
@@ -203,19 +194,12 @@ type diffChartData struct {
 	Points    []diffPoint `json:"points"`
 }
 
-// --- Address index ---
-
 type addrTx struct {
 	TxID      string `json:"txid"`
 	Height    int    `json:"height"`
 	Timestamp int64  `json:"timestamp"`
 	Value     int64  `json:"value"`
-	Direction string `json:"direction"` // "in" = received, "out" = sent
-}
-
-type outputRef struct {
-	Address string
-	Value   int64
+	Direction string `json:"direction"`
 }
 
 // gettx response shape
@@ -233,7 +217,6 @@ type txData struct {
 
 const zeroCoinbasePrev = "0000000000000000000000000000000000000000000000000000000000000000"
 
-// scriptToAddress decodes a P2PKH script (76a914{20-byte-pkh}88ac) to a bech32m address.
 func scriptToAddress(scriptHex string) string {
 	if len(scriptHex) != 50 || !strings.HasPrefix(scriptHex, "76a914") || !strings.HasSuffix(scriptHex, "88ac") {
 		return ""
@@ -245,18 +228,70 @@ func scriptToAddress(scriptHex string) string {
 	return crypto.PubKeyHashToBech32mAddress(pkh)
 }
 
-// --- State ---
+// --- SQLite storage ---
 
-var (
-	mu         sync.Mutex
-	minerMap   = map[string]*minerStat{}
-	diffPoints []diffPoint
-	lastScan   = -1
-	addrIndex  = map[string][]addrTx{}
-	outputMap  = map[string]outputRef{} // "txid:vout" → ref
-)
+var db *sql.DB
 
-const batchSize = 50
+func initDB(dbPath string) error {
+	var err error
+	db, err = sql.Open("sqlite", dbPath)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+
+	// Performance tuning.
+	db.Exec("PRAGMA journal_mode=WAL")
+	db.Exec("PRAGMA synchronous=NORMAL")
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS miners (
+			address TEXT PRIMARY KEY,
+			blocks INTEGER NOT NULL DEFAULT 0,
+			last_ts INTEGER NOT NULL DEFAULT 0,
+			last_height INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE TABLE IF NOT EXISTS diff_points (
+			height INTEGER PRIMARY KEY,
+			difficulty INTEGER NOT NULL,
+			timestamp INTEGER NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS addr_txs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			address TEXT NOT NULL,
+			txid TEXT NOT NULL,
+			height INTEGER NOT NULL,
+			timestamp INTEGER NOT NULL,
+			value INTEGER NOT NULL,
+			direction TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_addr ON addr_txs(address);
+		CREATE TABLE IF NOT EXISTS outputs (
+			key TEXT PRIMARY KEY,
+			address TEXT NOT NULL,
+			value INTEGER NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS meta (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+	`)
+	return err
+}
+
+func dbGetLastScan() int {
+	var val string
+	err := db.QueryRow("SELECT value FROM meta WHERE key='last_scan'").Scan(&val)
+	if err != nil {
+		return -1
+	}
+	var n int
+	fmt.Sscanf(val, "%d", &n)
+	return n
+}
+
+func dbSetLastScan(height int) {
+	db.Exec("INSERT OR REPLACE INTO meta(key,value) VALUES('last_scan', ?)", fmt.Sprintf("%d", height))
+}
 
 // --- Block scanning ---
 
@@ -269,7 +304,12 @@ type blockResult struct {
 	Transactions []string `json:"transactions"`
 }
 
+const batchSize = 50
+
+var mu sync.Mutex // protects DB writes during scan batches
+
 func scanNewBlocks(height int) error {
+	lastScan := dbGetLastScan()
 	from := lastScan + 1
 	if from > height {
 		return nil
@@ -282,7 +322,7 @@ func scanNewBlocks(height int) error {
 			end = height
 		}
 
-		// 1. Fetch block headers in parallel.
+		// 1. Fetch blocks in parallel.
 		blocks := make([]blockResult, end-start+1)
 		blockErrs := make([]error, end-start+1)
 		var wg sync.WaitGroup
@@ -300,28 +340,30 @@ func scanNewBlocks(height int) error {
 		}
 		wg.Wait()
 
-		// 2. Collect all txids from this batch and fetch them in parallel.
+		// 2. Only fetch tx details for blocks with real transactions (tx_count > 1).
 		type txKey struct {
 			blockIdx int
-			txIdx    int
 			txid     string
 		}
-		var allTxKeys []txKey
+		var txKeys []txKey
 		for i, b := range blocks {
-			if blockErrs[i] != nil {
+			if blockErrs[i] != nil || b.TxCount <= 1 {
 				continue
 			}
-			for j, txid := range b.Transactions {
-				allTxKeys = append(allTxKeys, txKey{blockIdx: i, txIdx: j, txid: txid})
+			for _, txid := range b.Transactions {
+				txKeys = append(txKeys, txKey{blockIdx: i, txid: txid})
 			}
 		}
 
-		txResults := make([]txData, len(allTxKeys))
-		txErrs := make([]error, len(allTxKeys))
-		for k, tk := range allTxKeys {
+		txResults := make([]txData, len(txKeys))
+		txErrs := make([]error, len(txKeys))
+		sem := make(chan struct{}, 8)
+		for k, tk := range txKeys {
 			wg.Add(1)
 			go func(k int, txid string) {
 				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
 				raw, err := rpc("gettx", txid)
 				if err != nil {
 					txErrs[k] = err
@@ -332,98 +374,109 @@ func scanNewBlocks(height int) error {
 		}
 		wg.Wait()
 
-		// Build a map: blockIdx → []txData (preserving tx order within block)
 		blockTxs := map[int][]txData{}
-		for k, tk := range allTxKeys {
-			if txErrs[k] != nil {
-				continue
+		for k, tk := range txKeys {
+			if txErrs[k] == nil {
+				blockTxs[tk.blockIdx] = append(blockTxs[tk.blockIdx], txResults[k])
 			}
-			blockTxs[tk.blockIdx] = append(blockTxs[tk.blockIdx], txResults[k])
 		}
 
-		// 3. Process blocks sequentially (for outputMap ordering).
+		// 3. Process blocks sequentially, write to SQLite in a transaction.
 		mu.Lock()
+		tx, err := db.Begin()
+		if err != nil {
+			mu.Unlock()
+			return fmt.Errorf("begin tx: %w", err)
+		}
+
+		stmtMiner, _ := tx.Prepare(`INSERT INTO miners(address,blocks,last_ts,last_height) VALUES(?,1,?,?)
+			ON CONFLICT(address) DO UPDATE SET blocks=blocks+1, last_ts=MAX(last_ts,excluded.last_ts), last_height=MAX(last_height,excluded.last_height)`)
+		stmtDiff, _ := tx.Prepare("INSERT OR IGNORE INTO diff_points(height,difficulty,timestamp) VALUES(?,?,?)")
+		stmtAddrTx, _ := tx.Prepare("INSERT INTO addr_txs(address,txid,height,timestamp,value,direction) VALUES(?,?,?,?,?,?)")
+		stmtOutput, _ := tx.Prepare("INSERT OR REPLACE INTO outputs(key,address,value) VALUES(?,?,?)")
+
 		for i, b := range blocks {
 			if blockErrs[i] != nil {
 				continue
 			}
 
-			// Difficulty chart data.
-			diffPoints = append(diffPoints, diffPoint{
-				Height:     b.Height,
-				Difficulty: b.Difficulty,
-				Timestamp:  b.Timestamp,
-			})
+			stmtDiff.Exec(b.Height, b.Difficulty, b.Timestamp)
 
-			// Miner leaderboard.
 			if b.MinerAddress != "" {
-				s, ok := minerMap[b.MinerAddress]
-				if !ok {
-					s = &minerStat{Address: b.MinerAddress}
-					minerMap[b.MinerAddress] = s
-				}
-				s.Blocks++
-				if b.Timestamp > s.LastTs {
-					s.LastTs = b.Timestamp
-					s.LastHeight = b.Height
-				}
+				stmtMiner.Exec(b.MinerAddress, b.Timestamp, b.Height)
 			}
 
-			// Address index: process this block's transactions.
-			for _, t := range blockTxs[i] {
-				// Outputs first (populate outputMap before resolving inputs).
-				for vout, out := range t.Outputs {
-					addr := scriptToAddress(out.Script)
-					if addr == "" {
-						continue
-					}
-					key := fmt.Sprintf("%s:%d", t.TxID, vout)
-					outputMap[key] = outputRef{Address: addr, Value: out.Value}
-					addrIndex[addr] = append(addrIndex[addr], addrTx{
-						TxID:      t.TxID,
-						Height:    b.Height,
-						Timestamp: b.Timestamp,
-						Value:     out.Value,
-						Direction: "in",
-					})
+			// Address index.
+			if b.TxCount <= 1 && b.MinerAddress != "" && len(b.Transactions) == 1 {
+				// Coinbase-only: record directly.
+				coinbaseTxID := b.Transactions[0]
+				var reward int64
+				if b.Height > 0 {
+					reward = 100000000
 				}
-
-				// Inputs (skip coinbase).
-				for _, inp := range t.Inputs {
-					if inp.PrevTxID == zeroCoinbasePrev {
-						continue
+				if reward > 0 {
+					key := fmt.Sprintf("%s:0", coinbaseTxID)
+					stmtOutput.Exec(key, b.MinerAddress, reward)
+					stmtAddrTx.Exec(b.MinerAddress, coinbaseTxID, b.Height, b.Timestamp, reward, "in")
+				}
+			} else {
+				for _, t := range blockTxs[i] {
+					for vout, out := range t.Outputs {
+						addr := scriptToAddress(out.Script)
+						if addr == "" {
+							continue
+						}
+						key := fmt.Sprintf("%s:%d", t.TxID, vout)
+						stmtOutput.Exec(key, addr, out.Value)
+						stmtAddrTx.Exec(addr, t.TxID, b.Height, b.Timestamp, out.Value, "in")
 					}
-					key := fmt.Sprintf("%s:%d", inp.PrevTxID, inp.PrevIndex)
-					ref, ok := outputMap[key]
-					if !ok {
-						continue
+					for _, inp := range t.Inputs {
+						if inp.PrevTxID == zeroCoinbasePrev {
+							continue
+						}
+						key := fmt.Sprintf("%s:%d", inp.PrevTxID, inp.PrevIndex)
+						var refAddr string
+						var refValue int64
+						err := tx.QueryRow("SELECT address,value FROM outputs WHERE key=?", key).Scan(&refAddr, &refValue)
+						if err != nil {
+							continue
+						}
+						stmtAddrTx.Exec(refAddr, t.TxID, b.Height, b.Timestamp, refValue, "out")
 					}
-					addrIndex[ref.Address] = append(addrIndex[ref.Address], addrTx{
-						TxID:      t.TxID,
-						Height:    b.Height,
-						Timestamp: b.Timestamp,
-						Value:     ref.Value,
-						Direction: "out",
-					})
 				}
 			}
 		}
+
+		stmtMiner.Close()
+		stmtDiff.Close()
+		stmtAddrTx.Close()
+		stmtOutput.Close()
+
+		tx.Exec("INSERT OR REPLACE INTO meta(key,value) VALUES('last_scan', ?)", fmt.Sprintf("%d", end))
+		tx.Commit()
 		mu.Unlock()
 	}
 
-	lastScan = height
+	log.Printf("leaderboard: scan complete, height=%d", height)
 	return nil
 }
 
 // --- Build JSON outputs ---
 
 func buildJSON(height int) leaderboardData {
-	mu.Lock()
-	miners := make([]minerStat, 0, len(minerMap))
-	for _, s := range minerMap {
-		miners = append(miners, *s)
+	// Load miners from DB.
+	rows, err := db.Query("SELECT address,blocks,last_ts,last_height FROM miners")
+	if err != nil {
+		return leaderboardData{UpdatedAt: time.Now().Unix(), Height: height}
 	}
-	mu.Unlock()
+	defer rows.Close()
+
+	var miners []minerStat
+	for rows.Next() {
+		var m minerStat
+		rows.Scan(&m.Address, &m.Blocks, &m.LastTs, &m.LastHeight)
+		miners = append(miners, m)
+	}
 
 	// Fetch actual balance for each miner.
 	var wg sync.WaitGroup
@@ -506,7 +559,6 @@ func fetchRecentBlocks(height int) recentBlocksData {
 		block recentBlock
 		err   error
 	}
-
 	results := make([]result, start-end+1)
 	var wg sync.WaitGroup
 	for h := start; h >= end; h-- {
@@ -553,7 +605,7 @@ func fetchRecentBlocks(height int) recentBlocksData {
 	}
 }
 
-// --- HTTP API for address history ---
+// --- HTTP API ---
 
 func startAPI(listenAddr string) {
 	mux := http.NewServeMux()
@@ -565,7 +617,6 @@ func startAPI(listenAddr string) {
 }
 
 func handleAddrHistory(w http.ResponseWriter, r *http.Request) {
-	// URL: /address/{addr}/txs
 	path := strings.TrimPrefix(r.URL.Path, "/address/")
 	addr := strings.TrimSuffix(path, "/txs")
 	addr = strings.TrimSuffix(addr, "/")
@@ -575,23 +626,31 @@ func handleAddrHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mu.Lock()
-	txs := addrIndex[addr]
-	result := make([]addrTx, len(txs))
-	copy(result, txs)
-	mu.Unlock()
+	rows, err := db.Query(
+		"SELECT txid,height,timestamp,value,direction FROM addr_txs WHERE address=? ORDER BY height DESC",
+		addr)
+	if err != nil {
+		http.Error(w, `[]`, 200)
+		return
+	}
+	defer rows.Close()
 
-	// Most recent first.
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Height > result[j].Height
-	})
+	var txs []addrTx
+	for rows.Next() {
+		var t addrTx
+		rows.Scan(&t.TxID, &t.Height, &t.Timestamp, &t.Value, &t.Direction)
+		txs = append(txs, t)
+	}
+	if txs == nil {
+		txs = []addrTx{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	json.NewEncoder(w).Encode(result)
+	json.NewEncoder(w).Encode(txs)
 }
 
-// --- Main update loop ---
+// --- Main ---
 
 func update(outFile string) {
 	raw, err := rpc("getblockcount")
@@ -616,36 +675,34 @@ func update(outFile string) {
 		return
 	}
 
-	// Write difficulty chart JSON (last 200 points).
-	mu.Lock()
-	pts := diffPoints
-	if len(pts) > 200 {
-		pts = pts[len(pts)-200:]
+	// Difficulty chart (last 200 points from DB).
+	dRows, err := db.Query("SELECT height,difficulty,timestamp FROM diff_points ORDER BY height DESC LIMIT 200")
+	if err == nil {
+		var pts []diffPoint
+		for dRows.Next() {
+			var p diffPoint
+			dRows.Scan(&p.Height, &p.Difficulty, &p.Timestamp)
+			pts = append(pts, p)
+		}
+		dRows.Close()
+		// Reverse to ascending order.
+		for i, j := 0, len(pts)-1; i < j; i, j = i+1, j-1 {
+			pts[i], pts[j] = pts[j], pts[i]
+		}
+		diffData := diffChartData{UpdatedAt: time.Now().Unix(), Points: pts}
+		baseDir := outFile[:len(outFile)-len("leaderboard.json")]
+		writeJSON(baseDir+"difficulty.json", diffData)
 	}
-	diffData := diffChartData{UpdatedAt: time.Now().Unix(), Points: pts}
-	mu.Unlock()
 
-	baseDir := outFile[:len(outFile)-len("leaderboard.json")]
-	diffFile := baseDir + "difficulty.json"
-	if err := writeJSON(diffFile, diffData); err != nil {
-		log.Printf("leaderboard: write %s: %v", diffFile, err)
-	}
-
-	// Write recent blocks JSON for explorer homepage.
+	// Recent blocks.
 	recentData := fetchRecentBlocks(height)
-	recentFile := baseDir + "recentblocks.json"
-	if err := writeJSON(recentFile, recentData); err != nil {
-		log.Printf("leaderboard: write %s: %v", recentFile, err)
-	}
+	baseDir := outFile[:len(outFile)-len("leaderboard.json")]
+	writeJSON(baseDir+"recentblocks.json", recentData)
 
-	mu.Lock()
-	addrCount := len(addrIndex)
-	txCount := 0
-	for _, txs := range addrIndex {
-		txCount += len(txs)
-	}
-	mu.Unlock()
-
+	// Stats.
+	var addrCount, txCount int
+	db.QueryRow("SELECT COUNT(DISTINCT address) FROM addr_txs").Scan(&addrCount)
+	db.QueryRow("SELECT COUNT(*) FROM addr_txs").Scan(&txCount)
 	log.Printf("leaderboard: updated height=%d miners=%d addresses=%d tx_records=%d",
 		height, data.TotalMiners, addrCount, txCount)
 }
@@ -655,17 +712,21 @@ func main() {
 	out := flag.String("out", "/var/www/nous/leaderboard.json", "Output JSON file")
 	interval := flag.Duration("interval", 30*time.Second, "Update interval")
 	apiAddr := flag.String("api", ":8081", "Explorer API listen address")
+	dbPath := flag.String("db", "/var/www/nous/leaderboard.db", "SQLite database path")
 	flag.Parse()
 
 	nodeURL = *node
 
-	log.Printf("leaderboard starting: node=%s out=%s interval=%s api=%s",
-		nodeURL, *out, *interval, *apiAddr)
+	if err := initDB(*dbPath); err != nil {
+		log.Fatalf("init db: %v", err)
+	}
 
-	// Start HTTP API server in background.
+	lastScan := dbGetLastScan()
+	log.Printf("leaderboard starting: node=%s out=%s api=%s db=%s last_scan=%d",
+		nodeURL, *out, *apiAddr, *dbPath, lastScan)
+
 	go startAPI(*apiAddr)
 
-	// Run immediately on start, then on interval.
 	update(*out)
 	for range time.Tick(*interval) {
 		update(*out)
