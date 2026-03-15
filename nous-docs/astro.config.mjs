@@ -57,6 +57,7 @@ export default defineConfig({
         {
           label: 'Reference',
           items: [
+            { label: 'Changelog', slug: 'reference/changelog' },
             { label: 'RPC API', slug: 'reference/rpc-api' },
             { label: 'CLI Flags', slug: 'reference/cli' },
             { label: 'Whitepaper', slug: 'reference/whitepaper' },

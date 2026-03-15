@@ -216,3 +216,7 @@ kill $(pgrep -x nousd)
 ```
 
 Non-consensus updates (RPC changes, display fixes, P2P optimizations) are backward compatible — your node will continue to work with older versions on the network. Consensus updates will be announced in advance on Discord with clear upgrade instructions.
+
+:::tip[Protocol v3 — March 2026]
+The latest update includes automatic peer discovery, anti-eclipse protection, and higher peer limits (125 total). Your node will discover new peers automatically instead of relying solely on seed nodes. See the [Changelog](/reference/changelog) for details.
+:::
