@@ -332,11 +332,15 @@ func (r *RPCServer) handleGetPeerInfo() interface{} {
 	info := make([]map[string]interface{}, 0, len(peers))
 	for _, p := range peers {
 		info = append(info, map[string]interface{}{
-			"addr":         p.Addr,
-			"inbound":      p.Inbound,
-			"version":      p.Version,
-			"block_height": p.BlockHeight,
-			"handshaked":   p.Handshaked,
+			"addr":               p.Addr,
+			"inbound":            p.Inbound,
+			"version":            p.Version,
+			"block_height":       p.BlockHeight,
+			"starting_height":    p.StartingHeight,
+			"best_known_height":  p.BlockHeight,
+			"synced_headers":     p.LastHeaderHeight,
+			"synced_blocks":      p.LastBlockHeight,
+			"handshaked":         p.Handshaked,
 		})
 	}
 	return info

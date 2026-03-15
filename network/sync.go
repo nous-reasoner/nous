@@ -462,12 +462,23 @@ func (bs *BlockSyncer) handleInv(peer *Peer, msg Message) {
 	bs.mu.Lock()
 	now := time.Now()
 	for _, item := range inv.Items {
-		if item.Type == InvTypeBlock && !bs.chain.HasBlock(item.Hash) {
-			bs.pending[item.Hash] = &pendingEntry{AddedAt: now}
-			needed = append(needed, item)
+		if item.Type == InvTypeBlock {
+			if !bs.chain.HasBlock(item.Hash) {
+				bs.pending[item.Hash] = &pendingEntry{AddedAt: now}
+				needed = append(needed, item)
+			}
 		}
 	}
 	bs.mu.Unlock()
+
+	// If the inv contains block hashes, the peer has at least
+	// (our height + number of announced blocks). This is the count
+	// of blocks the peer is advertising beyond what we know.
+	if blockCount := countBlockInv(inv.Items); blockCount > 0 {
+		// The peer has at least our height + the blocks it's announcing.
+		inferredHeight := bs.chain.Height() + uint64(blockCount)
+		peer.UpdateBestHeight(inferredHeight)
+	}
 
 	if len(needed) > 0 {
 		peer.SendMessage(bs.server.config.Magic, &MsgGetData{Items: needed})
@@ -601,10 +612,9 @@ func (bs *BlockSyncer) handleBlock(peer *Peer, msg Message) {
 		// Update server's advertised height.
 		bs.server.SetBlockHeight(newHeight)
 
-		// Update peer's known height so getpeerinfo stays accurate.
-		if newHeight > peer.BlockHeight {
-			peer.BlockHeight = newHeight
-		}
+		// Update peer's height tracking.
+		peer.LastBlockHeight = newHeight
+		peer.UpdateBestHeight(newHeight)
 
 		// Remove confirmed transactions from mempool.
 		bs.server.mempool.RemoveConfirmed(blk.Transactions)
@@ -723,9 +733,8 @@ func (bs *BlockSyncer) processOrphans(acceptedHash crypto.Hash, peer *Peer) {
 			}
 			log.Printf("sync: accepted orphan block %x at height %d", o.Hash[:8], newHeight)
 			bs.server.SetBlockHeight(newHeight)
-			if newHeight > peer.BlockHeight {
-				peer.BlockHeight = newHeight
-			}
+			peer.LastBlockHeight = newHeight
+			peer.UpdateBestHeight(newHeight)
 			bs.server.mempool.RemoveConfirmed(o.Block.Transactions)
 			// Queue this block's hash so its children are processed next.
 			worklist = append(worklist, o.Hash)
@@ -966,7 +975,13 @@ func (bs *BlockSyncer) handleHeaders(peer *Peer, msg Message) {
 	bs.lastHeaderAt = time.Now()
 	bs.headerRetries = 0 // reset on success
 	totalHeaders := len(bs.headerChain)
+	// The last header's height is baseHeight + totalHeaders.
+	lastHeaderHeight := bs.chain.Height() + uint64(totalHeaders)
 	bs.mu.Unlock()
+
+	// Track header height on the peer.
+	peer.LastHeaderHeight = lastHeaderHeight
+	peer.UpdateBestHeight(lastHeaderHeight)
 
 	log.Printf("sync: received %d headers (total: %d) from %s", headerCount, totalHeaders, peer.Addr)
 
@@ -1129,6 +1144,8 @@ func (bs *BlockSyncer) handleBlockV2(peer *Peer, blk *block.Block, blockHash cry
 		if err == nil {
 			log.Printf("sync: v2 accepted relay block %x at height %d", blockHash[:8], newHeight)
 			bs.server.SetBlockHeight(newHeight)
+			peer.LastBlockHeight = newHeight
+			peer.UpdateBestHeight(newHeight)
 			bs.server.mempool.RemoveConfirmed(blk.Transactions)
 		}
 		return
@@ -1213,11 +1230,12 @@ func (bs *BlockSyncer) processBlockBuffer() {
 		bs.server.SetBlockHeight(newHeight)
 		bs.server.mempool.RemoveConfirmed(blk.Transactions)
 
-		// Update BlockHeight on all peers that served us blocks,
-		// so getpeerinfo stays accurate.
+		// Update BestKnownHeight on all handshaked peers — during v2 parallel
+		// download we know all peers share the same chain, so their height
+		// is at least as high as the block we just processed.
 		for _, p := range bs.server.peers.All() {
-			if p.Handshaked && newHeight > p.BlockHeight {
-				p.BlockHeight = newHeight
+			if p.Handshaked {
+				p.UpdateBestHeight(newHeight)
 			}
 		}
 
@@ -1233,6 +1251,17 @@ func (bs *BlockSyncer) processBlockBuffer() {
 			bs.relayBlock(nil, &MsgBlock{Payload: payload})
 		}
 	}
+}
+
+// countBlockInv returns the number of block items in an inv list.
+func countBlockInv(items []InvItem) int {
+	n := 0
+	for _, item := range items {
+		if item.Type == InvTypeBlock {
+			n++
+		}
+	}
+	return n
 }
 
 // --- block serialization helpers ---

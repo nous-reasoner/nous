@@ -651,10 +651,130 @@ func fetchRecentBlocks(height int) recentBlocksData {
 func startAPI(listenAddr string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/address/", handleAddrRoute)
+	mux.HandleFunc("/explorer-api/network/status", handleNetworkStatus)
 	log.Printf("explorer API listening on %s", listenAddr)
 	if err := http.ListenAndServe(listenAddr, mux); err != nil {
 		log.Fatalf("explorer API: %v", err)
 	}
+}
+
+type networkStatusResponse struct {
+	BlockHeight int              `json:"block_height"`
+	Nodes       []nodeStatus     `json:"nodes"`
+	TotalPeers  int              `json:"total_peers"`
+	Timestamp   string           `json:"timestamp"`
+}
+
+type nodeStatus struct {
+	Name    string `json:"name"`
+	Height  int    `json:"height"`
+	Peers   int    `json:"peers"`
+	Version int    `json:"version"`
+}
+
+var seedNames = map[string]string{
+	"http://80.78.26.7:8332/rpc":   "seed1",
+	"http://80.78.25.211:8332/rpc": "seed2",
+	"http://80.78.26.244:8332/rpc": "seed3",
+}
+
+func handleNetworkStatus(w http.ResponseWriter, r *http.Request) {
+	type peerInfo struct {
+		Addr             string `json:"addr"`
+		Version          int    `json:"version"`
+		BestKnownHeight  int    `json:"best_known_height"`
+		BlockHeight      int    `json:"block_height"`
+		Handshaked       bool   `json:"handshaked"`
+	}
+	type miningInfo struct {
+		Height int `json:"height"`
+	}
+
+	var nodes []nodeStatus
+	maxHeight := 0
+	totalPeers := 0
+	uniqueIPs := make(map[string]bool)
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, seedURL := range seedRPCURLs {
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+
+			name := seedNames[url]
+
+			// Get height.
+			height := 0
+			if raw, err := rpcTo(url, "getmininginfo"); err == nil {
+				var info miningInfo
+				if json.Unmarshal(raw, &info) == nil {
+					height = info.Height
+				}
+			}
+
+			// Get peers.
+			peerCount := 0
+			maxVer := 0
+			if raw, err := rpcTo(url, "getpeerinfo"); err == nil {
+				var peers []peerInfo
+				if json.Unmarshal(raw, &peers) == nil {
+					peerCount = len(peers)
+					for _, p := range peers {
+						if p.Version > maxVer {
+							maxVer = p.Version
+						}
+						host := p.Addr
+						if idx := strings.LastIndex(host, ":"); idx > 0 {
+							host = host[:idx]
+						}
+						mu.Lock()
+						uniqueIPs[host] = true
+						mu.Unlock()
+					}
+				}
+			}
+
+			mu.Lock()
+			nodes = append(nodes, nodeStatus{
+				Name:    name,
+				Height:  height,
+				Peers:   peerCount,
+				Version: maxVer,
+			})
+			if height > maxHeight {
+				maxHeight = height
+			}
+			totalPeers += peerCount
+			mu.Unlock()
+		}(seedURL)
+	}
+	wg.Wait()
+
+	// Sort nodes by name for stable output.
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].Name < nodes[j].Name
+	})
+
+	// Unique external nodes + 3 seeds.
+	uniqueNodeCount := 3
+	for ip := range uniqueIPs {
+		if !seedHosts[ip] {
+			uniqueNodeCount++
+		}
+	}
+
+	resp := networkStatusResponse{
+		BlockHeight: maxHeight,
+		Nodes:       nodes,
+		TotalPeers:  uniqueNodeCount,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func handleAddrRoute(w http.ResponseWriter, r *http.Request) {

@@ -502,6 +502,7 @@ func (s *Server) sendVersion(peer *Peer) {
 func (s *Server) handleVersion(peer *Peer, msg Message) {
 	ver := msg.(*MsgVersion)
 	peer.Version = ver.Version
+	peer.StartingHeight = ver.BlockHeight
 	peer.BlockHeight = ver.BlockHeight
 	peer.ListenPort = ver.ListenPort
 

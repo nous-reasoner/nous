@@ -27,10 +27,15 @@ type Peer struct {
 	Addr        string
 	Conn        net.Conn
 	Version     uint32
-	BlockHeight uint64
+	BlockHeight uint64 // best known height (max of all signals) — use for peer selection
 	Inbound     bool
 	LastActive  time.Time
 	Handshaked  bool
+
+	// Height tracking (inspired by Bitcoin Core's synced_headers/synced_blocks).
+	StartingHeight   uint64 // height reported in version handshake (never updated after)
+	LastBlockHeight  uint64 // height of last complete block received from this peer
+	LastHeaderHeight uint64 // height of last header received from this peer
 
 	// Eviction protection metadata.
 	ConnectedAt    time.Time     // when this peer connected
@@ -56,6 +61,14 @@ func NewPeer(addr string, conn net.Conn, inbound bool) *Peer {
 		Inbound:     inbound,
 		LastActive:  time.Now(),
 		ConnectedAt: time.Now(),
+	}
+}
+
+// UpdateBestHeight updates the peer's best known height if the new value is higher.
+// This is the single point for all height updates — BestKnownHeight only ever increases.
+func (p *Peer) UpdateBestHeight(height uint64) {
+	if height > p.BlockHeight {
+		p.BlockHeight = height
 	}
 }
 
