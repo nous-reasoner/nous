@@ -746,19 +746,55 @@ async function renderAddress(addr) {
     if (addr) lookupAddress();
 }
 
+var addrState = { addr: '', txOffset: 0, txTotal: 0, utxoShown: 0, utxos: [] };
+var PAGE_SIZE = 50;
+
+function renderTxRow(tx) {
+    return `<div class="bg-card border border-border rounded px-4 py-2 text-sm flex flex-col sm-flex-row sm-justify-between sm-items-center gap-1">
+        <div>
+            <span class="text-xs ${tx.direction === 'in' ? 'text-nous' : 'text-red-400'}" style="display:inline-block;width:14px;">${tx.direction === 'in' ? '+' : '-'}</span>
+            <a href="#tx/${tx.txid}" class="font-mono text-xs text-nous hover-underline">${shortHash(tx.txid)}</a>
+            <a href="#block/${tx.height}" class="text-gray-600 text-xs ml-2 hover-underline">block ${tx.height}</a>
+            <span class="text-gray-600 text-xs ml-2">${formatTime(tx.timestamp)}</span>
+        </div>
+        <div class="font-bold ${tx.direction === 'in' ? 'text-nous' : 'text-red-400'}">${tx.direction === 'in' ? '+' : '-'}${formatNOUS(tx.value)}</div>
+    </div>`;
+}
+
+function renderUtxoRow(u) {
+    return `<div class="bg-card border border-border rounded px-4 py-2 text-sm flex flex-col sm-flex-row sm-justify-between sm-items-center gap-1">
+        <div>
+            <a href="#tx/${u.txid}" class="font-mono text-xs text-nous">${shortHash(u.txid)}</a>
+            <span class="text-gray-500">:${u.index}</span>
+            <span class="text-gray-600 text-xs ml-2">height ${u.height}</span>
+            ${u.is_coinbase ? '<span class="text-yellow-500 text-xs ml-1">coinbase</span>' : ''}
+        </div>
+        <div class="text-nous font-bold">${formatNOUS(u.value)}</div>
+    </div>`;
+}
+
 async function lookupAddress() {
     const addr = document.getElementById('addrInput').value.trim();
     const resultEl = document.getElementById('addrResult');
     if (!addr) return;
 
     resultEl.innerHTML = '<div class="text-gray-500 py-8 text-center">Loading...</div>';
+    addrState = { addr: addr, txOffset: 0, txTotal: 0, utxoShown: 0, utxos: [] };
 
     try {
-        const [balance, utxos, history] = await Promise.all([
+        const [balance, utxos, historyPage] = await Promise.all([
             rpc('getbalance', [addr]),
             rpc('listunspent', [addr]),
-            fetchAddrHistory(addr)
+            fetchAddrHistory(addr, 0, PAGE_SIZE)
         ]);
+
+        addrState.txTotal = historyPage.total;
+        addrState.txOffset = historyPage.txs.length;
+        addrState.utxos = utxos.slice().sort((a, b) => b.height - a.height);
+        addrState.utxoShown = Math.min(PAGE_SIZE, addrState.utxos.length);
+
+        var txShowing = addrState.txOffset;
+        var txTotal = addrState.txTotal;
 
         resultEl.innerHTML = `
             <div class="bg-card border border-border rounded p-4 mb-4">
@@ -776,47 +812,60 @@ async function lookupAddress() {
                 </div>
             </div>
 
-            <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2">Transaction History (${history.length})</h3>
-            <div class="space-y-1 mb-6">
-                ${history.length === 0 ? '<div class="text-gray-600 py-4 text-center text-sm">No transactions found</div>' :
-                history.map(tx => `
-                    <div class="bg-card border border-border rounded px-4 py-2 text-sm flex flex-col sm-flex-row sm-justify-between sm-items-center gap-1">
-                        <div>
-                            <span class="text-xs ${tx.direction === 'in' ? 'text-nous' : 'text-red-400'}" style="display:inline-block;width:14px;">${tx.direction === 'in' ? '+' : '-'}</span>
-                            <a href="#tx/${tx.txid}" class="font-mono text-xs text-nous hover-underline">${shortHash(tx.txid)}</a>
-                            <a href="#block/${tx.height}" class="text-gray-600 text-xs ml-2 hover-underline">block ${tx.height}</a>
-                            <span class="text-gray-600 text-xs ml-2">${formatTime(tx.timestamp)}</span>
-                        </div>
-                        <div class="font-bold ${tx.direction === 'in' ? 'text-nous' : 'text-red-400'}">${tx.direction === 'in' ? '+' : '-'}${formatNOUS(tx.value)}</div>
-                    </div>`).join('')}
+            <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2" id="txHeader">Transaction History (${txTotal})${txTotal > txShowing ? ' — showing ' + txShowing : ''}</h3>
+            <div class="space-y-1 mb-2" id="txRows">
+                ${txTotal === 0 ? '<div class="text-gray-600 py-4 text-center text-sm">No transactions found</div>' :
+                historyPage.txs.map(renderTxRow).join('')}
+            </div>
+            <div id="txLoadMore" class="text-center mb-6">
+                ${txTotal > txShowing ? '<button onclick="loadMoreTx()" class="text-nous text-sm border border-nous/30 rounded px-6 py-2 hover:bg-nous/10 transition">Load More</button>' : ''}
             </div>
 
-            <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2">UTXOs (${utxos.length})</h3>
-            <div class="space-y-1">
-                ${utxos.length === 0 ? '<div class="text-gray-600 py-4 text-center text-sm">No spendable UTXOs</div>' :
-                utxos.slice().sort((a, b) => b.height - a.height).map(u => `
-                    <div class="bg-card border border-border rounded px-4 py-2 text-sm flex flex-col sm-flex-row sm-justify-between sm-items-center gap-1">
-                        <div>
-                            <a href="#tx/${u.txid}" class="font-mono text-xs text-nous">${shortHash(u.txid)}</a>
-                            <span class="text-gray-500">:${u.index}</span>
-                            <span class="text-gray-600 text-xs ml-2">height ${u.height}</span>
-                            ${u.is_coinbase ? '<span class="text-yellow-500 text-xs ml-1">coinbase</span>' : ''}
-                        </div>
-                        <div class="text-nous font-bold">${formatNOUS(u.value)}</div>
-                    </div>`).join('')}
+            <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2" id="utxoHeader">UTXOs (${addrState.utxos.length})${addrState.utxos.length > addrState.utxoShown ? ' — showing ' + addrState.utxoShown : ''}</h3>
+            <div class="space-y-1" id="utxoRows">
+                ${addrState.utxos.length === 0 ? '<div class="text-gray-600 py-4 text-center text-sm">No spendable UTXOs</div>' :
+                addrState.utxos.slice(0, addrState.utxoShown).map(renderUtxoRow).join('')}
+            </div>
+            <div id="utxoLoadMore" class="text-center mt-2">
+                ${addrState.utxos.length > addrState.utxoShown ? '<button onclick="loadMoreUtxo()" class="text-nous text-sm border border-nous/30 rounded px-6 py-2 hover:bg-nous/10 transition">Load More</button>' : ''}
             </div>`;
     } catch (e) {
         resultEl.innerHTML = `<div class="text-red-400 py-4">${e.message}</div>`;
     }
 }
 
-async function fetchAddrHistory(addr) {
+async function loadMoreTx() {
+    var page = await fetchAddrHistory(addrState.addr, addrState.txOffset, PAGE_SIZE);
+    if (!page.txs || page.txs.length === 0) return;
+    addrState.txOffset += page.txs.length;
+    document.getElementById('txRows').insertAdjacentHTML('beforeend', page.txs.map(renderTxRow).join(''));
+    document.getElementById('txHeader').textContent = 'Transaction History (' + addrState.txTotal + ')' +
+        (addrState.txTotal > addrState.txOffset ? ' — showing ' + addrState.txOffset : '');
+    if (addrState.txOffset >= addrState.txTotal) {
+        document.getElementById('txLoadMore').innerHTML = '';
+    }
+}
+
+function loadMoreUtxo() {
+    var next = Math.min(addrState.utxoShown + PAGE_SIZE, addrState.utxos.length);
+    var newRows = addrState.utxos.slice(addrState.utxoShown, next).map(renderUtxoRow).join('');
+    addrState.utxoShown = next;
+    document.getElementById('utxoRows').insertAdjacentHTML('beforeend', newRows);
+    document.getElementById('utxoHeader').textContent = 'UTXOs (' + addrState.utxos.length + ')' +
+        (addrState.utxos.length > addrState.utxoShown ? ' — showing ' + addrState.utxoShown : '');
+    if (addrState.utxoShown >= addrState.utxos.length) {
+        document.getElementById('utxoLoadMore').innerHTML = '';
+    }
+}
+
+async function fetchAddrHistory(addr, offset, limit) {
     try {
-        const res = await fetch('/explorer-api/address/' + addr + '/txs');
-        if (!res.ok) return [];
+        var url = '/explorer-api/address/' + addr + '/txs?limit=' + limit + '&offset=' + offset;
+        var res = await fetch(url);
+        if (!res.ok) return { total: 0, txs: [] };
         return await res.json();
     } catch (e) {
-        return [];
+        return { total: 0, txs: [] };
     }
 }
 

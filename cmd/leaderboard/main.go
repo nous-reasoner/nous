@@ -659,6 +659,11 @@ func startAPI(listenAddr string) {
 	}
 }
 
+type addrTxPage struct {
+	Total int     `json:"total"`
+	Txs   []addrTx `json:"txs"`
+}
+
 func handleAddrHistory(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/address/")
 	addr := strings.TrimSuffix(path, "/txs")
@@ -669,11 +674,33 @@ func handleAddrHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse limit/offset with defaults.
+	q := r.URL.Query()
+	limit := 50
+	offset := 0
+	if v := q.Get("limit"); v != "" {
+		fmt.Sscanf(v, "%d", &limit)
+		if limit <= 0 || limit > 1000 {
+			limit = 50
+		}
+	}
+	if v := q.Get("offset"); v != "" {
+		fmt.Sscanf(v, "%d", &offset)
+		if offset < 0 {
+			offset = 0
+		}
+	}
+
+	var total int
+	db.QueryRow("SELECT COUNT(*) FROM addr_txs WHERE address=?", addr).Scan(&total)
+
 	rows, err := db.Query(
-		"SELECT txid,height,timestamp,value,direction FROM addr_txs WHERE address=? ORDER BY height DESC",
-		addr)
+		"SELECT txid,height,timestamp,value,direction FROM addr_txs WHERE address=? ORDER BY height DESC LIMIT ? OFFSET ?",
+		addr, limit, offset)
 	if err != nil {
-		http.Error(w, `[]`, 200)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(addrTxPage{Total: 0, Txs: []addrTx{}})
 		return
 	}
 	defer rows.Close()
@@ -690,7 +717,7 @@ func handleAddrHistory(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	json.NewEncoder(w).Encode(txs)
+	json.NewEncoder(w).Encode(addrTxPage{Total: total, Txs: txs})
 }
 
 // --- Main ---
