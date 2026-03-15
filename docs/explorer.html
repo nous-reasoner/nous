@@ -746,7 +746,7 @@ async function renderAddress(addr) {
     if (addr) lookupAddress();
 }
 
-var addrState = { addr: '', txOffset: 0, txTotal: 0, utxoShown: 0, utxos: [] };
+var addrState = { addr: '', txOffset: 0, txTotal: 0, utxoOffset: 0, utxoTotal: 0 };
 var PAGE_SIZE = 50;
 
 function renderTxRow(tx) {
@@ -779,19 +779,19 @@ async function lookupAddress() {
     if (!addr) return;
 
     resultEl.innerHTML = '<div class="text-gray-500 py-8 text-center">Loading...</div>';
-    addrState = { addr: addr, txOffset: 0, txTotal: 0, utxoShown: 0, utxos: [] };
+    addrState = { addr: addr, txOffset: 0, txTotal: 0, utxoOffset: 0, utxoTotal: 0 };
 
     try {
-        const [balance, utxos, historyPage] = await Promise.all([
+        const [balance, historyPage, utxoPage] = await Promise.all([
             rpc('getbalance', [addr]),
-            rpc('listunspent', [addr]),
-            fetchAddrHistory(addr, 0, PAGE_SIZE)
+            fetchAddrHistory(addr, 0, PAGE_SIZE),
+            fetchAddrUtxos(addr, 0, PAGE_SIZE)
         ]);
 
         addrState.txTotal = historyPage.total;
         addrState.txOffset = historyPage.txs.length;
-        addrState.utxos = utxos.slice().sort((a, b) => b.height - a.height);
-        addrState.utxoShown = Math.min(PAGE_SIZE, addrState.utxos.length);
+        addrState.utxoTotal = utxoPage.total;
+        addrState.utxoOffset = utxoPage.utxos.length;
 
         var txShowing = addrState.txOffset;
         var txTotal = addrState.txTotal;
@@ -821,13 +821,13 @@ async function lookupAddress() {
                 ${txTotal > txShowing ? '<button onclick="loadMoreTx()" class="text-nous text-sm border border-nous/30 rounded px-6 py-2 hover:bg-nous/10 transition">Load More</button>' : ''}
             </div>
 
-            <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2" id="utxoHeader">UTXOs (${addrState.utxos.length})${addrState.utxos.length > addrState.utxoShown ? ' — showing ' + addrState.utxoShown : ''}</h3>
+            <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2" id="utxoHeader">UTXOs (${addrState.utxoTotal})${addrState.utxoTotal > addrState.utxoOffset ? ' — showing ' + addrState.utxoOffset : ''}</h3>
             <div class="space-y-1" id="utxoRows">
-                ${addrState.utxos.length === 0 ? '<div class="text-gray-600 py-4 text-center text-sm">No spendable UTXOs</div>' :
-                addrState.utxos.slice(0, addrState.utxoShown).map(renderUtxoRow).join('')}
+                ${addrState.utxoTotal === 0 ? '<div class="text-gray-600 py-4 text-center text-sm">No spendable UTXOs</div>' :
+                utxoPage.utxos.map(renderUtxoRow).join('')}
             </div>
             <div id="utxoLoadMore" class="text-center mt-2">
-                ${addrState.utxos.length > addrState.utxoShown ? '<button onclick="loadMoreUtxo()" class="text-nous text-sm border border-nous/30 rounded px-6 py-2 hover:bg-nous/10 transition">Load More</button>' : ''}
+                ${addrState.utxoTotal > addrState.utxoOffset ? '<button onclick="loadMoreUtxo()" class="text-nous text-sm border border-nous/30 rounded px-6 py-2 hover:bg-nous/10 transition">Load More</button>' : ''}
             </div>`;
     } catch (e) {
         resultEl.innerHTML = `<div class="text-red-400 py-4">${e.message}</div>`;
@@ -846,14 +846,14 @@ async function loadMoreTx() {
     }
 }
 
-function loadMoreUtxo() {
-    var next = Math.min(addrState.utxoShown + PAGE_SIZE, addrState.utxos.length);
-    var newRows = addrState.utxos.slice(addrState.utxoShown, next).map(renderUtxoRow).join('');
-    addrState.utxoShown = next;
-    document.getElementById('utxoRows').insertAdjacentHTML('beforeend', newRows);
-    document.getElementById('utxoHeader').textContent = 'UTXOs (' + addrState.utxos.length + ')' +
-        (addrState.utxos.length > addrState.utxoShown ? ' — showing ' + addrState.utxoShown : '');
-    if (addrState.utxoShown >= addrState.utxos.length) {
+async function loadMoreUtxo() {
+    var page = await fetchAddrUtxos(addrState.addr, addrState.utxoOffset, PAGE_SIZE);
+    if (!page.utxos || page.utxos.length === 0) return;
+    addrState.utxoOffset += page.utxos.length;
+    document.getElementById('utxoRows').insertAdjacentHTML('beforeend', page.utxos.map(renderUtxoRow).join(''));
+    document.getElementById('utxoHeader').textContent = 'UTXOs (' + addrState.utxoTotal + ')' +
+        (addrState.utxoTotal > addrState.utxoOffset ? ' — showing ' + addrState.utxoOffset : '');
+    if (addrState.utxoOffset >= addrState.utxoTotal) {
         document.getElementById('utxoLoadMore').innerHTML = '';
     }
 }
@@ -866,6 +866,17 @@ async function fetchAddrHistory(addr, offset, limit) {
         return await res.json();
     } catch (e) {
         return { total: 0, txs: [] };
+    }
+}
+
+async function fetchAddrUtxos(addr, offset, limit) {
+    try {
+        var url = '/explorer-api/address/' + addr + '/utxos?limit=' + limit + '&offset=' + offset;
+        var res = await fetch(url);
+        if (!res.ok) return { total: 0, utxos: [] };
+        return await res.json();
+    } catch (e) {
+        return { total: 0, utxos: [] };
     }
 }
 

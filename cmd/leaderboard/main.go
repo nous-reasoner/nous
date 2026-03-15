@@ -652,16 +652,38 @@ func fetchRecentBlocks(height int) recentBlocksData {
 
 func startAPI(listenAddr string) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/address/", handleAddrHistory)
+	mux.HandleFunc("/address/", handleAddrRoute)
 	log.Printf("explorer API listening on %s", listenAddr)
 	if err := http.ListenAndServe(listenAddr, mux); err != nil {
 		log.Fatalf("explorer API: %v", err)
 	}
 }
 
+func handleAddrRoute(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/address/")
+	if strings.HasSuffix(path, "/utxos") {
+		handleAddrUtxos(w, r)
+	} else {
+		handleAddrHistory(w, r)
+	}
+}
+
 type addrTxPage struct {
 	Total int     `json:"total"`
 	Txs   []addrTx `json:"txs"`
+}
+
+type utxoEntry struct {
+	TxID      string `json:"txid"`
+	Index     int    `json:"index"`
+	Value     int64  `json:"value"`
+	Height    int    `json:"height"`
+	Coinbase  bool   `json:"is_coinbase"`
+}
+
+type utxoPage struct {
+	Total int         `json:"total"`
+	Utxos []utxoEntry `json:"utxos"`
 }
 
 func handleAddrHistory(w http.ResponseWriter, r *http.Request) {
@@ -718,6 +740,72 @@ func handleAddrHistory(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(addrTxPage{Total: total, Txs: txs})
+}
+
+func handleAddrUtxos(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/address/")
+	addr := strings.TrimSuffix(path, "/utxos")
+	addr = strings.TrimSuffix(addr, "/")
+
+	if addr == "" || !strings.HasPrefix(addr, "nous1") {
+		http.Error(w, `{"error":"invalid address"}`, http.StatusBadRequest)
+		return
+	}
+
+	q := r.URL.Query()
+	limit := 50
+	offset := 0
+	if v := q.Get("limit"); v != "" {
+		fmt.Sscanf(v, "%d", &limit)
+		if limit <= 0 || limit > 200 {
+			limit = 50
+		}
+	}
+	if v := q.Get("offset"); v != "" {
+		fmt.Sscanf(v, "%d", &offset)
+		if offset < 0 {
+			offset = 0
+		}
+	}
+
+	// Call listunspent RPC (localhost, fast).
+	raw, err := rpc("listunspent", addr)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(utxoPage{Total: 0, Utxos: []utxoEntry{}})
+		return
+	}
+
+	var allUtxos []utxoEntry
+	if err := json.Unmarshal(raw, &allUtxos); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(utxoPage{Total: 0, Utxos: []utxoEntry{}})
+		return
+	}
+
+	// Sort by height descending.
+	sort.Slice(allUtxos, func(i, j int) bool {
+		return allUtxos[i].Height > allUtxos[j].Height
+	})
+
+	total := len(allUtxos)
+	end := offset + limit
+	if offset > total {
+		offset = total
+	}
+	if end > total {
+		end = total
+	}
+	page := allUtxos[offset:end]
+	if page == nil {
+		page = []utxoEntry{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(utxoPage{Total: total, Utxos: page})
 }
 
 // --- Main ---
