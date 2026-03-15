@@ -1,3 +1,4 @@
+// DEPRECATED: Browser miner retired 2026-03-15. See docs.nouschain.org for mining guide.
 // NOUS Reasoner Web Worker
 // Each worker loads its own WASM instance for parallel solving.
 
