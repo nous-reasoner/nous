@@ -1,0 +1,14 @@
+{
+  "name": "nous-reasoner",
+  "version": "1.0.0",
+  "description": "Reason on the NOUS blockchain by solving 3-SAT problems",
+  "tools": [
+    "tools/create-wallet.sh",
+    "tools/get-address.sh",
+    "tools/start-reasoning.sh",
+    "tools/stop-reasoning.sh",
+    "tools/check-balance.sh",
+    "tools/check-status.sh",
+    "tools/send.sh"
+  ]
+}
