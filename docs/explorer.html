@@ -818,7 +818,7 @@ async function lookupAddress() {
                 historyPage.txs.map(renderTxRow).join('')}
             </div>
             <div id="txLoadMore" class="text-center mb-6">
-                ${txTotal > txShowing ? '<button onclick="loadMoreTx()" class="text-nous text-sm border border-nous/30 rounded px-6 py-2 hover:bg-nous/10 transition">Load More</button>' : ''}
+                ${txTotal > txShowing ? '<button onclick="loadMoreTx()" class="btn-nous rounded px-4 py-2 text-sm transition">Load More</button>' : ''}
             </div>
 
             <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-2" id="utxoHeader">UTXOs (${addrState.utxoTotal})${addrState.utxoTotal > addrState.utxoOffset ? ' — showing ' + addrState.utxoOffset : ''}</h3>
@@ -827,7 +827,7 @@ async function lookupAddress() {
                 utxoPage.utxos.map(renderUtxoRow).join('')}
             </div>
             <div id="utxoLoadMore" class="text-center mt-2">
-                ${addrState.utxoTotal > addrState.utxoOffset ? '<button onclick="loadMoreUtxo()" class="text-nous text-sm border border-nous/30 rounded px-6 py-2 hover:bg-nous/10 transition">Load More</button>' : ''}
+                ${addrState.utxoTotal > addrState.utxoOffset ? '<button onclick="loadMoreUtxo()" class="btn-nous rounded px-4 py-2 text-sm transition">Load More</button>' : ''}
             </div>`;
     } catch (e) {
         resultEl.innerHTML = `<div class="text-red-400 py-4">${e.message}</div>`;

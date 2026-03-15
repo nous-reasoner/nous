@@ -39,24 +39,30 @@ type rpcResponse struct {
 	} `json:"error"`
 }
 
-var nodeURL string
+var nodeURLs []string
 
 func rpc(method string, params ...any) (json.RawMessage, error) {
 	body, _ := json.Marshal(rpcRequest{Method: method, Params: params, ID: 1})
-	resp, err := http.Post(nodeURL, "application/json", strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for _, url := range nodeURLs {
+		resp, err := http.Post(url, "application/json", strings.NewReader(string(body)))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var r rpcResponse
+		if err := json.Unmarshal(raw, &r); err != nil {
+			lastErr = err
+			continue
+		}
+		if r.Error != nil {
+			return nil, &rpcErr{r.Error.Message}
+		}
+		return r.Result, nil
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	var r rpcResponse
-	if err := json.Unmarshal(raw, &r); err != nil {
-		return nil, err
-	}
-	if r.Error != nil {
-		return nil, &rpcErr{r.Error.Message}
-	}
-	return r.Result, nil
+	return nil, fmt.Errorf("all RPC nodes failed: %w", lastErr)
 }
 
 type rpcErr struct{ msg string }
@@ -514,25 +520,17 @@ func buildJSON(height int) leaderboardData {
 		}
 	}
 
-	var wg sync.WaitGroup
+	// Calculate balance from local addr_txs table instead of calling getbalance RPC.
+	// SUM(in) - SUM(out) gives current balance. Verified to match RPC exactly.
 	for i := range entries {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			raw, err := rpc("getbalance", entries[i].Address)
-			if err != nil {
-				return
-			}
-			var bal struct {
-				Balance  int64 `json:"balance"`
-				Immature int64 `json:"immature"`
-			}
-			if json.Unmarshal(raw, &bal) == nil {
-				entries[i].TotalNous = float64(bal.Balance+bal.Immature) / 1e8
-			}
-		}(i)
+		var balance int64
+		err := db.QueryRow(
+			"SELECT COALESCE(SUM(CASE WHEN direction='in' THEN value ELSE -value END), 0) FROM addr_txs WHERE address=?",
+			entries[i].Address).Scan(&balance)
+		if err == nil && balance > 0 {
+			entries[i].TotalNous = float64(balance) / 1e8
+		}
 	}
-	wg.Wait()
 
 	// Remove entries with zero balance and zero blocks.
 	var filtered []minerStat
@@ -866,22 +864,30 @@ func update(outFile string) {
 }
 
 func main() {
-	node := flag.String("node", "http://localhost:8332/rpc", "Node RPC URL")
+	nodes := flag.String("nodes", "http://localhost:8332/rpc", "Comma-separated RPC URLs (fallback order)")
 	out := flag.String("out", "/var/www/nous/leaderboard.json", "Output JSON file")
 	interval := flag.Duration("interval", 30*time.Second, "Update interval")
 	apiAddr := flag.String("api", ":8081", "Explorer API listen address")
 	dbPath := flag.String("db", "/var/www/nous/leaderboard.db", "SQLite database path")
 	flag.Parse()
 
-	nodeURL = *node
+	for _, u := range strings.Split(*nodes, ",") {
+		u = strings.TrimSpace(u)
+		if u != "" {
+			nodeURLs = append(nodeURLs, u)
+		}
+	}
+	if len(nodeURLs) == 0 {
+		log.Fatal("no RPC nodes configured")
+	}
 
 	if err := initDB(*dbPath); err != nil {
 		log.Fatalf("init db: %v", err)
 	}
 
 	lastScan := dbGetLastScan()
-	log.Printf("leaderboard starting: node=%s out=%s api=%s db=%s last_scan=%d",
-		nodeURL, *out, *apiAddr, *dbPath, lastScan)
+	log.Printf("leaderboard starting: nodes=%v out=%s api=%s db=%s last_scan=%d",
+		nodeURLs, *out, *apiAddr, *dbPath, lastScan)
 
 	go startAPI(*apiAddr)
 
