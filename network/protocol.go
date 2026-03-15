@@ -32,7 +32,11 @@ const (
 
 	// ProtocolVersion is the current protocol version.
 	// v2 adds getheaders/headers messages for headers-first sync.
-	ProtocolVersion uint32 = 2
+	// v3 adds addr manager with anti-eclipse, inbound eviction, unknown-message tolerance.
+	ProtocolVersion uint32 = 3
+
+	// AddrProtocolVersion is the minimum version that supports the full addr protocol.
+	AddrProtocolVersion uint32 = 3
 
 	// MinSupportedVersion is the minimum protocol version we accept from peers.
 	MinSupportedVersion uint32 = 1
@@ -199,6 +203,14 @@ func (m *MsgAddr) Command() string { return CmdAddr }
 type MsgGetAddr struct{}
 
 func (m *MsgGetAddr) Command() string { return CmdGetAddr }
+
+// MsgUnknown represents a message with an unrecognized command.
+// The payload was read and checksum-verified; the message is silently discarded.
+type MsgUnknown struct {
+	Cmd string
+}
+
+func (m *MsgUnknown) Command() string { return m.Cmd }
 
 // MsgGetHeaders requests block headers starting after StartHash.
 // Same wire format as MsgGetBlocks but returns headers instead of inv.

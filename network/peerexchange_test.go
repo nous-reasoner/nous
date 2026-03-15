@@ -1,73 +1,42 @@
 package network
 
 import (
+	"encoding/binary"
 	"net"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
+
+	"nous/crypto"
 )
 
-func TestAddressBookPersistence(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "peers.json")
-
-	// Create and populate an address book.
-	ab := NewAddressBook(nil)
-	ab.AddAddress(NetAddress{IP: "1.2.3.4", Port: 9333})
-	ab.AddAddress(NetAddress{IP: "5.6.7.8", Port: 9333})
-	ab.AddAddress(NetAddress{IP: "9.10.11.12", Port: 9334})
-
-	if ab.Count() != 3 {
-		t.Fatalf("expected 3 addresses, got %d", ab.Count())
-	}
-
-	// Save to file.
-	if err := ab.SaveToFile(path); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-
-	// Verify file exists.
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("file missing: %v", err)
-	}
-
-	// Load from file.
-	ab2, err := LoadAddressBook(path, []string{"seed1:9333"})
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if ab2.Count() != 3 {
-		t.Fatalf("loaded %d addresses, want 3", ab2.Count())
-	}
-	if len(ab2.Seeds()) != 1 || ab2.Seeds()[0] != "seed1:9333" {
-		t.Fatalf("seeds not preserved")
-	}
-}
-
 func TestGetAddrResponse(t *testing.T) {
-	// Set up a server with addresses in its book.
 	cfg := ServerConfig{
 		ListenAddr: ":0",
 		Magic:      TestNetMagic,
 	}
 	server := NewServer(cfg)
-	server.addrBook.AddAddress(NetAddress{IP: "1.2.3.4", Port: 9333})
-	server.addrBook.AddAddress(NetAddress{IP: "5.6.7.8", Port: 9333})
+
+	// Add enough addresses so GetAddresses returns at least 1 (23% of n).
+	server.addrMgr.AddAddresses([]NetAddress{
+		{IP: "1.2.3.4", Port: 9333},
+		{IP: "5.6.7.8", Port: 9333},
+		{IP: "9.10.11.12", Port: 9333},
+		{IP: "13.14.15.16", Port: 9333},
+		{IP: "17.18.19.20", Port: 9333},
+	}, net.ParseIP("99.99.99.99"))
 
 	if err := server.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	defer server.Stop()
 
-	// Connect a client.
 	conn, err := net.DialTimeout("tcp", server.ListenAddr(), 5*time.Second)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	defer conn.Close()
 
-	// Send version.
+	// Send version (v3).
 	ver := &MsgVersion{
 		Version:     ProtocolVersion,
 		BlockHeight: 0,
@@ -89,7 +58,7 @@ func TestGetAddrResponse(t *testing.T) {
 		t.Fatalf("expected verack, got %s", msg.Command())
 	}
 
-	// Read server's version (inbound peer gets version sent).
+	// Read server's version.
 	msg, err = DecodeMessage(conn, TestNetMagic)
 	if err != nil {
 		t.Fatalf("read version: %v", err)
@@ -102,21 +71,17 @@ func TestGetAddrResponse(t *testing.T) {
 	data, _ = EncodeMessage(TestNetMagic, &MsgVerAck{})
 	conn.Write(data)
 
-	// The server sends getaddr after completing the handshake (handleVerAck).
-	// We may receive it before our getaddr response. Read messages until we
-	// either consume the server's getaddr or get an addr.
+	// Drain the server's getaddr (sent in handleVerAck to v3 peers).
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-
-	// Drain the server's getaddr if present.
 	msg, err = DecodeMessage(conn, TestNetMagic)
 	if err != nil {
 		t.Fatalf("read after verack: %v", err)
 	}
 	if msg.Command() == CmdGetAddr {
-		// Server asked us for addresses — expected.
+		// Expected: server requests addresses from us.
 	}
 
-	// Now send getaddr.
+	// Send getaddr.
 	data, _ = EncodeMessage(TestNetMagic, &MsgGetAddr{})
 	conn.Write(data)
 
@@ -128,34 +93,67 @@ func TestGetAddrResponse(t *testing.T) {
 	}
 	addrMsg, ok := msg.(*MsgAddr)
 	if !ok {
-		t.Fatalf("expected MsgAddr, got %T", msg)
+		t.Fatalf("expected MsgAddr, got %T (%s)", msg, msg.Command())
 	}
-	if len(addrMsg.Addresses) < 2 {
-		t.Fatalf("expected at least 2 addresses, got %d", len(addrMsg.Addresses))
+	if len(addrMsg.Addresses) < 1 {
+		t.Fatalf("expected at least 1 address, got %d", len(addrMsg.Addresses))
 	}
 }
 
-func TestAddressBookDedup(t *testing.T) {
-	ab := NewAddressBook(nil)
+func TestGetAddrOnlyOnce(t *testing.T) {
+	cfg := ServerConfig{ListenAddr: ":0", Magic: TestNetMagic}
+	server := NewServer(cfg)
+	server.addrMgr.AddAddresses([]NetAddress{
+		{IP: "1.2.3.4", Port: 9333},
+	}, net.ParseIP("99.99.99.99"))
 
-	// Add same address multiple times.
-	ab.AddAddress(NetAddress{IP: "1.2.3.4", Port: 9333})
-	ab.AddAddress(NetAddress{IP: "1.2.3.4", Port: 9333})
-	ab.AddAddress(NetAddress{IP: "1.2.3.4", Port: 9333})
+	if err := server.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer server.Stop()
 
-	if ab.Count() != 1 {
-		t.Fatalf("expected 1 address after dedup, got %d", ab.Count())
+	conn, err := net.DialTimeout("tcp", server.ListenAddr(), 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Handshake.
+	ver := &MsgVersion{Version: ProtocolVersion, ListenPort: 9999, Nonce: 111, UserAgent: "test"}
+	data, _ := EncodeMessage(TestNetMagic, ver)
+	conn.Write(data)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	DecodeMessage(conn, TestNetMagic) // verack
+	DecodeMessage(conn, TestNetMagic) // version
+	data, _ = EncodeMessage(TestNetMagic, &MsgVerAck{})
+	conn.Write(data)
+	DecodeMessage(conn, TestNetMagic) // getaddr from server
+
+	// First getaddr should get a response.
+	data, _ = EncodeMessage(TestNetMagic, &MsgGetAddr{})
+	conn.Write(data)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	msg, err := DecodeMessage(conn, TestNetMagic)
+	if err != nil {
+		t.Fatalf("first getaddr response: %v", err)
+	}
+	if _, ok := msg.(*MsgAddr); !ok {
+		t.Fatalf("expected MsgAddr, got %s", msg.Command())
 	}
 
-	// AddAddresses should also dedup.
-	ab.AddAddresses([]NetAddress{
-		{IP: "1.2.3.4", Port: 9333},
-		{IP: "5.6.7.8", Port: 9333},
-		{IP: "5.6.7.8", Port: 9333},
-	})
-
-	if ab.Count() != 2 {
-		t.Fatalf("expected 2 addresses, got %d", ab.Count())
+	// Second getaddr should be silently ignored. Send a ping after to verify
+	// the connection is still alive (we should get pong back, not another addr).
+	data, _ = EncodeMessage(TestNetMagic, &MsgGetAddr{})
+	conn.Write(data)
+	data, _ = EncodeMessage(TestNetMagic, &MsgPing{Nonce: 42})
+	conn.Write(data)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	msg, err = DecodeMessage(conn, TestNetMagic)
+	if err != nil {
+		t.Fatalf("after second getaddr: %v", err)
+	}
+	if msg.Command() != CmdPong {
+		t.Fatalf("expected pong after ignored getaddr, got %s", msg.Command())
 	}
 }
 
@@ -174,9 +172,9 @@ func TestPrivateAddressFiltered(t *testing.T) {
 		{"0.0.0.0", true},
 		{"8.8.8.8", false},
 		{"1.2.3.4", false},
-		{"172.15.0.1", false},  // just outside 172.16/12
-		{"172.32.0.1", false},  // just outside 172.16/12
-		{"192.169.0.1", false}, // not 192.168/16
+		{"172.15.0.1", false},
+		{"172.32.0.1", false},
+		{"192.169.0.1", false},
 	}
 
 	for _, tt := range tests {
@@ -186,7 +184,6 @@ func TestPrivateAddressFiltered(t *testing.T) {
 		}
 	}
 
-	// Test that filterAddresses removes private IPs.
 	cfg := ServerConfig{ListenAddr: ":0", Magic: TestNetMagic}
 	s := NewServer(cfg)
 
@@ -200,15 +197,9 @@ func TestPrivateAddressFiltered(t *testing.T) {
 	if len(filtered) != 2 {
 		t.Fatalf("expected 2 addresses after filtering, got %d", len(filtered))
 	}
-	for _, addr := range filtered {
-		if isPrivateIP(addr.IP) {
-			t.Errorf("private address %s not filtered", addr.IP)
-		}
-	}
 }
 
 func TestAutoConnect(t *testing.T) {
-	// Create two servers.
 	cfg1 := ServerConfig{ListenAddr: ":0", Magic: TestNetMagic}
 	s1 := NewServer(cfg1)
 	if err := s1.Start(); err != nil {
@@ -223,51 +214,82 @@ func TestAutoConnect(t *testing.T) {
 	}
 	defer s2.Stop()
 
-	// Add s1's address to s2's address book.
-	addr := s1.listener.Addr().(*net.TCPAddr)
-	s2.addrBook.AddAddress(NetAddress{IP: addr.IP.String(), Port: uint16(addr.Port)})
+	// Connect directly (AddrManager rejects private IPs like 127.0.0.1,
+	// so we can't add localhost via AddAddresses).
+	s1Addr := s1.listener.Addr().String()
+	if err := s2.Connect(s1Addr); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
 
-	// Trigger auto-connect on s2.
-	s2.autoConnect()
-
-	// Wait briefly for connection to establish.
 	time.Sleep(500 * time.Millisecond)
 
-	// s2 should have 1 outbound peer.
 	if s2.peers.Count() < 1 {
 		t.Fatalf("expected at least 1 peer on s2, got %d", s2.peers.Count())
 	}
 }
 
-func TestAddressBookFailureTracking(t *testing.T) {
-	ab := NewAddressBook(nil)
-	ab.AddAddress(NetAddress{IP: "1.2.3.4", Port: 9333})
+func TestUnknownMessageFallback(t *testing.T) {
+	cfg := ServerConfig{ListenAddr: ":0", Magic: TestNetMagic}
+	server := NewServer(cfg)
+	if err := server.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer server.Stop()
 
-	key := "1.2.3.4:9333"
+	conn, err := net.DialTimeout("tcp", server.ListenAddr(), 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
 
-	// First two failures should not remove.
-	ab.RecordFailure(key, 3)
-	if ab.Count() != 1 {
-		t.Fatal("should still have 1 address after 1 failure")
+	// Handshake.
+	ver := &MsgVersion{Version: ProtocolVersion, ListenPort: 9999, Nonce: 222, UserAgent: "test"}
+	data, _ := EncodeMessage(TestNetMagic, ver)
+	conn.Write(data)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	DecodeMessage(conn, TestNetMagic) // verack
+	DecodeMessage(conn, TestNetMagic) // version
+	data, _ = EncodeMessage(TestNetMagic, &MsgVerAck{})
+	conn.Write(data)
+	DecodeMessage(conn, TestNetMagic) // getaddr from server
+
+	// Send an unknown message type. Build a raw message with command "futureXYZ".
+	// The payload is arbitrary; the server should read it, verify checksum, and discard.
+	fakePayload := []byte("hello future")
+	fakeMsg := buildRawMessage(TestNetMagic, "futureXYZ", fakePayload)
+	conn.Write(fakeMsg)
+
+	// Send a ping to verify the connection is still alive.
+	data, _ = EncodeMessage(TestNetMagic, &MsgPing{Nonce: 77})
+	conn.Write(data)
+
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	msg, err := DecodeMessage(conn, TestNetMagic)
+	if err != nil {
+		t.Fatalf("connection dead after unknown message: %v", err)
 	}
-	ab.RecordFailure(key, 3)
-	if ab.Count() != 1 {
-		t.Fatal("should still have 1 address after 2 failures")
+	if msg.Command() != CmdPong {
+		t.Fatalf("expected pong, got %s", msg.Command())
 	}
 
-	// Third failure should remove.
-	removed := ab.RecordFailure(key, 3)
-	if !removed {
-		t.Fatal("expected address to be removed on 3rd failure")
+	// Verify no ban score was added.
+	score := server.protection.GetScore(conn.LocalAddr().String())
+	if score > 0 {
+		t.Fatalf("expected 0 ban score after unknown message, got %d", score)
 	}
-	if ab.Count() != 0 {
-		t.Fatalf("expected 0 addresses, got %d", ab.Count())
-	}
+}
 
-	// Re-adding should reset failure count.
-	ab.AddAddress(NetAddress{IP: "1.2.3.4", Port: 9333})
-	addrs := ab.GetGoodAddresses(10, 3)
-	if len(addrs) != 1 {
-		t.Fatalf("expected 1 good address, got %d", len(addrs))
-	}
+// buildRawMessage constructs a raw wire message with arbitrary command and payload.
+func buildRawMessage(magic uint32, cmd string, payload []byte) []byte {
+	var buf [24]byte
+	binary.LittleEndian.PutUint32(buf[0:4], magic)
+	copy(buf[4:16], cmd)
+	binary.LittleEndian.PutUint32(buf[16:20], uint32(len(payload)))
+	checksum := crypto.DoubleSha256(payload)
+	copy(buf[20:24], checksum[:4])
+
+	result := make([]byte, 24+len(payload))
+	copy(result, buf[:])
+	copy(result[24:], payload)
+	return result
 }

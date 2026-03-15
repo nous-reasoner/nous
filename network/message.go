@@ -227,7 +227,9 @@ func decodePayload(cmd string, payload []byte) (Message, error) {
 		return &MsgHeaders{Headers: payload}, nil
 
 	default:
-		return nil, fmt.Errorf("network: unknown command %q", cmd)
+		// Unknown commands are tolerated: payload was already read and checksum
+		// verified by DecodeMessage, so just return a sentinel.
+		return &MsgUnknown{Cmd: cmd}, nil
 	}
 }
 

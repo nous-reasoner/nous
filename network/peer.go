@@ -12,7 +12,7 @@ import (
 // Peer connection limits.
 const (
 	MaxOutbound    = 8
-	MaxInbound     = 64
+	MaxInbound     = 117
 	MaxConnections = MaxOutbound + MaxInbound // 125
 
 	// InactiveTimeout is the duration after which a peer is considered dead.
@@ -32,6 +32,17 @@ type Peer struct {
 	LastActive  time.Time
 	Handshaked  bool
 
+	// Eviction protection metadata.
+	ConnectedAt    time.Time     // when this peer connected
+	LastBlockTime  time.Time     // last time peer sent a valid block
+	LastTxTime     time.Time     // last time peer sent a valid transaction
+	MinPingLatency time.Duration // minimum observed ping round-trip
+	PingSentAt     time.Time     // when the last ping was sent (for latency calc)
+
+	// Addr protocol state.
+	GetAddrReceived bool // true after first getaddr response (once-per-peer)
+	ListenPort      uint16 // peer's advertised listen port (from version msg)
+
 	mu      sync.Mutex
 	writeMu sync.Mutex // protects concurrent Conn.Write
 	closed  bool
@@ -40,10 +51,11 @@ type Peer struct {
 // NewPeer creates a new Peer from a connection.
 func NewPeer(addr string, conn net.Conn, inbound bool) *Peer {
 	return &Peer{
-		Addr:       addr,
-		Conn:       conn,
-		Inbound:    inbound,
-		LastActive: time.Now(),
+		Addr:        addr,
+		Conn:        conn,
+		Inbound:     inbound,
+		LastActive:  time.Now(),
+		ConnectedAt: time.Now(),
 	}
 }
 
